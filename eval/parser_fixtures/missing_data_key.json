@@ -1,0 +1,10 @@
+{
+  "exportDate": "2099-01-01T00:00:00.000Z",
+  "owner": "synth_tester",
+  "bookmarks": [
+    {
+      "id": "5555000000000000001",
+      "text": "This file uses 'bookmarks' instead of 'data' as the top-level array key. parse_bookmarks_json should raise ValueError immediately, not silently return empty results."
+    }
+  ]
+}

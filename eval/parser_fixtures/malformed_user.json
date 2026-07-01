@@ -1,0 +1,39 @@
+{
+  "exportDate": "2099-01-01T00:00:00.000Z",
+  "owner": "synth_tester",
+  "totalBookmarks": 3,
+  "skipped": 0,
+  "data": [
+    {
+      "id": "4444000000000000001",
+      "date": "2026-05-20T10:00:00.000Z",
+      "text": "First row is valid — should parse cleanly.",
+      "url": "https://twitter.com/synth_ok1/status/4444000000000000001",
+      "user": {
+        "id": "400001",
+        "name": "Synth OK One",
+        "handle": "synth_ok1",
+        "profilePicUrl": "https://example.com/ok1.jpg"
+      }
+    },
+    {
+      "id": "4444000000000000002",
+      "date": "2026-05-20T11:00:00.000Z",
+      "text": "Second row has a malformed user field — user is a string instead of an object. This should produce a row-level error in ParseResult.errors, not crash the whole parse.",
+      "url": "https://twitter.com/synth_bad/status/4444000000000000002",
+      "user": "not-an-object"
+    },
+    {
+      "id": "4444000000000000003",
+      "date": "2026-05-20T12:00:00.000Z",
+      "text": "Third row is valid — should parse cleanly even though row 2 failed.",
+      "url": "https://twitter.com/synth_ok2/status/4444000000000000003",
+      "user": {
+        "id": "400003",
+        "name": "Synth OK Two",
+        "handle": "synth_ok2",
+        "profilePicUrl": "https://example.com/ok2.jpg"
+      }
+    }
+  ]
+}

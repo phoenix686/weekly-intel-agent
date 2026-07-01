@@ -1,0 +1,32 @@
+{
+  "exportDate": "2099-01-01T00:00:00.000Z",
+  "owner": "synth_tester",
+  "totalBookmarks": 2,
+  "skipped": 0,
+  "data": [
+    {
+      "id": "3333000000000000001",
+      "date": "2026-05-15T10:00:00.000Z",
+      "text": "",
+      "url": "https://twitter.com/synth_empty/status/3333000000000000001",
+      "user": {
+        "id": "300001",
+        "name": "Synth Empty Text",
+        "handle": "synth_empty",
+        "profilePicUrl": "https://example.com/empty.jpg"
+      }
+    },
+    {
+      "id": "3333000000000000002",
+      "date": "2026-05-15T11:00:00.000Z",
+      "text": "Normal row following the empty-text row. Both rows should appear in results with no crash.",
+      "url": "https://twitter.com/synth_normal/status/3333000000000000002",
+      "user": {
+        "id": "300002",
+        "name": "Synth Normal",
+        "handle": "synth_normal",
+        "profilePicUrl": "https://example.com/normal.jpg"
+      }
+    }
+  ]
+}

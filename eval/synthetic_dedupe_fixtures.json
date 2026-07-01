@@ -1,0 +1,125 @@
+{
+  "_comment": "Synthetic duplicate-pair fixtures for Phase 2 cluster_dedupe_node testing. All data is fake. Groups items by pair_label — items sharing a label should end up in the same cluster; items with different labels should not.",
+  "pairs": [
+    {
+      "pair_label": "exact_url_same_tweet_bookmarked_twice",
+      "description": "Identical tweet URL bookmarked at two different times. Text is byte-for-byte the same. A deduper should merge these unconditionally.",
+      "items": [
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorA/status/1000000000000000001",
+          "title": "Three things every production agent loop needs: a shared…",
+          "text": "Three things every production agent loop needs: a shared artifact layer, deterministic logging, and a codebase harness so improvements compound across runs.",
+          "fetched_at": "2026-05-01T10:00:00.000Z",
+          "author_name": "Synth Author A",
+          "author_handle": "synth_authorA",
+          "is_thread": false,
+          "thread_contents": null,
+          "expanded_urls": []
+        },
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorA/status/1000000000000000001",
+          "title": "Three things every production agent loop needs: a shared…",
+          "text": "Three things every production agent loop needs: a shared artifact layer, deterministic logging, and a codebase harness so improvements compound across runs.",
+          "fetched_at": "2026-05-10T14:30:00.000Z",
+          "author_name": "Synth Author A",
+          "author_handle": "synth_authorA",
+          "is_thread": false,
+          "thread_contents": null,
+          "expanded_urls": []
+        }
+      ]
+    },
+    {
+      "pair_label": "same_article_different_tweeters",
+      "description": "Two different people sharing the same article URL. Tweet texts differ but expanded_urls match. A deduper operating on link identity should merge these.",
+      "items": [
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorB/status/1000000000000000002",
+          "title": "Solid deep-dive on LLM evaluation: covers RAGAS, DeepEval,…",
+          "text": "Solid deep-dive on LLM evaluation: covers RAGAS, DeepEval, and custom metric design. Worth a careful read. https://t.co/synth_short_B",
+          "fetched_at": "2026-05-02T09:00:00.000Z",
+          "author_name": "Synth Author B",
+          "author_handle": "synth_authorB",
+          "is_thread": false,
+          "thread_contents": null,
+          "expanded_urls": ["https://synthblog.example.com/llm-eval-guide"]
+        },
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorC/status/1000000000000000003",
+          "title": "The RAGAS section here is the clearest explanation I've…",
+          "text": "The RAGAS section here is the clearest explanation I've seen. Bookmarking. https://t.co/synth_short_C",
+          "fetched_at": "2026-05-02T11:45:00.000Z",
+          "author_name": "Synth Author C",
+          "author_handle": "synth_authorC",
+          "is_thread": false,
+          "thread_contents": null,
+          "expanded_urls": ["https://synthblog.example.com/llm-eval-guide"]
+        }
+      ]
+    },
+    {
+      "pair_label": "quote_tweet_of_original",
+      "description": "A quote-tweet that reproduces the original tweet body inside thread_contents. The core claim is identical. A deduper operating on text similarity should merge these.",
+      "items": [
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorD/status/1000000000000000004",
+          "title": "Context window management is the skill that separates junior…",
+          "text": "Context window management is the skill that separates junior from senior prompt engineers. Not prompting style, not chain-of-thought tricks — knowing what to put in and what to leave out.",
+          "fetched_at": "2026-05-03T08:00:00.000Z",
+          "author_name": "Synth Author D",
+          "author_handle": "synth_authorD",
+          "is_thread": false,
+          "thread_contents": null,
+          "expanded_urls": []
+        },
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorE/status/1000000000000000005",
+          "title": "This. Context window management is the skill that separates…",
+          "text": "This.\n\nContext window management is the skill that separates junior from senior prompt engineers. Not prompting style, not chain-of-thought tricks — knowing what to put in and what to leave out.",
+          "fetched_at": "2026-05-03T10:15:00.000Z",
+          "author_name": "Synth Author E",
+          "author_handle": "synth_authorE",
+          "is_thread": true,
+          "thread_contents": "Context window management is the skill that separates junior from senior prompt engineers. Not prompting style, not chain-of-thought tricks — knowing what to put in and what to leave out.",
+          "expanded_urls": []
+        }
+      ]
+    },
+    {
+      "pair_label": "non_duplicate_same_topic",
+      "description": "Two items on the same general topic (agent memory) that make different claims. Should NOT merge — exists to test that the deduper does not over-cluster similar-topic items.",
+      "items": [
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorF/status/1000000000000000006",
+          "title": "Episodic memory retrieval latency is the bottleneck nobody…",
+          "text": "Episodic memory retrieval latency is the bottleneck nobody talks about. At 100ms per lookup you're burning your context budget before the agent even starts reasoning.",
+          "fetched_at": "2026-05-04T07:00:00.000Z",
+          "author_name": "Synth Author F",
+          "author_handle": "synth_authorF",
+          "is_thread": false,
+          "thread_contents": null,
+          "expanded_urls": []
+        },
+        {
+          "source": "twillot_bootstrap",
+          "url": "https://twitter.com/synth_authorG/status/1000000000000000007",
+          "title": "The future of agent memory isn't bigger vector stores — it's…",
+          "text": "The future of agent memory isn't bigger vector stores — it's smarter consolidation. Weekly distillation passes that compress episodic traces into semantic summaries.",
+          "fetched_at": "2026-05-04T09:00:00.000Z",
+          "author_name": "Synth Author G",
+          "author_handle": "synth_authorG",
+          "is_thread": false,
+          "thread_contents": null,
+          "expanded_urls": []
+        }
+      ]
+    }
+  ]
+}

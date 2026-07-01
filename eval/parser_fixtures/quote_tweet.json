@@ -1,0 +1,44 @@
+{
+  "exportDate": "2099-01-01T00:00:00.000Z",
+  "owner": "synth_tester",
+  "totalBookmarks": 2,
+  "skipped": 0,
+  "data": [
+    {
+      "id": "2222000000000000001",
+      "date": "2026-05-10T08:00:00.000Z",
+      "text": "This is a quote-tweet. It references another tweet via quote_status. is_thread should be True and thread_contents should carry the original tweet text.",
+      "url": "https://twitter.com/synth_quoter/status/2222000000000000001",
+      "user": {
+        "id": "200001",
+        "name": "Synth Quoter",
+        "handle": "synth_quoter",
+        "profilePicUrl": "https://example.com/quoter.jpg"
+      },
+      "quote_status": {
+        "id": "2222000000000000000",
+        "date": "2026-05-09T07:00:00.000Z",
+        "text": "Original tweet that is being quoted. This text should appear in thread_contents.",
+        "url": "https://twitter.com/synth_original/status/2222000000000000000",
+        "user": {
+          "id": "200000",
+          "name": "Synth Original Author",
+          "handle": "synth_original",
+          "profilePicUrl": "https://example.com/original.jpg"
+        }
+      }
+    },
+    {
+      "id": "2222000000000000002",
+      "date": "2026-05-10T09:00:00.000Z",
+      "text": "This is a plain bookmark with no quote_status. is_thread should be False and thread_contents should be None.",
+      "url": "https://twitter.com/synth_plain/status/2222000000000000002",
+      "user": {
+        "id": "200002",
+        "name": "Synth Plain",
+        "handle": "synth_plain",
+        "profilePicUrl": "https://example.com/plain.jpg"
+      }
+    }
+  ]
+}

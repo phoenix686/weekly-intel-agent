@@ -1,0 +1,50 @@
+{
+  "exportDate": "2099-01-01T00:00:00.000Z",
+  "owner": "synth_tester",
+  "totalBookmarks": 3,
+  "skipped": 0,
+  "data": [
+    {
+      "id": "1111000000000000001",
+      "date": "2026-05-01T10:00:00.000Z",
+      "text": "Plain bookmark with no links and no quote. Short enough that title equals text.",
+      "url": "https://twitter.com/synth_user1/status/1111000000000000001",
+      "user": {
+        "id": "100001",
+        "name": "Synth User One",
+        "handle": "synth_user1",
+        "profilePicUrl": "https://example.com/pic1.jpg"
+      }
+    },
+    {
+      "id": "1111000000000000002",
+      "date": "2026-05-02T11:00:00.000Z",
+      "text": "Bookmark with an expanded link. The short URL should be resolved to the full URL in expanded_urls.",
+      "url": "https://twitter.com/synth_user2/status/1111000000000000002",
+      "user": {
+        "id": "100002",
+        "name": "Synth User Two",
+        "handle": "synth_user2",
+        "profilePicUrl": "https://example.com/pic2.jpg"
+      },
+      "links": [
+        {
+          "shortUrl": "https://t.co/synth001",
+          "expandedUrl": "https://synthblog.example.com/some-article"
+        }
+      ]
+    },
+    {
+      "id": "1111000000000000003",
+      "date": "2026-05-03T12:00:00.000Z",
+      "text": "A bookmark whose text is exactly eighty-one characters long, which means title must be truncated properly here.",
+      "url": "https://twitter.com/synth_user3/status/1111000000000000003",
+      "user": {
+        "id": "100003",
+        "name": "Synth User Three",
+        "handle": "synth_user3",
+        "profilePicUrl": "https://example.com/pic3.jpg"
+      }
+    }
+  ]
+}
