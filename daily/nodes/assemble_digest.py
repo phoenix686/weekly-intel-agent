@@ -15,7 +15,7 @@ def format_digest(scored_items: list[ScoredItem], run_id: str) -> str:
     lines = ["🤖 *Daily Digest*", ""]
 
     for i, item in enumerate(kept[:MAX_DIGEST_ITEMS], 1):
-        title = item["title"][:80]
+        title = (item.get("title") or item["text"])[:80]
         url = item["url"]
         tags = " ".join(f"`{tag}`" for tag in item["tags"])
         reasoning = item["reasoning"].replace("_", r"\_")

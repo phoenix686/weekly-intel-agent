@@ -25,3 +25,11 @@ print(f"\n{len(plan_items)} plan_items, {len(proposals)} proposals\n")
 
 for item in result["classified_items"]:
     print(f"{item['item_id']} | {item['classification']} | {item.get('proposal_type')} | {item['classification_reasoning'][:100]}")
+
+# add to the bottom of scripts/test_classify_synthetic.py
+from sunday.nodes.assemble_plan import assemble_plan
+
+state.update(result)  # result is classify_item's output from before
+plan_result = assemble_plan(state)
+print("\n" + "="*50)
+print(plan_result["plan_text"])

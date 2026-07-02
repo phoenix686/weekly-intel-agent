@@ -91,3 +91,16 @@ def test_reasoning_wrapped_in_italic():
     items = [_item(keep=True, reasoning="This is the reasoning.")]
     result = format_digest(items, RUN_ID)
     assert "_This is the reasoning._" in result
+
+
+def test_missing_title_falls_back_to_text():
+    item = {
+        "url": "https://example.com", "text": "Full body text used as fallback title.",
+        "author_name": "Author", "author_handle": "author",
+        "fetched_at": "2026-01-01T00:00:00Z", "is_thread": False,
+        "thread_contents": None, "expanded_urls": [], "source": "twillot_bootstrap",
+        "duplicate_count": 1, "keep": True, "reasoning": "Good content.",
+        "tags": ["agentic-engineering"],
+    }
+    result = format_digest([item], RUN_ID)
+    assert "Full body text used as fallback title." in result

@@ -9,22 +9,30 @@ from state import SundayGraphState, NodeCost
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic()
 
-CORRELATE_PROMPT = """You are matching newly scored items against existing Trello cards to decide if each item relates to work already tracked.
+CORRELATE_PROMPT = """You are matching newly scored items against existing Trello cards to decide if each item directly relates to work already tracked.
+
+A match means: reading or acting on this item would directly help you make progress on the SPECIFIC task the card represents — not because they share vocabulary or are in the same broad domain, but because the item is genuinely about that card's particular project or task.
+
+Reasons to return null rather than a match:
+- The card name is vague, short, or stream-of-consciousness (e.g. "some thoughts on X thing"): if you cannot clearly identify the specific task the card represents, require much stronger and more explicit evidence before matching anything to it
+- The item is a general explainer or tutorial on a topic the card happens to mention
+- Multiple items all seem to match the same card — if one vague card is attracting several different items, that is a signal the card name is too broad to be a reliable match target; reconsider all of them
+- The connection is "this technology area overlaps" rather than "this item is about this specific project"
+
+Error asymmetry: a missed match (item appears in Reading & Learning instead of Existing Project Work) is a minor inconvenience. An incorrect match (item wrongly attributed to a card it doesn't actually relate to) corrupts the weekly plan. When in doubt, return null.
 
 Existing Trello cards:
 {cards_block}
 
-Scored items to match:
+Items to match:
 {items_block}
 
-For each item, decide whether it matches an existing card closely enough that it should be considered a continuation/extension of that card's work — not just topically similar, but genuinely the same underlying task or project.
-
-Return ONLY a JSON array, one object per item, in this exact shape:
+Return ONLY a JSON array, one object per item:
 [
   {{"item_id": "...", "matched_card_id": "abc123" or null, "match_reasoning": "brief reason"}}
 ]
 
-If nothing matches closely enough, use null for matched_card_id — don't force a weak match."""
+If nothing matches closely enough, use null for matched_card_id."""
 
 
 def _format_cards(cards: list[dict]) -> str:
