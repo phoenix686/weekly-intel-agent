@@ -36,10 +36,12 @@ If nothing matches closely enough, use null for matched_card_id."""
 
 
 def _format_cards(cards: list[dict]) -> str:
-    return "\n".join(
-        f"- id={c['card_id']} | list={c['list_name']} | {c['name']}"
-        for c in cards
-    )
+    lines = []
+    for c in cards:
+        lines.append(f"- id={c['card_id']} | list={c['list_name']} | {c['name']}")
+        for item in c.get("checklist_items", []):
+            lines.append(f"    - checklist: {item}")
+    return "\n".join(lines)
 
 
 def _format_items(items: list[dict]) -> str:

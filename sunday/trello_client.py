@@ -41,8 +41,13 @@ def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
 
     result = []
     for list_id, list_name in relevant.items():
-        cards = _trello_get(f"/lists/{list_id}/cards", {"filter": "open"})
+        cards = _trello_get(f"/lists/{list_id}/cards", {"filter": "open", "checklists": "all"})
         for card in cards:
+            checklist_items = [
+                item["name"]
+                for checklist in card.get("checklists", [])
+                for item in checklist.get("checkItems", [])
+            ]
             result.append({
                 "card_id": card["id"],
                 "name": card["name"],
@@ -50,6 +55,7 @@ def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
                 "list_id": list_id,
                 "list_name": list_name,
                 "url": card.get("shortUrl", ""),
+                "checklist_items": checklist_items,
             })
 
     logger.info(f"fetch_board_cards: fetched {len(result)} cards")
