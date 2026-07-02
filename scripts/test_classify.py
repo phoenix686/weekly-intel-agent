@@ -1,3 +1,13 @@
+"""
+Expected Output:
+Fetched 32 Trello cards
+Correlated 2 items
+
+https://twitter.com/Qihong53030163/status/2071089857489928620 | plan_item | None | Standalone learning resource (Twitter thread on LLM architecture/optimization). No existing project scope expansion—this is routine reading material for technical development.
+https://twitter.com/cwolferesearch/status/2070942465654186054 | plan_item | None | Standalone technical learning resource on evaluation design and benchmarking. No matched card and no indication of new project scope—routine reference material for existing agent/model work.
+
+Summary: 2 plan_items, 0 project_proposals
+"""
 import json
 import os
 import sys
@@ -5,6 +15,7 @@ from pathlib import Path
 
 from sunday.nodes.read_trello import read_trello
 from sunday.nodes.correlate_trello import correlate_trello
+
 from sunday.nodes.classify_item import classify_item
 from state import make_sunday_initial_state
 

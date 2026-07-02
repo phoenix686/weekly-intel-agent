@@ -1,3 +1,43 @@
+"""
+Expected Output:
+Fetched 32 Trello cards
+Correlated 10 items
+
+5 plan_items, 5 proposals
+
+https://twitter.com/synthetic/status/1000000000000000001 | plan_item | None | Matched to existing card (6a3b3768dce0aa08d46965ca: digital simulated world agent concept). This is 
+https://twitter.com/synthetic/status/1000000000000000002 | project_proposal | new | No matched_card_id. Score reasoning explicitly notes it overlaps with 'existing tracing/observabilit
+https://twitter.com/synthetic/status/1000000000000000003 | project_proposal | new | Score reasoning explicitly calls this 'a full standalone project concept (multi-source personal know
+https://twitter.com/synthetic/status/1000000000000000004 | plan_item | None | Described as 'foundational conceptual resource, directly useful for ongoing memory-systems work, sta
+https://twitter.com/synthetic/status/1000000000000000005 | project_proposal | new | Score reasoning: 'Concrete new-feature concept...spaced-repetition flashcard generation—a genuine sc
+https://twitter.com/synthetic/status/1000000000000000006 | plan_item | None | Matched to existing card (6a4355aa1948685d2d428377: Prompt caching deep agents). This is a directly 
+https://twitter.com/synthetic/status/1000000000000000007 | project_proposal | new | Score reasoning: 'describes a distinct new tool (browser extension + webhook sync)' adjacent to but 
+https://twitter.com/synthetic/status/1000000000000000008 | plan_item | None | Matched to existing card (6a3b371703c9bd2f1a78919a: voice agent / LangGraph agent concept). Score de
+https://twitter.com/synthetic/status/1000000000000000009 | project_proposal | new | Score reasoning: 'tooling that could meaningfully extend the existing eval-building work...worth con
+https://twitter.com/synthetic/status/1000000000000000010 | plan_item | None | Score describes this as 'practical, directly useful prompt-design reading, no project-scope implicat
+
+==================================================
+📋 *Weekly Plan*
+
+**Reading & Learning**
+1. [Solid explainer on the differences between RAG, long-context windows, and memory](https://twitter.com/synthetic/status/1000000000000000004)
+   _Foundational conceptual resource, directly useful for ongoing memory-systems work, standard reading material._
+
+2. [Long-form post on designing effective system prompts for coding agents, with bef](https://twitter.com/synthetic/status/1000000000000000010)
+   _Practical, directly useful prompt-design reading, no project-scope implications._
+
+**Existing Project Work**
+3. [Great overview of gradient checkpointing techniques for training large models on](https://twitter.com/synthetic/status/1000000000000000001)
+   _Directly relevant technical resource on memory-efficient training â€” useful background for understanding model constraints in agentic systems._ — continues card: "Upload latest calc on model memory gpu thingy into bible"
+
+4. [Detailed writeup comparing DSPy, GEPA, and manual prompt engineering across thre](https://twitter.com/synthetic/status/1000000000000000006)
+   _Directly applicable to planned prompt-optimization work, high-quality comparative resource._ — continues card: "Prompt caching deep agents"
+
+5. [Short case study on reducing LangGraph recursion-limit failures in production by](https://twitter.com/synthetic/status/1000000000000000008)
+   _Directly relevant to existing LangGraph agent reliability practices, standard technical reading._ — continues card: "Voice agent cam now be vreated by langgraph apparently there's an article i was thinking can this be built as an extension of the trellis agent that gives ideas and plan for the week and an insta reel I saved where a character floats on the screen and has a plan shown and can maybe speak"
+
+_5 plan items · 5 proposals pending approval · run: test-syn_
+"""
 import json
 from state import make_sunday_initial_state
 from sunday.nodes.read_trello import read_trello
