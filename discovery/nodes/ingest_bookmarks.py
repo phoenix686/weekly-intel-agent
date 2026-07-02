@@ -30,6 +30,7 @@ def ingest_bookmarks(state: DiscoverySubgraphState) -> dict:
         input_tokens=0,
         output_tokens=0,
         latency_ms=round((time.perf_counter() - t0) * 1000, 4),
+        cost_usd=0.0
     )
 
     return {

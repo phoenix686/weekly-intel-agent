@@ -1,0 +1,35 @@
+[project]
+name = "weekly-intel"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=1.2.6",
+    "langsmith>=0.9.2",
+    "anthropic>=0.40.0",
+    "langmem>=0.0.15",
+    "python-dotenv>=1.2.2",
+    "psycopg[binary]>=3.3.4",
+    "langgraph-checkpoint-postgres>=3.1.0",
+]
+
+[tool.uv]
+# This project is a script-style layout, not an installable package.
+# Root-level modules (state.py, etc.) are importable via PYTHONPATH=.
+# set in .env. Pass --env-file .env explicitly (uv does not auto-load .env):
+#   uv run --env-file .env python <script>
+# Or set UV_ENV_FILE=.env in your shell profile to avoid repeating the flag.
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pre-commit>=3.8.0",
+    "ruff>=0.6.0",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# E4=imports, E7=statement errors, E9=runtime errors, F=pyflakes — critical errors only
+select = ["E4", "E7", "E9", "F"]

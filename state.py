@@ -34,21 +34,39 @@ class RawItem(TypedDict):
 
 
 class ClusteredItem(TypedDict):
-    """A RawItem after dedupe/clustering. cluster_id groups near-duplicates;
-    representative items keep is_representative=True."""
+    """A RawItem after URL-heuristic deduplication. One record per unique
+    normalized URL; duplicate_count tracks how many raw_items were collapsed."""
 
-    item: RawItem
-    cluster_id: str
-    is_representative: bool
+    url: str
+    title: str
+    text: str
+    author_name: str
+    author_handle: str
+    fetched_at: str
+    is_thread: bool
+    thread_contents: str | None
+    expanded_urls: list[str]
+    source: str
+    duplicate_count: int
 
 
 class ScoredItem(TypedDict):
     """A ClusteredItem after scoring against the taste profile."""
 
-    item: RawItem
-    cluster_id: str
-    score: float            # 0.0-1.0, taste-profile match
-    score_reason: str        # short rationale string, for traceability/eval
+    url: str
+    title: str
+    text: str
+    author_name: str
+    author_handle: str
+    fetched_at: str
+    is_thread: bool
+    thread_contents: str | None
+    expanded_urls: list[str]
+    source: str
+    duplicate_count: int
+    keep: bool
+    reasoning: str      # one-sentence rationale, visible in LangSmith traces
+    tags: list[str]     # 1-3 tags from the fixed vocabulary
 
 
 class NodeCost(TypedDict):
@@ -60,6 +78,7 @@ class NodeCost(TypedDict):
     input_tokens: int
     output_tokens: int
     latency_ms: float
+    cost_usd: float
 
 
 class DiscoverySubgraphState(TypedDict):
@@ -82,3 +101,67 @@ class DiscoverySubgraphState(TypedDict):
     stage: Literal["start", "searched", "clustered", "scored", "done"]
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
+
+
+class DailyGraphState(TypedDict):
+    """State for the daily parent graph.
+
+    Keys shared with DiscoverySubgraphState (run_id, scored_items, costs,
+    errors) are passed through to/from the discovery subgraph by name
+    intersection. Keys only in DiscoverySubgraphState (raw_items,
+    clustered_items, stage) stay internal to the subgraph.
+    """
+
+    run_id: str
+    scored_items: list[ScoredItem]
+    costs: Annotated[list[NodeCost], operator.add]
+    errors: list[str]
+    digest_text: str        # populated by assemble_digest, consumed by send_telegram_digest
+
+
+def make_daily_initial_state(run_id: str) -> DailyGraphState:
+    return DailyGraphState(
+        run_id=run_id,
+        scored_items=[],
+        costs=[],
+        errors=[],
+        digest_text="",
+    )
+
+
+class SundayGraphState(TypedDict):
+    """State for the Sunday parent graph.
+
+    Pipeline: read_trello -> correlate_trello -> classify_item -> assemble_plan
+              -> await_approval (Part B) -> write_outputs -> update_profile
+
+    Keys shared with DiscoverySubgraphState (run_id, scored_items, costs, errors)
+    pass through the discovery subgraph by name intersection.
+    """
+
+    run_id: str
+    scored_items: list[ScoredItem]
+    trello_cards: list[dict]        # raw card data from read_trello
+    correlated_items: list[dict]    # scored_items + matched_card_id: str | None
+    classified_items: list[dict]    # + classification: "plan_item" | "project_proposal"
+                                    #   + proposal_type: "extend" | "new" | None
+    plan_text: str                  # populated by assemble_plan
+    pending_approvals: list[dict]   # project_proposal items awaiting await_approval
+    approval_results: list[dict]    # populated by await_approval (Part B)
+    costs: Annotated[list[NodeCost], operator.add]          
+    errors: list[str]
+
+
+def make_sunday_initial_state(run_id: str) -> SundayGraphState:
+    return SundayGraphState(
+        run_id=run_id,
+        scored_items=[],
+        trello_cards=[],
+        correlated_items=[],
+        classified_items=[],
+        plan_text="",
+        pending_approvals=[],
+        approval_results=[],
+        costs=[],
+        errors=[],
+    )

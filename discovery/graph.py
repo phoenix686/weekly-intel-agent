@@ -8,46 +8,12 @@ no-op placeholders until Phase 2.
 
 from __future__ import annotations
 
-import time
 import uuid
-
 from langgraph.graph import StateGraph, START, END
-
-from state import DiscoverySubgraphState, NodeCost
+from state import DiscoverySubgraphState
 from discovery.nodes.ingest_bookmarks import ingest_bookmarks
-
-
-def _make_cost_record(node_name: str, start_time: float) -> NodeCost:
-    return NodeCost(
-        node_name=node_name,
-        input_tokens=0,
-        output_tokens=0,
-        latency_ms=round((time.perf_counter() - start_time) * 1000, 4),
-    )
-
-
-def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
-    """Placeholder for: dedupe near-duplicate RawItems -> ClusteredItem list."""
-    t0 = time.perf_counter()
-    print(f"[node] cluster_dedupe_node running (run_id={state['run_id']})")
-
-    return {
-        "clustered_items": [],
-        "stage": "clustered",
-        "costs": [_make_cost_record("cluster_dedupe_node", t0)],
-    }
-
-
-def score_node(state: DiscoverySubgraphState) -> dict:
-    """Placeholder for: score ClusteredItems against taste profile -> ScoredItem list."""
-    t0 = time.perf_counter()
-    print(f"[node] score_node running (run_id={state['run_id']})")
-
-    return {
-        "scored_items": [],
-        "stage": "scored",
-        "costs": [_make_cost_record("score_node", t0)],
-    }
+from discovery.nodes.cluster_dedupe import cluster_dedupe_node
+from discovery.nodes.score import score_node
 
 
 def build_discovery_subgraph():
