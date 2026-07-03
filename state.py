@@ -147,7 +147,7 @@ class SundayGraphState(TypedDict):
                                     #   + proposal_type: "extend" | "new" | None
     plan_text: str                  # populated by assemble_plan
     pending_approvals: list[dict]   # project_proposal items awaiting await_approval
-    approval_results: list[dict]    # populated by await_approval (Part B)
+    approval_results: Annotated[list[dict], operator.add]  # one entry per proposal_worker Send
     costs: Annotated[list[NodeCost], operator.add]          
     errors: list[str]
 
