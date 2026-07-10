@@ -14,7 +14,7 @@ contract that nodes read from and write to.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, TypedDict, Literal
+from typing import Annotated, TypedDict, Literal, NotRequired
 
 
 class RawItem(TypedDict):
@@ -31,6 +31,8 @@ class RawItem(TypedDict):
     is_thread: bool       # True when item quotes/threads another tweet
     thread_contents: str | None  # quoted tweet text, or None
     expanded_urls: list[str]     # expanded link URLs extracted from the item
+    has_video: NotRequired[bool]        # True if a companion video was detected (not fetched/transcribed)
+    video_url: NotRequired[str | None]  # companion video URL, if trivially available
 
 
 class ClusteredItem(TypedDict):
@@ -48,6 +50,8 @@ class ClusteredItem(TypedDict):
     expanded_urls: list[str]
     source: str
     duplicate_count: int
+    has_video: NotRequired[bool]
+    video_url: NotRequired[str | None]
 
 
 class ScoredItem(TypedDict):
@@ -67,6 +71,8 @@ class ScoredItem(TypedDict):
     keep: bool
     reasoning: str      # one-sentence rationale, visible in LangSmith traces
     tags: list[str]     # 1-3 tags from the fixed vocabulary
+    has_video: NotRequired[bool]
+    video_url: NotRequired[str | None]
 
 
 class NodeCost(TypedDict):
@@ -100,7 +106,7 @@ class DiscoverySubgraphState(TypedDict):
     run_id: str
     stage: Literal["start", "searched", "clustered", "scored", "done"]
     costs: Annotated[list[NodeCost], operator.add]
-    errors: list[str]
+    errors: Annotated[list[str], operator.add]
 
 
 class DailyGraphState(TypedDict):
@@ -117,6 +123,9 @@ class DailyGraphState(TypedDict):
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
     digest_text: str        # populated by assemble_digest, consumed by send_telegram_digest
+    digest_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
+                                       # assemble_digest, persisted by send_telegram_digest keyed
+                                       # by the sent message_id so a later numbered reply resolves
 
 
 def make_daily_initial_state(run_id: str) -> DailyGraphState:
@@ -126,6 +135,7 @@ def make_daily_initial_state(run_id: str) -> DailyGraphState:
         costs=[],
         errors=[],
         digest_text="",
+        digest_item_map={},
     )
 
 
@@ -146,8 +156,13 @@ class SundayGraphState(TypedDict):
     classified_items: list[dict]    # + classification: "plan_item" | "project_proposal"
                                     #   + proposal_type: "extend" | "new" | None
     plan_text: str                  # populated by assemble_plan
+    plan_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
+                                     # assemble_plan, persisted by send_telegram_plan keyed by
+                                     # the sent message_id so a later numbered reply resolves
     pending_approvals: list[dict]   # project_proposal items awaiting await_approval
     pending_resumes: Annotated[list[dict], operator.add]   # one entry per proposal_worker Send: {proposal_id, thread_id, message_id}
+    pending_source_candidates: list[dict]   # discover_sources output: {name, feed_url, bucket, sample_keep_rate, sample_reasoning}
+    pending_source_resumes: Annotated[list[dict], operator.add]  # one entry per source_proposal_worker Send
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
 
@@ -160,8 +175,11 @@ def make_sunday_initial_state(run_id: str) -> SundayGraphState:
         correlated_items=[],
         classified_items=[],
         plan_text="",
+        plan_item_map={},
         pending_approvals=[],
         pending_resumes=[],
+        pending_source_candidates=[],
+        pending_source_resumes=[],
         costs=[],
         errors=[],
     )

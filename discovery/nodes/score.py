@@ -3,6 +3,7 @@ import logging
 import time
 import anthropic
 from state import DiscoverySubgraphState, ScoredItem, NodeCost
+from discovery.seen_items import mark_seen
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,8 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         latency_ms=round((time.perf_counter() - t0) * 1000, 4),
         cost_usd=round(cost_usd, 6),
     )
+
+    mark_seen([item["url"] for item in all_scored])
 
     return {
         "scored_items": all_scored,

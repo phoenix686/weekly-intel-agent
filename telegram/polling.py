@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 from langgraph.types import Command
 
 from sunday.nodes.await_approval import get_proposal_graph
+from sunday.nodes.discover_sources import get_source_proposal_graph
 from sunday.approval_actions import handle_approval, handle_rejection
+from sunday.source_discovery_actions import handle_source_approval, handle_source_rejection
 from sunday.memory_store_config import get_store
 import telegram.feedback_router as feedback_router
 
@@ -74,9 +76,12 @@ def _handle_update(update: dict, store) -> None:
     if reply_to:
         reply_msg_id = str(reply_to["message_id"])
         resume_item = store.get(("weekly_intel", "pending_resume_map"), reply_msg_id)
+        source_resume_item = store.get(("weekly_intel", "pending_source_resume_map"), reply_msg_id)
 
         if resume_item:
             _handle_approval_reply(reply_msg_id, text, resume_item.value, store)
+        elif source_resume_item:
+            _handle_source_approval_reply(reply_msg_id, text, source_resume_item.value, store)
         else:
             feedback_router.handle_feedback(message)
     else:
@@ -107,6 +112,32 @@ def _handle_approval_reply(reply_msg_id: str, text: str, record: dict, store) ->
 
     store.delete(("weekly_intel", "pending_resume_map"), reply_msg_id)
     logger.info(f"polling: resolved {record['proposal_id']} → {decision}")
+
+
+def _handle_source_approval_reply(reply_msg_id: str, text: str, record: dict, store) -> None:
+    thread_id = record["thread_id"]
+
+    decision = _normalize_decision(text)
+    if decision is None:
+        from telegram.bot_client import send_message
+        send_message("Didn't catch that — reply \"approve\" or \"reject\" to this source proposal.")
+        logger.warning(f"polling: unrecognized reply '{text}' for source thread {thread_id}")
+        return
+
+    child = get_source_proposal_graph()
+    result = child.invoke(
+        Command(resume=decision),
+        config={"configurable": {"thread_id": thread_id}},
+    )
+
+    candidate = {"name": result["name"], "feed_url": result["feed_url"], "bucket": result["bucket"]}
+    if decision == "approve":
+        handle_source_approval(candidate, result["bucket"])
+    else:
+        handle_source_rejection(candidate)
+
+    store.delete(("weekly_intel", "pending_source_resume_map"), reply_msg_id)
+    logger.info(f"polling: resolved source proposal {record['proposal_id']} → {decision}")
 
 
 def _queue_adhoc(text: str, store) -> None:

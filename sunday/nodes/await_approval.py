@@ -1,11 +1,11 @@
 import hashlib
-import re
 from typing import TypedDict
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Send
 
 from telegram.bot_client import send_message
+from telegram.markdown import escape_markdown_v2
 from checkpointer_config import get_checkpointer
 from sunday.memory_store_config import get_store
 
@@ -29,20 +29,15 @@ def thread_id_for(proposal_id: str) -> str:
     return "proposal-" + hashlib.sha256(proposal_id.encode()).hexdigest()[:16]
 
 
-def _escape_markdown_v2(text: str) -> str:
-    special_chars = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(special_chars)}])', r'\\\1', text)
-
-
 def _format_proposal_message(state: ProposalState) -> str:
     title = state.get("title") or state["text"][:80]
-    tags = " ".join(f"`{_escape_markdown_v2(t)}`" for t in state.get("tags", []))
+    tags = " ".join(f"`{escape_markdown_v2(t)}`" for t in state.get("tags", []))
     kind = "🔄 *Extend Existing Project*" if state.get("proposal_type") == "extend" else "🆕 *New Project Proposal*"
     return (
         f"{kind}\n\n"
-        f"[{_escape_markdown_v2(title)}]({state['url']})\n"
+        f"[{escape_markdown_v2(title)}]({state['url']})\n"
         f"Tags: {tags}\n\n"
-        f"_{_escape_markdown_v2(state['reasoning'])}_\n\n"
+        f"_{escape_markdown_v2(state['reasoning'])}_\n\n"
         f"Reply \"approve\" or \"reject\" to this message\\."
     )
 

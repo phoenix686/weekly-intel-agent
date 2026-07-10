@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 def assemble_plan(state: SundayGraphState) -> dict:
     t0 = time.perf_counter()
-    text = format_plan(
+    text, item_map = format_plan(
         state["classified_items"],
         len(state["pending_approvals"]),
         state["run_id"],
@@ -17,13 +17,13 @@ def assemble_plan(state: SundayGraphState) -> dict:
         node_name="assemble_plan", input_tokens=0, output_tokens=0,
         cost_usd=0.0, latency_ms=round((time.perf_counter() - t0) * 1000, 2),
     )
-    return {"plan_text": text, "costs": [cost]}
+    return {"plan_text": text, "plan_item_map": item_map, "costs": [cost]}
 def format_plan(
     classified_items: list[dict],
     pending_approvals_count: int,
     run_id: str,
     trello_cards: list[dict],
-) -> str:
+) -> tuple[str, dict[int, dict]]:
     card_by_id = {c["card_id"]: c for c in trello_cards}
     plan_items = [i for i in classified_items if i["classification"] == "plan_item"]
 
@@ -32,13 +32,14 @@ def format_plan(
         if pending_approvals_count > 0:
             msg += f" {pending_approvals_count} proposals pending approval — check Telegram."
         msg += "_"
-        return msg
+        return msg, {}
 
     reading = [i for i in plan_items if i.get("matched_card_id") is None]
     project = [i for i in plan_items if i.get("matched_card_id") is not None]
 
     lines = ["📋 *Weekly Plan*", ""]
     counter = 1
+    item_map: dict[int, dict] = {}
 
     if reading:
         lines.append("**Reading & Learning**")
@@ -48,6 +49,11 @@ def format_plan(
             lines.append(f"{counter}. [{title}]({item['url']})")
             lines.append(f"   _{reasoning}_")
             lines.append("")
+            item_map[counter] = {
+                "url": item["url"], "title": title,
+                "text": item["text"], "tags": item.get("tags", []),
+                "reasoning": item["reasoning"],
+            }
             counter += 1
 
     if project:
@@ -60,6 +66,11 @@ def format_plan(
             lines.append(f"{counter}. [{title}]({item['url']})")
             lines.append(f'   _{reasoning}_ — continues card: "{card_name}"')
             lines.append("")
+            item_map[counter] = {
+                "url": item["url"], "title": title,
+                "text": item["text"], "tags": item.get("tags", []),
+                "reasoning": item["reasoning"],
+            }
             counter += 1
 
     if pending_approvals_count > 0:
@@ -68,6 +79,6 @@ def format_plan(
         footer = f"_{len(plan_items)} plan items · run: {run_id[:8]}_"
     lines.append(footer)
 
-    return "\n".join(lines)
+    return "\n".join(lines), item_map
 
 

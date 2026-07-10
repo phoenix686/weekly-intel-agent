@@ -1,17 +1,19 @@
 import time
 
-from discovery.parsers.scrape_blogs import fetch_blog_entries
+from discovery.parsers.rss_common import fetch_rss_feed
 from state import DiscoverySubgraphState, RawItem, NodeCost
 
+FEED_URL = "https://news.smol.ai/rss.xml"
 
-def scrape_blogs(state: DiscoverySubgraphState) -> dict:
+
+def smol_ai_news(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
-    result = fetch_blog_entries()
+    result = fetch_rss_feed(FEED_URL, source_name="smol_ai_news")
 
     items: list[RawItem] = []
     for row in result.rows:
         item = RawItem(
-            source="blog_scrape",
+            source="smol_ai_news",
             title=row["title"],
             text=row["text"],
             url=row["url"],
@@ -29,7 +31,7 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
         items.append(item)
 
     cost = NodeCost(
-        node_name="scrape_blogs",
+        node_name="smol_ai_news",
         input_tokens=0, output_tokens=0,
         latency_ms=round((time.perf_counter() - t0) * 1000, 4),
         cost_usd=0.0,
@@ -37,5 +39,5 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
     return {
         "raw_items": items,
         "costs": [cost],
-        "errors": [f"{feed}: {msg}" for feed, msg in result.errors],
+        "errors": [f"{source}: {msg}" for source, msg in result.errors],
     }

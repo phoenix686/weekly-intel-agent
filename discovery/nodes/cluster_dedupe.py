@@ -8,11 +8,15 @@ unique URL. No LangGraph imports, no LLM calls.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import defaultdict
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from state import DiscoverySubgraphState, RawItem, ClusteredItem, NodeCost
+from discovery.seen_items import filter_unseen
+
+logger = logging.getLogger(__name__)
 
 
 _TRACKING_PARAMS = frozenset({
@@ -62,7 +66,7 @@ def _dedupe(raw_items: list[RawItem]) -> list[ClusteredItem]:
     result: list[ClusteredItem] = []
     for group in groups.values():
         rep = _pick_representative(group)
-        result.append(ClusteredItem(
+        item = ClusteredItem(
             url=rep["url"],
             title=rep["title"],
             text=rep["text"],
@@ -74,15 +78,25 @@ def _dedupe(raw_items: list[RawItem]) -> list[ClusteredItem]:
             expanded_urls=rep["expanded_urls"],
             source=rep["source"],
             duplicate_count=len(group),
-        ))
+        )
+        if "has_video" in rep:
+            item["has_video"] = rep["has_video"]
+        if "video_url" in rep:
+            item["video_url"] = rep["video_url"]
+        result.append(item)
     return result
 
 
 def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
     clustered = _dedupe(state["raw_items"])
+
+    unseen, seen_urls = filter_unseen(clustered)
+    if seen_urls:
+        logger.info(f"cluster_dedupe: skipped {len(seen_urls)} already-seen item(s): {seen_urls}")
+
     return {
-        "clustered_items": clustered,
+        "clustered_items": unseen,
         "costs": [NodeCost(
             node_name="cluster_dedupe",
             input_tokens=0,

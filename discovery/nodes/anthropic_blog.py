@@ -1,17 +1,17 @@
 import time
 
-from discovery.parsers.scrape_blogs import fetch_blog_entries
+from discovery.parsers.anthropic_blog import fetch_anthropic_engineering
 from state import DiscoverySubgraphState, RawItem, NodeCost
 
 
-def scrape_blogs(state: DiscoverySubgraphState) -> dict:
+def anthropic_blog(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
-    result = fetch_blog_entries()
+    result = fetch_anthropic_engineering()
 
     items: list[RawItem] = []
     for row in result.rows:
         item = RawItem(
-            source="blog_scrape",
+            source="anthropic_blog",
             title=row["title"],
             text=row["text"],
             url=row["url"],
@@ -29,7 +29,7 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
         items.append(item)
 
     cost = NodeCost(
-        node_name="scrape_blogs",
+        node_name="anthropic_blog",
         input_tokens=0, output_tokens=0,
         latency_ms=round((time.perf_counter() - t0) * 1000, 4),
         cost_usd=0.0,
@@ -37,5 +37,5 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
     return {
         "raw_items": items,
         "costs": [cost],
-        "errors": [f"{feed}: {msg}" for feed, msg in result.errors],
+        "errors": [f"{source}: {msg}" for source, msg in result.errors],
     }

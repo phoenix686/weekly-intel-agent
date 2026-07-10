@@ -17,8 +17,8 @@ TASTE_PROFILE_PATH = Path("data/taste_profile.yaml")
 
 _YAML_PLACEHOLDER = """\
 # Weekly Intel — taste profile
-# Updated incrementally each Sunday based on rejected project proposals.
-# (no rejection history yet — this is the initial version)
+# Updated incrementally based on rejected proposals and digest/plan feedback.
+# (no feedback history yet — this is the initial version)
 version: 1
 proposal_filters: []
 notes: ""
@@ -26,31 +26,31 @@ notes: ""
 
 _UPDATE_PROMPT = """\
 You are maintaining a taste-profile YAML file for a weekly intelligence agent. \
-The profile records which kinds of project proposals the user has rejected, \
-so future classification runs can route similar ideas differently.
+The profile records patterns in what the user likes and dislikes -- both \
+project proposals and daily/weekly digest items -- so future scoring and \
+classification runs can route similar content appropriately.
 
 Current profile:
 ---
 {current_profile}
 ---
 
-This week's rejected proposals ({count} total):
-{rejected_items}
+New signal ({sentiment}, {count} total):
+{feedback_items}
 
 Task: produce a SMALL incremental update to the profile above.
-- Add or refine entries under proposal_filters to reflect the pattern of these rejections.
+- Add or refine entries under proposal_filters to reflect this signal.
 - Preserve all existing entries — do NOT regenerate from scratch.
-- Do NOT overfit to a single ambiguous rejection; only add a pattern if it is clear.
+- Do NOT overfit to a single ambiguous reaction; only add a pattern if it is clear.
 - Return only valid YAML (no markdown fences, no commentary outside YAML).
 """
 
 
-def _format_rejection_for_yaml(item: dict) -> str:
+def _format_feedback_for_yaml(item: dict, feedback_text: str) -> str:
     return "\n".join([
         f"1. url: {item.get('url', 'unknown')}",
         f"   summary: {item.get('text', '')[:200]}",
-        f"   proposal_type: {item.get('proposal_type')}",
-        f"   classification_reasoning: {item.get('classification_reasoning', '')[:200]}",
+        f"   feedback: {feedback_text[:200]}",
     ])
 
 
@@ -66,28 +66,39 @@ def handle_approval(item: dict, thread_id: str) -> None:
     logger.info(f"handle_approval: processed approval for {item.get('url')}")
 
 
-def handle_rejection(item: dict, run_id: str) -> None:
-    """Writes rejection_event to the Postgres store and performs incremental YAML update."""
+def handle_feedback(item: dict, feedback_text: str, sentiment: str, run_id: str) -> None:
+    """Writes a feedback_event to the Postgres store and folds the signal
+    into taste_profile.yaml via the same incremental Haiku-update mechanism
+    used for proposal rejections. Works for BOTH positive and negative
+    signal -- passive digest/plan feedback is not gated behind approval,
+    it flows straight into the profile update."""
     store = get_store()
 
     key = str(uuid.uuid4())
-    namespace = ("weekly_intel", "rejection_events")
+    namespace = ("weekly_intel", "feedback_events")
     value = {
-        "type": "rejection_event",
-        "item_id": item["url"],
+        "type": "feedback_event",
+        "item_id": item.get("url"),
         "content_summary": item.get("text", "")[:300],
-        "proposal_type": item.get("proposal_type"),
-        "classification_reasoning": item.get("classification_reasoning", ""),
+        "feedback_text": feedback_text,
+        "sentiment": sentiment,
         "run_id": run_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     store.put(namespace, key, value)
-    logger.info(f"handle_rejection: wrote rejection_event {key} for {item['url']}")
+    logger.info(f"handle_feedback: wrote feedback_event {key} for {item.get('url')} (sentiment={sentiment})")
 
-    _update_yaml_for_rejection(item)
+    _update_yaml_for_feedback(item, feedback_text, sentiment)
 
 
-def _update_yaml_for_rejection(item: dict) -> None:
+def handle_rejection(item: dict, run_id: str) -> None:
+    """Proposal rejection -- always negative signal. Thin wrapper over
+    handle_feedback, kept so existing callers (telegram/polling.py) don't
+    need to change."""
+    handle_feedback(item, feedback_text="rejected proposal", sentiment="negative", run_id=run_id)
+
+
+def _update_yaml_for_feedback(item: dict, feedback_text: str, sentiment: str) -> None:
     current_profile = (
         TASTE_PROFILE_PATH.read_text(encoding="utf-8")
         if TASTE_PROFILE_PATH.exists()
@@ -96,8 +107,9 @@ def _update_yaml_for_rejection(item: dict) -> None:
 
     prompt = _UPDATE_PROMPT.format(
         current_profile=current_profile,
+        sentiment=sentiment,
         count=1,
-        rejected_items=_format_rejection_for_yaml(item),
+        feedback_items=_format_feedback_for_yaml(item, feedback_text),
     )
 
     response = _client.messages.create(
@@ -114,6 +126,6 @@ def _update_yaml_for_rejection(item: dict) -> None:
     output_tokens = response.usage.output_tokens
     cost = round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6)
     logger.info(
-        f"_update_yaml_for_rejection: updated taste profile "
-        f"(tokens: {input_tokens}/{output_tokens}, cost: ${cost:.6f})"
+        f"_update_yaml_for_feedback: updated taste profile "
+        f"(sentiment={sentiment}, tokens: {input_tokens}/{output_tokens}, cost: ${cost:.6f})"
     )

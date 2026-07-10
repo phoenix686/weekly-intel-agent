@@ -4,15 +4,16 @@ from state import ScoredItem, DailyGraphState, NodeCost
 MAX_DIGEST_ITEMS = 15
 
 
-def format_digest(scored_items: list[ScoredItem], run_id: str) -> str:
+def format_digest(scored_items: list[ScoredItem], run_id: str) -> tuple[str, dict[int, dict]]:
     kept = [item for item in scored_items if item["keep"]]
     total_scored = len(scored_items)
     total_kept = len(kept)
 
     if not kept:
-        return "🤖 *Daily Digest*\n\n_Nothing new today._"
+        return "🤖 *Daily Digest*\n\n_Nothing new today._", {}
 
     lines = ["🤖 *Daily Digest*", ""]
+    item_map: dict[int, dict] = {}
 
     for i, item in enumerate(kept[:MAX_DIGEST_ITEMS], 1):
         title = (item.get("title") or item["text"])[:80]
@@ -25,14 +26,22 @@ def format_digest(scored_items: list[ScoredItem], run_id: str) -> str:
         lines.append(f"   _{reasoning}_")
         lines.append("")
 
+        item_map[i] = {
+            "url": url,
+            "title": title,
+            "text": item["text"],
+            "tags": item["tags"],
+            "reasoning": item["reasoning"],
+        }
+
     lines.append(f"_{total_scored} scored · {total_kept} kept · run: {run_id[:8]}_")
 
-    return "\n".join(lines)
+    return "\n".join(lines), item_map
 
 
 def assemble_digest(state: DailyGraphState) -> dict:
     t0 = time.monotonic()
-    text = format_digest(state["scored_items"], state["run_id"])
+    text, item_map = format_digest(state["scored_items"], state["run_id"])
     cost = NodeCost(
         node_name="assemble_digest",
         input_tokens=0,
@@ -42,6 +51,7 @@ def assemble_digest(state: DailyGraphState) -> dict:
     )
     return {
         "digest_text": text,
+        "digest_item_map": item_map,
         "costs": [cost],
     }
 
