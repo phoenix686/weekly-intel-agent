@@ -10,7 +10,6 @@ from sunday.nodes.classify_item import classify_item
 from sunday.nodes.assemble_plan import assemble_plan
 from sunday.nodes.send_telegram_plan import send_telegram_plan
 from sunday.nodes.await_approval import route_to_approvals, proposal_worker
-from sunday.nodes.write_outputs import write_outputs
 from sunday.nodes.update_profile import update_profile
 
 
@@ -31,7 +30,6 @@ def build_sunday_graph():
     graph.add_node("assemble_plan", assemble_plan)
     graph.add_node("send_telegram_plan", send_telegram_plan)
     graph.add_node("proposal_worker", proposal_worker)
-    graph.add_node("write_outputs", write_outputs)
     graph.add_node("update_profile", update_profile)
 
     graph.add_edge(START, "discovery_subgraph")
@@ -41,8 +39,7 @@ def build_sunday_graph():
     graph.add_conditional_edges("classify_item", _fan_out_after_classify)
     graph.add_edge("assemble_plan", "send_telegram_plan")
     graph.add_edge("send_telegram_plan", "update_profile")
-    graph.add_edge("proposal_worker", "write_outputs")
-    graph.add_edge("write_outputs", "update_profile")
+    graph.add_edge("proposal_worker", "update_profile")
     graph.add_edge("update_profile", END)
 
     return graph.compile(checkpointer=get_checkpointer())
