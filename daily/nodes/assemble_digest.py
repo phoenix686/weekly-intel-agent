@@ -1,5 +1,8 @@
 import time
+from datetime import datetime, timezone
+
 from state import ScoredItem, DailyGraphState, NodeCost
+from sunday.memory_store_config import get_store
 
 MAX_DIGEST_ITEMS = 15
 
@@ -42,6 +45,17 @@ def format_digest(scored_items: list[ScoredItem], run_id: str) -> tuple[str, dic
 def assemble_digest(state: DailyGraphState) -> dict:
     t0 = time.monotonic()
     text, item_map = format_digest(state["scored_items"], state["run_id"])
+
+    get_store().put(
+        ("companion",),
+        "current_daily_digest",
+        {
+            "run_id": state["run_id"],
+            "digest_text": text,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
     cost = NodeCost(
         node_name="assemble_digest",
         input_tokens=0,

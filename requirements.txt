@@ -1,6 +1,8 @@
 langgraph>=1.2.6
+langgraph-checkpoint-postgres>=3.1.0
 langsmith>=0.9.2
 anthropic>=0.40.0
 langmem>=0.0.15
 psycopg[binary]>=3.1.0
 psycopg-pool>=3.1.0
+python-dotenv>=1.2.2

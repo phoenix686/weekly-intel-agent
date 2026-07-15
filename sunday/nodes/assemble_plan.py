@@ -1,7 +1,9 @@
 import time
 import logging
+from datetime import datetime, timezone
 
 from state import SundayGraphState, NodeCost
+from sunday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,17 @@ def assemble_plan(state: SundayGraphState) -> dict:
         state["run_id"],
         state["trello_cards"],
     )
+
+    get_store().put(
+        ("companion",),
+        "current_weekly_plan",
+        {
+            "run_id": state["run_id"],
+            "plan_text": text,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
     cost = NodeCost(
         node_name="assemble_plan", input_tokens=0, output_tokens=0,
         cost_usd=0.0, latency_ms=round((time.perf_counter() - t0) * 1000, 2),
