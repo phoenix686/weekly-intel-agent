@@ -107,21 +107,25 @@ class DiscoverySubgraphState(TypedDict):
     stage: Literal["start", "searched", "clustered", "scored", "done"]
     costs: Annotated[list[NodeCost], operator.add]
     errors: Annotated[list[str], operator.add]
+    source_context: Literal["daily", "sunday"]  # read by route_sources() to
+                                                 # decide the active source
+                                                 # node(s) for this invocation
 
 
 class DailyGraphState(TypedDict):
     """State for the daily parent graph.
 
     Keys shared with DiscoverySubgraphState (run_id, scored_items, costs,
-    errors) are passed through to/from the discovery subgraph by name
-    intersection. Keys only in DiscoverySubgraphState (raw_items,
-    clustered_items, stage) stay internal to the subgraph.
+    errors, source_context) are passed through to/from the discovery
+    subgraph by name intersection. Keys only in DiscoverySubgraphState
+    (raw_items, clustered_items, stage) stay internal to the subgraph.
     """
 
     run_id: str
     scored_items: list[ScoredItem]
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
+    source_context: Literal["daily", "sunday"]
     digest_text: str        # populated by assemble_digest, consumed by send_telegram_digest
     digest_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
                                        # assemble_digest, persisted by send_telegram_digest keyed
@@ -136,6 +140,7 @@ def make_daily_initial_state(run_id: str) -> DailyGraphState:
         errors=[],
         digest_text="",
         digest_item_map={},
+        source_context="daily",
     )
 
 
@@ -145,8 +150,9 @@ class SundayGraphState(TypedDict):
     Pipeline: read_trello -> correlate_trello -> classify_item -> assemble_plan
               -> await_approval (Part B) -> write_outputs -> update_profile
 
-    Keys shared with DiscoverySubgraphState (run_id, scored_items, costs, errors)
-    pass through the discovery subgraph by name intersection.
+    Keys shared with DiscoverySubgraphState (run_id, scored_items, costs,
+    errors, source_context) pass through the discovery subgraph by name
+    intersection.
     """
 
     run_id: str
@@ -161,10 +167,9 @@ class SundayGraphState(TypedDict):
                                      # the sent message_id so a later numbered reply resolves
     pending_approvals: list[dict]   # project_proposal items awaiting await_approval
     pending_resumes: Annotated[list[dict], operator.add]   # one entry per proposal_worker Send: {proposal_id, thread_id, message_id}
-    pending_source_candidates: list[dict]   # discover_sources output: {name, feed_url, bucket, sample_keep_rate, sample_reasoning}
-    pending_source_resumes: Annotated[list[dict], operator.add]  # one entry per source_proposal_worker Send
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
+    source_context: Literal["daily", "sunday"]
 
 
 def make_sunday_initial_state(run_id: str) -> SundayGraphState:
@@ -178,8 +183,7 @@ def make_sunday_initial_state(run_id: str) -> SundayGraphState:
         plan_item_map={},
         pending_approvals=[],
         pending_resumes=[],
-        pending_source_candidates=[],
-        pending_source_resumes=[],
         costs=[],
         errors=[],
+        source_context="sunday",
     )
