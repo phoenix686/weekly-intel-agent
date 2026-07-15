@@ -1,5 +1,11 @@
 .env
 .venv/
 __pycache__/
-docs/
 data/
+
+.claude/
+.pre-commit-config.yaml
+feature_list.json
+phase-5b-spec.md
+closeout-spec.md
+session-handoff.md

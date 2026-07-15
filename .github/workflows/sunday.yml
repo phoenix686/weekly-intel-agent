@@ -1,0 +1,48 @@
+name: Sunday Pipeline
+
+on:
+  schedule:
+    # 13:30 UTC = 19:00 IST, Sunday.
+    - cron: "30 13 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: sunday-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-sunday:
+    runs-on: ubuntu-latest
+    # The interrupt() approval gate does NOT keep this job running -- each
+    # proposal pauses on its own dedicated checkpointer thread in Postgres,
+    # and the parent graph (this job) completes normally once every
+    # proposal has been sent, regardless of whether any are still pending
+    # approval. Resuming a paused proposal happens later, in a separate
+    # process, via telegram/polling.py's poll_once() -- not by this job
+    # staying alive. 20 minutes is a safety net against a genuine hang,
+    # not a wait for Telegram replies.
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: "."
+      DB_URI: ${{ secrets.DB_URI }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
+      TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
+      TRELLO_BOARD_ID: ${{ secrets.TRELLO_BOARD_ID }}
+      LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Sunday pipeline
+        run: python scripts/run_sunday.py
