@@ -1,30 +1,34 @@
-# Blog/newsletter source list for scrape_blogs / tldr_ai / smol_ai_news /
-# anthropic_blog. Each entry has a `name`, a `bucket` (daily | sunday), and
-# exactly one of `feed_url` (RSS/Atom, fetched via
+# Blog/newsletter/RSS source list for scrape_blogs (the single generic
+# source-fetching node -- TLDR AI, Smol AI News, and Anthropic's dev blog
+# used to be separate dedicated node files; all sources are RSS/HTML reads
+# through this one config now). Each entry has a `name`, a `bucket`
+# (daily | sunday), and exactly one of `feed_url` (RSS/Atom, fetched via
 # discovery/parsers/rss_common.py) or `scrape_url` (HTML fallback, only
 # used by the Anthropic entry today via discovery/parsers/anthropic_blog.py).
+#
+# bucket=daily entries fire on both daily and sunday invocations.
+# bucket=sunday entries fire on sunday only. See
+# discovery/parsers/scrape_blogs.py's fetch_blog_entries().
 #
 # All entries live-verified 2026-07-15 (real fetch, not assumed from prior
 # commits) via discovery/parsers/rss_common.py's fetch_rss_feed(). Part 7
 # sources were re-verified, not carried over on trust.
 #
-# DecodingML/DecodingAI (https://decodingml.substack.com/feed) was dropped:
-# live-verified 2026-07-15 and found to return a valid but EMPTY RSS
-# channel (0 <item> elements) -- the Substack account now renders as a
-# personal feed ("Vesa Alexandru", itunes:block=Yes), not the Decoding ML
-# publication that was live on 2026-07-10. No working replacement URL
-# found (decodingml.com does not resolve). Flag to Pooja if a new URL for
-# this publication turns up.
+# Smol AI News removed entirely (2026-07-15, explicit instruction) --
+# discovery/nodes/smol_ai_news.py deleted.
+#
+# DecodingML/DecodingAI: the original https://decodingml.substack.com/feed
+# was found dead (valid but empty RSS channel, account renamed to a
+# personal feed) and dropped 2026-07-15. Found and re-verified same day:
+# the publication rebranded to "Decoding AI Magazine" at a custom domain,
+# https://www.decodingai.com/feed -- live-verified, 10 real items
+# returned, no errors.
 #
 # deeplearning.ai / The Batch intentionally excluded -- no public RSS feed,
 # confirmed independently twice.
 
 - name: "TLDR AI"
   feed_url: "https://tldr.tech/api/rss/ai"
-  bucket: daily
-
-- name: "Smol AI News"
-  feed_url: "https://news.smol.ai/rss.xml"
   bucket: daily
 
 - name: "LangChain Blog"
@@ -41,6 +45,10 @@
 
 - name: "Anthropic Engineering Blog"
   scrape_url: "https://www.anthropic.com/engineering"
+  bucket: sunday
+
+- name: "Decoding AI Magazine"
+  feed_url: "https://www.decodingai.com/feed"
   bucket: sunday
 
 - name: "The Nuanced Perspective"

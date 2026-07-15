@@ -6,7 +6,7 @@ from state import DiscoverySubgraphState, RawItem, NodeCost
 
 def scrape_blogs(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
-    result = fetch_blog_entries()
+    result = fetch_blog_entries(state["source_context"])
 
     items: list[RawItem] = []
     for row in result.rows:

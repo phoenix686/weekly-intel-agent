@@ -21,6 +21,16 @@ exist in a fresh checkout) before this fix.
 
 search_web is NOT wired in: its parser (discovery/parsers/search_web.py)
 is still an unconfigured NotImplementedError stub.
+
+scrape_blogs is now the ONLY source node routed here (besides
+process_adhoc_input, sunday-only) -- TLDR AI, Smol AI News, and
+Anthropic's dev blog used to be separate dedicated node files
+(tldr_ai.py, smol_ai_news.py, anthropic_blog.py); now that
+discovery/config/blog_sources.yaml exists as the single source-of-truth
+config, scrape_blogs reads it directly and fetches whatever's active for
+the current invocation's cadence bucket -- see
+discovery/parsers/scrape_blogs.py. Smol AI News was removed entirely
+(not folded in), per explicit instruction.
 """
 
 from __future__ import annotations
@@ -30,27 +40,21 @@ from langgraph.graph import StateGraph, START, END
 from state import DiscoverySubgraphState
 from discovery.nodes.cluster_dedupe import cluster_dedupe_node
 from discovery.nodes.score import score_node
-from discovery.nodes.tldr_ai import tldr_ai
-from discovery.nodes.smol_ai_news import smol_ai_news
 from discovery.nodes.scrape_blogs import scrape_blogs
-from discovery.nodes.anthropic_blog import anthropic_blog
 from sunday.nodes.process_adhoc_input import process_adhoc_input
 
 # Every source node that's part of the scheduled discovery subgraph.
 # ingest_bookmarks deliberately excluded -- see module docstring.
 _ALL_SOURCE_NODES = {
-    "tldr_ai": tldr_ai,
-    "smol_ai_news": smol_ai_news,
     "scrape_blogs": scrape_blogs,
-    "anthropic_blog": anthropic_blog,
     "process_adhoc_input": process_adhoc_input,
 }
 
 # Active node names per invocation context. The single source of truth
-# route_sources reads from -- a new source means one new row here (and in
-# _ALL_SOURCE_NODES above), not a second graph to keep in sync.
-_DAILY_ACTIVE = ["tldr_ai", "smol_ai_news"]
-_SUNDAY_ACTIVE = ["tldr_ai", "smol_ai_news", "scrape_blogs", "anthropic_blog", "process_adhoc_input"]
+# route_sources reads from -- a new source means one new row in
+# discovery/config/blog_sources.yaml, not a new node here.
+_DAILY_ACTIVE = ["scrape_blogs"]
+_SUNDAY_ACTIVE = ["scrape_blogs", "process_adhoc_input"]
 
 
 def route_sources(state: DiscoverySubgraphState) -> list[str]:

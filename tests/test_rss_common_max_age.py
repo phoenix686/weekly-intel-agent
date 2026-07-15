@@ -76,34 +76,38 @@ def test_item_exactly_at_cutoff_boundary_kept():
 
 
 def test_daily_bucket_sources_use_48h_cutoff():
-    """tldr_ai.py / smol_ai_news.py pass max_age_hours=48 to fetch_rss_feed."""
+    """scrape_blogs.py passes max_age_hours=48 to fetch_rss_feed for
+    bucket=daily entries (e.g. TLDR AI)."""
     stale_36h = _NOW - timedelta(hours=36)   # within 48h, kept
     stale_60h = _NOW - timedelta(hours=60)   # outside 48h, dropped
     body = _rss([
         ("Within window", "https://example.com/a", stale_36h),
         ("Outside window", "https://example.com/b", stale_60h),
     ])
-    with patch("urllib.request.urlopen", return_value=_mock_response(body)):
-        from discovery.nodes.tldr_ai import tldr_ai
-        with patch("discovery.nodes.tldr_ai.get_source", return_value={"feed_url": "https://example.com/feed"}):
-            result = tldr_ai({})
+    daily_entry = [{"name": "TLDR AI", "feed_url": "https://example.com/feed", "bucket": "daily"}]
+    with patch("urllib.request.urlopen", return_value=_mock_response(body)), \
+         patch("discovery.parsers.scrape_blogs.entries_for_context", return_value=daily_entry):
+        from discovery.parsers.scrape_blogs import fetch_blog_entries
+        result = fetch_blog_entries("daily")
 
-    titles = [i["title"] for i in result["raw_items"]]
+    titles = [r["title"] for r in result.rows]
     assert titles == ["Within window"]
 
 
 def test_sunday_bucket_sources_use_216h_cutoff():
-    """scrape_blogs.py passes max_age_hours=216 (9 days) to fetch_rss_feed."""
+    """scrape_blogs.py passes max_age_hours=216 (9 days) to fetch_rss_feed
+    for bucket=sunday entries."""
     within = _NOW - timedelta(hours=200)   # within 216h, kept
     outside = _NOW - timedelta(hours=300)  # outside 216h, dropped
     body = _rss([
         ("Within 9 days", "https://example.com/a", within),
         ("Outside 9 days", "https://example.com/b", outside),
     ])
+    sunday_entry = [{"name": "LangChain Blog", "feed_url": "https://example.com/feed", "bucket": "sunday"}]
     with patch("urllib.request.urlopen", return_value=_mock_response(body)), \
-         patch("discovery.parsers.scrape_blogs.feed_urls_for_bucket", return_value=["https://example.com/feed"]):
+         patch("discovery.parsers.scrape_blogs.entries_for_context", return_value=sunday_entry):
         from discovery.parsers.scrape_blogs import fetch_blog_entries
-        result = fetch_blog_entries()
+        result = fetch_blog_entries("sunday")
 
     titles = [r["title"] for r in result.rows]
     assert titles == ["Within 9 days"]
