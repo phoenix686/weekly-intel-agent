@@ -46,10 +46,13 @@ def test_real_build_sunday_graph_excludes_ingest_bookmarks():
 
 
 def test_build_discovery_subgraph_excludes_ingest_bookmarks_both_modes():
-    daily_nodes = build_discovery_subgraph(include_sunday_only=False).get_graph().nodes
-    sunday_nodes = build_discovery_subgraph(include_sunday_only=True).get_graph().nodes
-    assert "ingest_bookmarks" not in daily_nodes
-    assert "ingest_bookmarks" not in sunday_nodes
+    """discovery/graph.py now uses a single subgraph with a real
+    route_sources() conditional entry point (not the earlier
+    build_discovery_subgraph(include_sunday_only) two-graph-shape
+    pattern) -- ingest_bookmarks is simply never registered as a node at
+    all, so it's absent regardless of source_context."""
+    all_nodes = build_discovery_subgraph().get_graph().nodes
+    assert "ingest_bookmarks" not in all_nodes
 
 
 def test_ingest_bookmarks_remains_directly_importable_for_manual_bootstrap():

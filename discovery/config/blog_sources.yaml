@@ -1,0 +1,76 @@
+# Blog/newsletter source list for scrape_blogs / tldr_ai / smol_ai_news /
+# anthropic_blog. Each entry has a `name`, a `bucket` (daily | sunday), and
+# exactly one of `feed_url` (RSS/Atom, fetched via
+# discovery/parsers/rss_common.py) or `scrape_url` (HTML fallback, only
+# used by the Anthropic entry today via discovery/parsers/anthropic_blog.py).
+#
+# All entries live-verified 2026-07-15 (real fetch, not assumed from prior
+# commits) via discovery/parsers/rss_common.py's fetch_rss_feed(). Part 7
+# sources were re-verified, not carried over on trust.
+#
+# DecodingML/DecodingAI (https://decodingml.substack.com/feed) was dropped:
+# live-verified 2026-07-15 and found to return a valid but EMPTY RSS
+# channel (0 <item> elements) -- the Substack account now renders as a
+# personal feed ("Vesa Alexandru", itunes:block=Yes), not the Decoding ML
+# publication that was live on 2026-07-10. No working replacement URL
+# found (decodingml.com does not resolve). Flag to Pooja if a new URL for
+# this publication turns up.
+#
+# deeplearning.ai / The Batch intentionally excluded -- no public RSS feed,
+# confirmed independently twice.
+
+- name: "TLDR AI"
+  feed_url: "https://tldr.tech/api/rss/ai"
+  bucket: daily
+
+- name: "Smol AI News"
+  feed_url: "https://news.smol.ai/rss.xml"
+  bucket: daily
+
+- name: "LangChain Blog"
+  feed_url: "https://blog.langchain.dev/rss.xml"
+  bucket: sunday
+
+- name: "JamWithAI"
+  feed_url: "https://jamwithai.substack.com/feed"
+  bucket: sunday
+
+- name: "Latent Space"
+  feed_url: "https://www.latent.space/feed"
+  bucket: sunday
+
+- name: "Anthropic Engineering Blog"
+  scrape_url: "https://www.anthropic.com/engineering"
+  bucket: sunday
+
+- name: "The Nuanced Perspective"
+  feed_url: "https://thenuancedperspective.substack.com/feed"
+  bucket: sunday
+
+- name: "AI with Aish"
+  feed_url: "https://aishwaryasrinivasan.substack.com/feed"
+  bucket: sunday
+
+- name: "The Neural Maze"
+  feed_url: "https://theneuralmaze.substack.com/feed"
+  bucket: sunday
+
+- name: "ByteByteGo"
+  feed_url: "https://blog.bytebytego.com/feed"
+  bucket: sunday
+
+- name: "MarkTechPost"
+  feed_url: "https://www.marktechpost.com/feed/"
+  bucket: sunday
+
+- name: "Ahead of AI"
+  feed_url: "https://magazine.sebastianraschka.com/feed"
+  bucket: sunday
+
+- name: "Daily Dose of Data Science"
+  feed_url: "https://blog.dailydoseofds.com/feed"
+  bucket: sunday
+
+- name: "The New Stack (AI)"
+  feed_url: "https://thenewstack.io/ai/feed/"
+  bucket: sunday

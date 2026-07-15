@@ -6,7 +6,7 @@ from daily.nodes.send_telegram_digest import send_telegram_digest
 
 
 def build_daily_graph():
-    discovery = build_discovery_subgraph()
+    discovery = build_discovery_subgraph()  # route_sources reads state["source_context"] at runtime
     graph = StateGraph(DailyGraphState)
     graph.add_node("discovery_subgraph", discovery)
     graph.add_node("assemble_digest", assemble_digest)

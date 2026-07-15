@@ -54,8 +54,12 @@ def _parse_date(raw: str) -> str:
         return datetime.now(timezone.utc).isoformat()
 
 
-def fetch_anthropic_engineering(limit: int = 30) -> ParseResult:
+def fetch_anthropic_engineering(url: str = LISTING_URL, limit: int = 30) -> ParseResult:
     """Fetch and parse Anthropic's engineering blog listing page.
+
+    `url` defaults to LISTING_URL but is overridable so the caller can
+    source it from discovery/config/blog_sources.yaml instead of this
+    module's hardcoded constant.
 
     Each successfully parsed entry produces a dict with keys matching
     RawItem's shape minus `source`: title, text (always "" -- the listing
@@ -67,7 +71,7 @@ def fetch_anthropic_engineering(limit: int = 30) -> ParseResult:
     errors: list[tuple[str, str]] = []
 
     try:
-        req = urllib.request.Request(LISTING_URL, headers={"User-Agent": _BROWSER_USER_AGENT})
+        req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_USER_AGENT})
         with urllib.request.urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
 

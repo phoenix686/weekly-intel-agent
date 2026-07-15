@@ -74,10 +74,11 @@ def test_multiple_queued_messages_each_produce_a_raw_item():
 
 
 def test_process_adhoc_input_wired_sunday_only_not_daily():
-    from discovery.graph import build_discovery_subgraph
+    """discovery/graph.py now uses a single subgraph with a real
+    route_sources() conditional entry point, not a two-graph-shape
+    factory -- process_adhoc_input is registered once, and route_sources
+    itself decides per-invocation whether it's active."""
+    from discovery.graph import route_sources
 
-    daily_graph = build_discovery_subgraph(include_sunday_only=False).get_graph()
-    sunday_graph = build_discovery_subgraph(include_sunday_only=True).get_graph()
-
-    assert "process_adhoc_input" not in daily_graph.nodes
-    assert "process_adhoc_input" in sunday_graph.nodes
+    assert "process_adhoc_input" not in route_sources({"source_context": "daily"})
+    assert "process_adhoc_input" in route_sources({"source_context": "sunday"})

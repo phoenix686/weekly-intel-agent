@@ -11,7 +11,7 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 _DC_CREATOR = "{http://purl.org/dc/elements/1.1/}creator"
@@ -38,13 +38,13 @@ def _text(item: ET.Element, tag: str) -> str:
     return child.text.strip()
 
 
-def _parse_pubdate(raw: str) -> str:
+def _parse_pubdate(raw: str) -> datetime:
     if not raw:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(timezone.utc)
     try:
-        return parsedate_to_datetime(raw).astimezone(timezone.utc).isoformat()
+        return parsedate_to_datetime(raw).astimezone(timezone.utc)
     except (TypeError, ValueError):
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(timezone.utc)
 
 
 def _detect_video(description: str) -> tuple[bool, str | None]:
@@ -62,12 +62,26 @@ def _detect_video(description: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def fetch_rss_feed(feed_url: str, source_name: str, limit: int = 30) -> ParseResult:
+def fetch_rss_feed(
+    feed_url: str,
+    source_name: str,
+    limit: int = 30,
+    max_age_hours: int | None = None,
+) -> ParseResult:
     """Fetch and parse a single RSS 2.0 feed into plain row dicts.
 
     Row keys match RawItem's shape minus `source` (the caller sets that):
         title, text, url, author_name, author_handle, fetched_at,
         is_thread, thread_contents, expanded_urls, has_video, video_url
+
+    max_age_hours: when set, an item whose pubDate is older than this many
+    hours is dropped before it's ever returned -- cheaper than parsing it,
+    scoring it, and letting discovery/seen_items.py's cross-run dedup catch
+    it after the fact. This is an additional pre-filter, NOT a replacement
+    for seen_items -- an item within the window can still be a duplicate
+    seen_items needs to catch. Items with a missing/unparseable pubDate
+    fall back to "now" (see _parse_pubdate) and are always kept, since
+    there's no real timestamp to judge staleness against.
 
     Feed-level failures (network error, malformed XML) are appended to
     ParseResult.errors as (source_name, message); rows is empty in that case.
@@ -88,10 +102,21 @@ def fetch_rss_feed(feed_url: str, source_name: str, limit: int = 30) -> ParseRes
         channel = root.find("channel")
         items = channel.findall("item") if channel is not None else root.findall(".//item")
 
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+            if max_age_hours is not None else None
+        )
+
         for item in items[:limit]:
             link = _text(item, "link")
             if not link:
                 continue
+
+            pubdate_raw = _text(item, "pubDate")
+            fetched_dt = _parse_pubdate(pubdate_raw)
+            if cutoff is not None and pubdate_raw and fetched_dt < cutoff:
+                continue
+
             title = _text(item, "title")
             description = _text(item, "description")
             author = _text(item, _DC_CREATOR) or _text(item, "author")
@@ -103,7 +128,7 @@ def fetch_rss_feed(feed_url: str, source_name: str, limit: int = 30) -> ParseRes
                 "url": link,
                 "author_name": author,
                 "author_handle": "",
-                "fetched_at": _parse_pubdate(_text(item, "pubDate")),
+                "fetched_at": fetched_dt.isoformat(),
                 "is_thread": False,
                 "thread_contents": None,
                 "expanded_urls": [],

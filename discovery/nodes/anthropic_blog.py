@@ -1,12 +1,14 @@
 import time
 
 from discovery.parsers.anthropic_blog import fetch_anthropic_engineering
+from discovery.blog_sources_config import get_source
 from state import DiscoverySubgraphState, RawItem, NodeCost
 
 
 def anthropic_blog(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
-    result = fetch_anthropic_engineering()
+    scrape_url = get_source("Anthropic Engineering Blog")["scrape_url"]
+    result = fetch_anthropic_engineering(url=scrape_url)
 
     items: list[RawItem] = []
     for row in result.rows:

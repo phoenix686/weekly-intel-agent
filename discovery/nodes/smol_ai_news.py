@@ -1,14 +1,14 @@
 import time
 
 from discovery.parsers.rss_common import fetch_rss_feed
+from discovery.blog_sources_config import get_source
 from state import DiscoverySubgraphState, RawItem, NodeCost
-
-FEED_URL = "https://news.smol.ai/rss.xml"
 
 
 def smol_ai_news(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
-    result = fetch_rss_feed(FEED_URL, source_name="smol_ai_news")
+    feed_url = get_source("Smol AI News")["feed_url"]
+    result = fetch_rss_feed(feed_url, source_name="smol_ai_news", max_age_hours=48)
 
     items: list[RawItem] = []
     for row in result.rows:
