@@ -50,10 +50,57 @@ class ParseResult:
     errors: list[tuple[str, str]] = field(default_factory=list)
 
 
+@dataclass
+class SourceResult:
+    """Per-source fetch outcome -- lets the node stamp one NodeCost per
+    source (name, error) instead of one per node invocation, now that
+    NodeCost.error exists (state-nodecost-error-field, Checkpoint 1)."""
+    name: str
+    rows: list[dict]
+    error: str | None = None
+
+
+def fetch_one_source(entry: dict) -> SourceResult:
+    """Dispatch a single blog_sources.yaml entry to its fetcher (feed_url
+    -> fetch_rss_feed, scrape_url -> fetch_anthropic_engineering), applying
+    the same per-entry filtering fetch_blog_entries always has (LangChain
+    case-study heuristic, blank-title drop). A fetch failure produces zero
+    rows and a non-None error message -- never raises. Public (not
+    underscore-prefixed): discovery/nodes/scrape_blogs.py calls this
+    directly, one entry at a time, so it can time each source's real fetch
+    latency individually for its own NodeCost record."""
+    if "feed_url" in entry:
+        max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]
+        result = fetch_rss_feed(
+            entry["feed_url"], source_name=entry["name"], max_age_hours=max_age
+        )
+        rows = [
+            row for row in result.rows
+            if row["title"]
+            and not (entry["feed_url"] == _LANGCHAIN_FEED_URL and _is_langchain_case_study(row))
+        ]
+        error = result.errors[0][1] if result.errors else None
+        return SourceResult(name=entry["name"], rows=rows, error=error)
+
+    result = fetch_anthropic_engineering(url=entry["scrape_url"])
+    rows = [row for row in result.rows if row["title"]]
+    error = result.errors[0][1] if result.errors else None
+    return SourceResult(name=entry["name"], rows=rows, error=error)
+
+
+def fetch_blog_entries_per_source(source_context: str) -> list[SourceResult]:
+    """One SourceResult per blog_sources.yaml entry active for
+    source_context ("daily" or "sunday" -- sunday is a superset, see
+    blog_sources_config.entries_for_context). A single failing source
+    never affects another's result -- each entry is fetched and handled
+    independently."""
+    return [fetch_one_source(entry) for entry in entries_for_context(source_context)]
+
+
 def fetch_blog_entries(source_context: str) -> ParseResult:
-    """Fetch every blog_sources.yaml entry active for source_context
-    ("daily" or "sunday" -- sunday is a superset, see
-    blog_sources_config.entries_for_context).
+    """Flat aggregate view over fetch_blog_entries_per_source() -- kept for
+    existing callers (tests/test_rss_common_max_age.py) that only need the
+    combined rows/errors, not per-source granularity.
 
     Each successfully parsed entry produces a dict with keys:
         title, text, url, author_name, author_handle, is_thread,
@@ -64,23 +111,8 @@ def fetch_blog_entries(source_context: str) -> ParseResult:
     """
     rows: list[dict] = []
     errors: list[tuple[str, str]] = []
-
-    for entry in entries_for_context(source_context):
-        if "feed_url" in entry:
-            max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]
-            result = fetch_rss_feed(
-                entry["feed_url"], source_name=entry["name"], max_age_hours=max_age
-            )
-            errors.extend(result.errors)
-            for row in result.rows:
-                if entry["feed_url"] == _LANGCHAIN_FEED_URL and _is_langchain_case_study(row):
-                    continue
-                if not row["title"]:
-                    continue
-                rows.append(row)
-        else:
-            result = fetch_anthropic_engineering(url=entry["scrape_url"])
-            errors.extend((entry["name"], msg) for _, msg in result.errors)
-            rows.extend(row for row in result.rows if row["title"])
-
+    for source_result in fetch_blog_entries_per_source(source_context):
+        rows.extend(source_result.rows)
+        if source_result.error is not None:
+            errors.append((source_result.name, source_result.error))
     return ParseResult(rows=rows, errors=errors)
