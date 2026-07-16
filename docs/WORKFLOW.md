@@ -210,27 +210,22 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **Key exports:** `scrape_blogs(state) -> dict`
 - **Depended on by:** `discovery/graph.py` (once wired — pending Pooja + source confirmation)
 
-### `discovery/parsers/search_web.py`  _(scaffolding only — Parts 1-7)_
-- **What it does:** Parser stub for web search. `run_searches(queries)` raises
-  `NotImplementedError` until search provider is confirmed. Matches `bookmarks_json.py`
-  pattern.
-- **Key exports:** `run_searches(queries: list[str]) -> ParseResult`
-- **Depended on by:** `discovery/nodes/search_web.py`
-
-### `discovery/nodes/search_web.py`  _(scaffolding only — Parts 1-7)_
-- **What it does:** Node wrapper for `run_searches`. `SEARCH_QUERIES` list is empty —
-  pending confirmation of query sourcing strategy. Matches `ingest_bookmarks` pattern.
-- **Key exports:** `search_web(state) -> dict`
-- **Depended on by:** `discovery/graph.py` (once wired — pending Pooja + source confirmation)
+### `discovery/parsers/search_web.py`, `discovery/nodes/search_web.py`  _(RETIRED 2026-07-16)_
+- Deleted entirely (batch2-dedup-taste-spec.md Section 6). Never left
+  NotImplementedError-stub state; blog_sources.yaml's live-verified
+  sources cover the same ground with better signal, lower cost. No
+  remaining reference anywhere in the graph.
 
 ### `discovery/__init__.py`
 - **What it does:** Empty package marker.
 
-### `discovery/graph.py`
-- **What it does:** Compiles the discovery subgraph: `ingest_bookmarks → cluster_dedupe → score`.
-  `process_adhoc_input`, `scrape_blogs`, `search_web` are NOT yet wired — those fan-out
-  branches are Pooja's to add once sources are confirmed.
-- **Key exports:** `build_discovery_subgraph()`, `make_initial_state()`
+### `discovery/graph.py`  _(current shape: see "Checkpoint 5" section below)_
+- **What it does:** Compiles the discovery subgraph with a real
+  `route_sources()` conditional entry point. See the Checkpoint 5 section
+  of this file for the current fan-out shape and cluster_dedupe_node's
+  full pipeline (URL dedup → seen_items → semantic dedup → taste
+  pre-filter).
+- **Key exports:** `build_discovery_subgraph()`, `route_sources()`, `make_initial_state()`
 - **Depended on by:** `daily/graph.py`, `sunday/graph.py`
 
 ### `discovery/parsers/bookmarks_json.py`
@@ -622,9 +617,8 @@ correct.
 
 ## What does NOT exist yet
 
-- **`search_web` provider** — `run_searches` raises `NotImplementedError`. Out of
-  scope per Part 7 (X/search dropped from V1); not wired into `discovery/graph.py`.
-- **Taste profile in LangMem** — currently a static string in `score.py`.
+- **Taste profile in LangMem** — currently a plain YAML file, read/written by
+  `sunday/approval_actions.py`.
 - Numeric score field on `ScoredItem`, tag feedback loop — deferred.
 - **`resume-live-check`** (Checkpoint 3) — a real Telegram approve/reject
   round-trip against a real paused Sunday proposal, confirming `poll.yml`'s

@@ -19,8 +19,11 @@ scripts/save_clustered.py. Wiring it into a scheduled run caused a real
 production FileNotFoundError on data/tweets.json (gitignored, doesn't
 exist in a fresh checkout) before this fix.
 
-search_web is NOT wired in: its parser (discovery/parsers/search_web.py)
-is still an unconfigured NotImplementedError stub.
+search_web is retired entirely (batch2-dedup-taste-spec.md Section 6,
+2026-07-16): discovery/nodes/search_web.py and
+discovery/parsers/search_web.py deleted. blog_sources.yaml's live-verified
+sources cover the same ground with better signal and lower cost -- no
+distinct remaining job for it.
 
 scrape_blogs is now the ONLY source node routed here (besides
 process_adhoc_input, sunday-only) -- TLDR AI, Smol AI News, and
