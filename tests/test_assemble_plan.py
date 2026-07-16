@@ -7,9 +7,9 @@ RUN_ID = "abc12345-0000-0000-0000-000000000000"
 
 
 def _plan_item(matched_card_id=None, title="A title", reasoning="Good content.",
-               url="https://example.com"):
+               url="https://example.com", text="body text"):
     return {
-        "url": url, "title": title, "reasoning": reasoning,
+        "url": url, "title": title, "text": text, "reasoning": reasoning,
         "classification": "plan_item", "proposal_type": None,
         "classification_reasoning": "routed as plan_item",
         "matched_card_id": matched_card_id, "tags": ["agentic-engineering"],
@@ -18,7 +18,7 @@ def _plan_item(matched_card_id=None, title="A title", reasoning="Good content.",
 
 def _proposal(title="New project idea"):
     return {
-        "url": "https://example.com/proposal", "title": title,
+        "url": "https://example.com/proposal", "title": title, "text": "body text",
         "reasoning": "Interesting new direction.", "classification": "project_proposal",
         "proposal_type": "new", "classification_reasoning": "new scope",
         "matched_card_id": None, "tags": ["side-projects"],
@@ -32,45 +32,46 @@ def _card(card_id="card1", name="My Trello Card"):
 # ── Zero-items fallbacks ──────────────────────────────────────────────────────
 
 def test_zero_plan_items_zero_proposals_fallback():
-    result = format_plan([], 0, RUN_ID, [])
-    assert result == "📋 *Weekly Plan*\n\n_Nothing on the plan this week._"
+    text, item_map = format_plan([], 0, RUN_ID, [])
+    assert text == "📋 *Weekly Plan*\n\n_Nothing on the plan this week._"
+    assert item_map == {}
 
 
 def test_zero_plan_items_with_proposals_includes_clause():
-    result = format_plan([_proposal()], 2, RUN_ID, [])
-    assert "Nothing on the plan this week." in result
-    assert "2 proposals pending approval" in result
-    assert "check Telegram" in result
+    text, item_map = format_plan([_proposal()], 2, RUN_ID, [])
+    assert "Nothing on the plan this week." in text
+    assert "2 proposals pending approval" in text
+    assert "check Telegram" in text
 
 
 def test_zero_plan_items_zero_proposals_no_proposal_clause():
-    result = format_plan([], 0, RUN_ID, [])
-    assert "proposals" not in result
+    text, item_map = format_plan([], 0, RUN_ID, [])
+    assert "proposals" not in text
 
 
 # ── Section routing ───────────────────────────────────────────────────────────
 
 def test_proposals_excluded_from_output():
     items = [_plan_item(title="Keep me"), _proposal(title="Skip me")]
-    result = format_plan(items, 1, RUN_ID, [])
-    assert "Keep me" in result
-    assert "Skip me" not in result
+    text, item_map = format_plan(items, 1, RUN_ID, [])
+    assert "Keep me" in text
+    assert "Skip me" not in text
 
 
 def test_unmatched_item_in_reading_section_only():
     items = [_plan_item(matched_card_id=None, title="Read this")]
-    result = format_plan(items, 0, RUN_ID, [])
-    assert "**Reading & Learning**" in result
-    assert "Read this" in result
-    assert "**Existing Project Work**" not in result
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "**Reading & Learning**" in text
+    assert "Read this" in text
+    assert "**Existing Project Work**" not in text
 
 
 def test_matched_item_in_project_section_only():
     items = [_plan_item(matched_card_id="card1", title="Continue this")]
-    result = format_plan(items, 0, RUN_ID, [_card("card1")])
-    assert "**Existing Project Work**" in result
-    assert "Continue this" in result
-    assert "**Reading & Learning**" not in result
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert "**Existing Project Work**" in text
+    assert "Continue this" in text
+    assert "**Reading & Learning**" not in text
 
 
 def test_both_sections_present_when_both_types_exist():
@@ -78,10 +79,10 @@ def test_both_sections_present_when_both_types_exist():
         _plan_item(matched_card_id=None, title="Article A"),
         _plan_item(matched_card_id="card1", title="Project B"),
     ]
-    result = format_plan(items, 0, RUN_ID, [_card("card1")])
-    assert "**Reading & Learning**" in result
-    assert "**Existing Project Work**" in result
-    assert result.index("Article A") < result.index("Project B")
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert "**Reading & Learning**" in text
+    assert "**Existing Project Work**" in text
+    assert text.index("Article A") < text.index("Project B")
 
 
 # ── Numbering ─────────────────────────────────────────────────────────────────
@@ -91,65 +92,65 @@ def test_items_numbered_sequentially_across_sections():
         _plan_item(matched_card_id=None, title="Article A"),
         _plan_item(matched_card_id="card1", title="Project B"),
     ]
-    result = format_plan(items, 0, RUN_ID, [_card("card1")])
-    assert "1. [Article A]" in result
-    assert "2. [Project B]" in result
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert "1. [Article A]" in text
+    assert "2. [Project B]" in text
 
 
 # ── Card name resolution ──────────────────────────────────────────────────────
 
 def test_card_name_appended_for_matched_item():
     items = [_plan_item(matched_card_id="card1", reasoning="Builds on prior work.")]
-    result = format_plan(items, 0, RUN_ID, [_card("card1", "Weekly Intel Agent")])
-    assert 'continues card: "Weekly Intel Agent"' in result
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1", "Weekly Intel Agent")])
+    assert 'continues card: "Weekly Intel Agent"' in text
 
 
 def test_unknown_card_id_falls_back_to_id_string():
     items = [_plan_item(matched_card_id="ghost-id")]
-    result = format_plan(items, 0, RUN_ID, [])
-    assert 'continues card: "ghost-id"' in result
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert 'continues card: "ghost-id"' in text
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────
 
 def test_underscore_escaping_in_reasoning():
     items = [_plan_item(reasoning="Uses score_node and run_id.")]
-    result = format_plan(items, 0, RUN_ID, [])
-    assert r"score\_node" in result
-    assert r"run\_id" in result
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert r"score\_node" in text
+    assert r"run\_id" in text
 
 
 def test_reasoning_wrapped_in_italic():
     items = [_plan_item(reasoning="This is the reasoning.")]
-    result = format_plan(items, 0, RUN_ID, [])
-    assert "_This is the reasoning._" in result
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "_This is the reasoning._" in text
 
 
 def test_title_truncated_to_80_chars():
     items = [_plan_item(title="A" * 100)]
-    result = format_plan(items, 0, RUN_ID, [])
-    assert "A" * 80 in result
-    assert "A" * 81 not in result
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "A" * 80 in text
+    assert "A" * 81 not in text
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 
 def test_footer_plan_count_and_run_id():
     items = [_plan_item(), _plan_item()]
-    result = format_plan(items, 0, RUN_ID, [])
-    assert "2 plan items" in result
-    assert "run: abc12345" in result
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "2 plan items" in text
+    assert "run: abc12345" in text
 
 
 def test_footer_omits_proposal_clause_when_zero():
-    result = format_plan([_plan_item()], 0, RUN_ID, [])
-    assert "proposals" not in result
+    text, item_map = format_plan([_plan_item()], 0, RUN_ID, [])
+    assert "proposals" not in text
 
 
 def test_footer_includes_proposal_clause_when_nonzero():
-    result = format_plan([_plan_item()], 3, RUN_ID, [])
-    assert "3 proposals pending approval" in result
-    assert "·" in result
+    text, item_map = format_plan([_plan_item()], 3, RUN_ID, [])
+    assert "3 proposals pending approval" in text
+    assert "·" in text
 
 
 def test_missing_title_falls_back_to_text():
@@ -159,5 +160,28 @@ def test_missing_title_falls_back_to_text():
         "proposal_type": None, "classification_reasoning": "routed as plan_item",
         "matched_card_id": None, "tags": ["agentic-engineering"],
     }
-    result = format_plan([item], 0, RUN_ID, [])
-    assert "Full body text used as fallback title." in result
+    text, item_map = format_plan([item], 0, RUN_ID, [])
+    assert "Full body text used as fallback title." in text
+
+
+# ── item_map (untested before this fix -- these tests never exercised the
+# second half of the tuple return, even before it broke) ──────────────────────
+
+def test_item_map_keyed_by_display_number_with_correct_fields():
+    items = [_plan_item(title="Article A", url="https://a.example.com", text="article body")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert set(item_map.keys()) == {1}
+    assert item_map[1]["url"] == "https://a.example.com"
+    assert item_map[1]["title"] == "Article A"
+    assert item_map[1]["text"] == "article body"
+
+
+def test_item_map_numbering_continues_across_both_sections():
+    items = [
+        _plan_item(matched_card_id=None, title="Article A"),
+        _plan_item(matched_card_id="card1", title="Project B"),
+    ]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert set(item_map.keys()) == {1, 2}
+    assert item_map[1]["title"] == "Article A"
+    assert item_map[2]["title"] == "Project B"
