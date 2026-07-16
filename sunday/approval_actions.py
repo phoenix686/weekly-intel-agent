@@ -30,9 +30,26 @@ from sunday.same_day_nudge import apply_nudge
 logger = logging.getLogger(__name__)
 
 _FEEDBACK_NAMESPACE = ("weekly_intel", "feedback_events")
+_APPROVAL_LOG_NAMESPACE = ("weekly_intel", "approval_log")
 
 
-def handle_approval(item: dict, thread_id: str) -> None:
+def _log_approval_outcome(item_id: str, outcome: str, run_id: str) -> None:
+    """Logs BOTH approved and rejected proposal outcomes (closeout-spec.md
+    Section 4 point 2) -- previously only rejections were recorded
+    (rejection_event). A failed write here must never block the real
+    Trello/feedback action it's attached to (Section 7's reliability
+    requirement), so it's caught and logged, not raised."""
+    try:
+        get_store().put(
+            _APPROVAL_LOG_NAMESPACE,
+            str(uuid.uuid4()),
+            {"item_id": item_id, "outcome": outcome, "run_id": run_id},
+        )
+    except Exception as e:
+        logger.warning(f"approval_log write failed for {item_id} (outcome={outcome}, run={run_id}): {e}")
+
+
+def handle_approval(item: dict, thread_id: str, run_id: str) -> None:
     """Creates or updates the relevant Trello card, sends Telegram confirmation."""
     if item.get("proposal_type") == "extend" and item.get("matched_card_id"):
         card = update_trello_card(item["matched_card_id"], desc=item["reasoning"])
@@ -42,6 +59,7 @@ def handle_approval(item: dict, thread_id: str) -> None:
         card = create_trello_card(title, get_dump_list_id(), item["reasoning"])
         send_message(f"✅ Created new card: {card['name']}\n{card['url']}")
     logger.info(f"handle_approval: processed approval for {item.get('url')}")
+    _log_approval_outcome(item.get("url"), "approved", run_id)
 
 
 def handle_feedback(item: dict, feedback_text: str, sentiment: str, run_id: str) -> None:
@@ -86,5 +104,9 @@ def handle_feedback(item: dict, feedback_text: str, sentiment: str, run_id: str)
 def handle_rejection(item: dict, run_id: str) -> None:
     """Proposal rejection -- always negative signal. Thin wrapper over
     handle_feedback, kept so existing callers (telegram/polling.py) don't
-    need to change."""
+    need to change. Also logs the rejected outcome to approval_log
+    (closeout-spec.md Section 4 point 2) -- separate from feedback_events,
+    since that namespace is shared with non-proposal digest/plan feedback
+    and doesn't distinguish a proposal's approve/reject outcome on its own."""
     handle_feedback(item, feedback_text="rejected proposal", sentiment="negative", run_id=run_id)
+    _log_approval_outcome(item.get("url"), "rejected", run_id)

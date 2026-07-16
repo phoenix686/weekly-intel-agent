@@ -2,12 +2,41 @@
 import time
 import json
 import logging
+import uuid
 import anthropic
 
 from state import SundayGraphState, NodeCost
+from sunday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic()
+
+_CLASSIFICATION_LOG_NAMESPACE = ("weekly_intel", "classification_log")
+
+
+def _log_classifications(items: list[dict], run_id: str) -> None:
+    """Log every classify_item decision (plan_item AND project_proposal
+    alike, per closeout-spec.md Section 4 point 1) to the store, so
+    plan_item decisions -- the majority of all items, since they bypass
+    the approval gate by design -- stop leaving zero trace. A failed
+    write here must never block the node's real return value (per
+    closeout-spec.md Section 7's reliability requirement), so every
+    failure is caught and logged, not raised."""
+    store = get_store()
+    for item in items:
+        try:
+            store.put(
+                _CLASSIFICATION_LOG_NAMESPACE,
+                str(uuid.uuid4()),
+                {
+                    "item_id": item["url"],
+                    "decision": item["classification"],
+                    "proposal_type": item["proposal_type"],
+                    "run_id": run_id,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"classify_item: classification_log write failed for {item['url']} (run={run_id}): {e}")
 
 CLASSIFY_PROMPT = """You are classifying scored, Trello-correlated items into two categories for a weekly planning agent.
 
@@ -136,12 +165,14 @@ def classify_item(state: SundayGraphState) -> dict:
                 cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
                 latency_ms=round((time.perf_counter() - t0) * 1000, 2),
             )
+            fallback_items = [
+                {**item, "classification": "plan_item", "proposal_type": None,
+                 "classification_reasoning": "fallback: JSON parse failed"}
+                for item in state["correlated_items"]
+            ]
+            _log_classifications(fallback_items, state["run_id"])
             return {
-                "classified_items": [
-                    {**item, "classification": "plan_item", "proposal_type": None,
-                     "classification_reasoning": "fallback: JSON parse failed"}
-                    for item in state["correlated_items"]
-                ],
+                "classified_items": fallback_items,
                 "pending_approvals": [],
                 "costs": [cost],
                 "errors": state["errors"] + [f"classify_item JSON parse failed after retry (run_id={state['run_id']})"],
@@ -163,6 +194,8 @@ def classify_item(state: SundayGraphState) -> dict:
         f"classify_item: {len(classified_items) - len(pending_approvals)} plan_items, "
         f"{len(pending_approvals)} proposals (run_id={state['run_id']})"
     )
+
+    _log_classifications(classified_items, state["run_id"])
 
     cost = NodeCost(
         node_name="classify_item",

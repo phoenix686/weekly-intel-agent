@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Checkpoint 3 (resume + ad-hoc polling)
+Last updated: Checkpoint 4 closeout + scrape-blogs-node fix (see bottom sections)
 
 ## Scheduled runs (GitHub Actions)
 
@@ -775,6 +775,88 @@ each verified for real rather than assumed:
   `score-eval-script`, `ingest-bookmarks-ci-removal`). All 5 Checkpoint 5
   features (plus the newly added `stage-field-progression`) are passing.
 
+## scrape-blogs-node fix + Checkpoint 4 closeout (full delegation, CLAUDE.md Section 8)
+
+### `discovery/parsers/scrape_blogs.py`, `discovery/nodes/scrape_blogs.py`
+`scrape-blogs-node` (Checkpoint 2) had sat `in_progress` on a stale
+blocker: its own evidence said `NodeCost` had no `error` field yet, but
+that field shipped and passed back in Checkpoint 1 -- the node was simply
+never updated to use it, still emitting one aggregate `NodeCost` per node
+invocation instead of one per source. Added `fetch_one_source(entry)`
+(dispatches ONE `blog_sources.yaml` entry, never raises) and
+`fetch_blog_entries_per_source()` to the parser; the node now loops
+`entries_for_context()` directly, timing each source's real fetch
+individually and stamping one `NodeCost` per source (`error` set via
+`NodeCost.error` on failure). `fetch_blog_entries()` kept as a thin
+aggregate wrapper for existing callers. Verified live against the real
+`blog_sources.yaml` (all 12 sources, sunday context): 12 `NodeCost`
+records, 58 real `raw_items`, real per-source latencies 298ms-2063ms. A
+deliberately-broken URL, checked directly against `fetch_one_source()`,
+produced a real network error and zero rows with no effect on a real
+working source run in the same process.
+
+### `sunday/nodes/classify_item.py`
+`classification-decision-logging` (Checkpoint 4, closeout-spec.md Section
+4 point 1): every classify_item decision -- `plan_item` and
+`project_proposal` alike, including the JSON-parse-failure fallback path
+-- now logs `{item_id, decision, proposal_type, run_id}` to
+`("weekly_intel","classification_log")`. Closes the blind spot where
+`plan_item` decisions (the majority of all items, since they bypass the
+approval gate by design) left zero trace. Store write wrapped in
+try/except, never blocks the node's real return value. Verified live: a
+real Haiku call classified one routine item as `plan_item` and one
+structurally-new item as `project_proposal`; both landed as real, separate
+`classification_log` entries.
+
+### `sunday/approval_actions.py`, `telegram/polling.py`
+`approval-outcome-logging` (Checkpoint 4, closeout-spec.md Section 4 point
+2): the spec's original target file, `write_outputs.py`, no longer
+exists (removed entirely in the Parts 1-7 rewrite) -- its logic lives in
+`handle_approval`/`handle_rejection` now, so the fix landed there instead
+of assuming the old spec's file layout still applied. Added
+`_log_approval_outcome(item_id, outcome, run_id)`, writing
+`{item_id, outcome, run_id}` to `("weekly_intel","approval_log")`, called
+from both `handle_approval` (`outcome="approved"`) and `handle_rejection`
+(`outcome="rejected"`, alongside its existing `feedback_events` write --
+kept separate since that namespace doesn't itself distinguish a
+proposal's approve/reject outcome). `handle_approval` gained a `run_id`
+parameter it was previously missing entirely; its one real caller
+(`telegram/polling.py`'s `_handle_approval_reply`) now passes it through.
+Verified live (Trello/Telegram calls mocked -- creating a real card or
+sending a real message isn't something a smoke test should do unprompted
+-- store itself real): one approved and one rejected proposal produced
+two real, distinct `approval_log` entries.
+
+### `eval/score_eval.py`, `eval/labeled_set.json`
+`score-eval-script` (Checkpoint 4, closeout-spec.md Section 3) -- **script
+complete, deliberately NOT marked passing.** Per CLAUDE.md Section 8's
+standing exception, label content is Pooja's judgment call, not Claude
+Code's to invent, so `eval/labeled_set.json` ships empty (`[]`). Schema:
+`{item_id, correct_decision: "keep"|"drop", correct_tags: [...], notes}`,
+`item_id` must match a `url` in `data/scored_items.json` (the real
+510-item bootstrap run). `score_eval.py` loads the labeled set, joins
+against `data/scored_items.json`, re-runs score_node's own `_score_batch`
+(reused directly, not reimplemented, so this eval can't silently drift
+from production), reports `keep_accuracy` and `mean_tag_overlap`; raises
+(not silently skips) on a labeled `item_id` missing from source data.
+Verified: against the real (empty) `labeled_set.json` it correctly prints
+a "nothing to do" message rather than a fake number. A throwaway,
+NOT-committed 3-item demo (using each item's own prior score_node
+decision as a mechanical self-consistency check, not a real correctness
+claim) run through the real pipeline with a real Haiku call produced a
+genuine, non-placeholder result: `keep_accuracy=100.00%`,
+`mean_tag_overlap=100.00%`, real tokens input=818/output=190. Awaiting
+Pooja to fill in real labels before this can mean anything as an actual
+eval.
+
+### `ingest-bookmarks-ci-removal` (Checkpoint 4) -- already satisfied
+No code change needed. `ingest_bookmarks` was already absent from
+`.github/workflows/daily.yml`/`sunday.yml`/`poll.yml` (confirmed by grep
+across every `.yml`/`.yaml` in the repo) as a side effect of the Phase 5B
+`route_sources` rebuild, which never registered it as a graph node in the
+first place. `tests/test_ingest_bookmarks_gating.py` (4/4) re-confirms
+this against the real compiled graphs.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
@@ -794,6 +876,8 @@ actual code, not assumed from the spec's prior draft).
 | `prefilter_drops` | `{item_id, filter_type: "dedup"\|"taste", similarity_score, compared_against_item_id, compared_against_tag, run_id}` | `discovery/semantic_dedup.py`, `discovery/taste_vectors.py` | audit log only -- no reader yet |
 | `same_day_adjustments` | `{tag, cumulative_adjustment, item_ids_contributing, week_of}` | `sunday/same_day_nudge.py` | `sunday/nodes/update_profile.py` (cleared weekly; not yet consumed to influence live scoring/pre-filter comparisons -- spec Section 7 scopes this namespace's build to storage/computation/clearing only, no consumer described) |
 | `rejection_events` | **KNOWN-DEAD** -- orphaned, no schema in production use | `scripts/test_update_profile_rejections.py` only (manual test script) | none in production |
+| `classification_log` | `{item_id, decision: "plan_item"\|"project_proposal", proposal_type, run_id}` | `sunday/nodes/classify_item.py` (every item, not just proposals) | future eval work (`classify_item` eval, not yet built) |
+| `approval_log` | `{item_id, outcome: "approved"\|"rejected", run_id}` | `sunday/approval_actions.py` (`handle_approval`, `handle_rejection`) | future eval work (`classify_item` eval, not yet built) |
 
 ## What does NOT exist yet
 

@@ -101,7 +101,7 @@ def _handle_approval_reply(reply_msg_id: str, text: str, record: dict, store) ->
     )
 
     if decision == "approve":
-        handle_approval(result, thread_id)
+        handle_approval(result, thread_id, run_id)
     else:
         handle_rejection(result, run_id)
 
