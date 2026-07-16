@@ -41,7 +41,7 @@
 
 - name: "Latent Space"
   feed_url: "https://www.latent.space/feed"
-  bucket: sunday
+  bucket: daily
 
 - name: "Anthropic Engineering Blog"
   scrape_url: "https://www.anthropic.com/engineering"
@@ -63,22 +63,14 @@
   feed_url: "https://theneuralmaze.substack.com/feed"
   bucket: sunday
 
-- name: "ByteByteGo"
-  feed_url: "https://blog.bytebytego.com/feed"
-  bucket: sunday
-
 - name: "MarkTechPost"
   feed_url: "https://www.marktechpost.com/feed/"
-  bucket: sunday
+  bucket: daily
 
 - name: "Ahead of AI"
   feed_url: "https://magazine.sebastianraschka.com/feed"
   bucket: sunday
 
-- name: "Daily Dose of Data Science"
-  feed_url: "https://blog.dailydoseofds.com/feed"
-  bucket: sunday
-
 - name: "The New Stack (AI)"
   feed_url: "https://thenewstack.io/ai/feed/"
-  bucket: sunday
+  bucket: daily
