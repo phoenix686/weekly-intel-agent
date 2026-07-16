@@ -89,6 +89,9 @@ def _dedupe(raw_items: list[RawItem]) -> list[ClusteredItem]:
     return result
 
 
+_ADHOC_SOURCE = "adhoc_telegram"
+
+
 def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
     clustered = _dedupe(state["raw_items"])
@@ -105,13 +108,24 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
         cost_usd=0.0
     )]
 
-    deduped, semantic_costs = dedupe_semantic(unseen)
+    # Ad-hoc items bypass both the semantic dedup and taste pre-filter
+    # entirely (batch2-dedup-taste-spec.md Section 10) -- something Pooja
+    # personally chose to text the bot about is maximally relevant and
+    # opted-in by construction, never embedded, never persisted as a
+    # dedup target. A single source-based split here, not a duplicated
+    # check inside each filter.
+    adhoc_items = [item for item in unseen if item["source"] == _ADHOC_SOURCE]
+    filterable_items = [item for item in unseen if item["source"] != _ADHOC_SOURCE]
+
+    run_id = state["run_id"]
+
+    deduped, semantic_costs = dedupe_semantic(filterable_items, run_id)
     costs.extend(semantic_costs)
 
-    relevant, taste_costs = taste_prefilter(deduped)
+    relevant, taste_costs = taste_prefilter(deduped, run_id)
     costs.extend(taste_costs)
 
     return {
-        "clustered_items": relevant,
+        "clustered_items": relevant + adhoc_items,
         "costs": costs,
     }
