@@ -637,15 +637,25 @@ correct.
 Scope: `batch2-dedup-taste-spec.md`. Built across two passes -- an initial
 pass against Voyage AI that a mid-checkpoint investigation (the spec's own
 Section 0) found had drifted from the locked spec (embedding provider,
-Section 7's whole taste-update design), and a second pass that corrected
-both after explicit confirmation.
+Section 7's whole taste-update design), and further passes as the
+embedding provider itself changed twice more: Voyage -> Gemini (abandoned
+after a multi-hour live debugging session against a real, correctly
+configured key -- unresolved 429/API_KEY_INVALID errors from the very
+first request) -> local `sentence-transformers` (final decision, no
+external account/key/billing tier of any kind).
 
 ### `discovery/embeddings.py`
-- Gemini (`gemini-embedding-001` via Google AI Studio) embedding wrapper,
-  shared by dedup, taste pre-filter, and topic-vector recompute.
-  `COST_PER_TOKEN_USD = 0.0` (real free-tier pricing, not a placeholder).
-  Response shape (`.embeddings[i].values`) verified directly against the
-  installed `google-genai` SDK's source, not guessed.
+- Local `sentence-transformers` (`all-MiniLM-L6-v2`) embedding wrapper,
+  shared by dedup, taste pre-filter, and topic-vector recompute. No API
+  key, no account, no billing tier -- the entire category of problem that
+  cost hours with Gemini doesn't exist for a local model.
+  `COST_PER_TOKEN_USD = 0.0` (local compute, not billed).
+  `total_tokens` is real, summed from the model's own `attention_mask`
+  (not padded batch width). 384-dimension vectors -- confirmed no
+  downstream code hardcodes a dimension. `torch` pinned to the CPU-only
+  build in `requirements.txt` (`torch==2.13.0+cpu` via
+  `--extra-index-url`) -- GitHub Actions runners have no GPU, and a bare
+  version pin risks pip resolving the default (much larger) CUDA build.
 
 ### `discovery/semantic_dedup.py`
 - Cross-source/cross-run dedup: embeds title+text, cosine >=0.90 against a
@@ -696,6 +706,26 @@ both after explicit confirmation.
   (`sys.stdout.reconfigure(encoding="utf-8")`) blocking the script from
   completing at all.
 
+### Embedding provider -- final resolution
+- Landed on local `sentence-transformers` (`all-MiniLM-L6-v2`) after
+  Voyage AI and Gemini were both tried and abandoned this checkpoint
+  (Gemini specifically: real key, real project, correct format, still an
+  unresolved 429/API_KEY_INVALID from the very first request after
+  hours of live debugging). `.github/workflows/daily.yml` and
+  `sunday.yml` (the two workflows that run `discovery/scrape_blogs`) cache
+  both the pip package cache and the HuggingFace model-weights cache
+  directory. `requirements.txt` pins `torch==2.13.0+cpu` via
+  `--extra-index-url https://download.pytorch.org/whl/cpu` -- verified
+  against a genuinely fresh venv with real `pip` (not `uv`), confirming
+  `torch.cuda.is_available() == False` and the resolved version string
+  ends in `+cpu`, not the ~500MB-larger default CUDA build.
+- All four previously GEMINI_API_KEY-blocked features
+  (`semantic-dedup-embeddings`, `taste-similarity-prefilter`,
+  `topic-vector-recompute`, `sunday-consolidated-taste-rewrite`) are now
+  live-verified against this local model and the real Supabase Postgres
+  store -- see `feature_list.json` for evidence. No external account, key,
+  or secret involved anywhere in this provider.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
@@ -729,11 +759,6 @@ actual code, not assumed from the spec's prior draft).
   at least commit `78b0869`, Phase 1); found while re-running
   `smoke_test_phase0.py` for this checkpoint's node-count fix, flagged
   rather than silently patched since it's outside this checkpoint's scope.
-- **Live verification of every Gemini-embedding-dependent feature** —
-  `GEMINI_API_KEY` is not present in this environment; graceful-degradation
-  paths are confirmed working for real (a live smoke test run showed every
-  item correctly passing through unfiltered on embed failure), but no real
-  embedding has ever actually been computed.
 - **`resume-live-check`** (Checkpoint 3) — a real Telegram approve/reject
   round-trip against a real paused Sunday proposal, confirming `poll.yml`'s
   next run actually resumes the graph and writes the correct Trello outcome.

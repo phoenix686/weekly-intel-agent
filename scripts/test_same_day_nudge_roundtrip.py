@@ -1,8 +1,8 @@
 """
 Real-store smoke test for sunday/same_day_nudge.py, same pattern as
-scripts/test_pending_resume_map_roundtrip.py: no embedding dependency
-(same_day_nudge only calls Haiku, not Gemini), so this can be verified
-live right now even while GEMINI_API_KEY is absent. Writes real data
+scripts/test_pending_resume_map_roundtrip.py: no embedding dependency at
+all (same_day_nudge only calls Haiku), so this has never needed an
+embedding provider to verify. Writes real data
 under a throwaway tag/item_id to the live same_day_adjustments namespace,
 verifies, then deletes what it wrote.
 

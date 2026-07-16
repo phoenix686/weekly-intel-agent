@@ -1,75 +1,82 @@
 """
-Gemini embedding client wrapper (gemini-embedding-001 via Google AI
-Studio), per batch2-dedup-taste-spec.md Section 3. Shared by semantic
-dedup (discovery/semantic_dedup.py), the taste-similarity pre-filter
-(discovery/taste_vectors.py), and the Sunday consolidated taste-profile
-rewrite's topic-vector recompute (sunday/nodes/update_profile.py, via
-discovery/taste_vectors.recompute_topic_vectors).
+Local sentence-transformers embedding wrapper (all-MiniLM-L6-v2), per
+batch2-dedup-taste-spec.md Section 3 -- final provider decision. History,
+stated plainly so this doesn't get re-litigated: Voyage AI was the
+original choice (replaced for a better free-tier shape), then
+gemini-embedding-001 (abandoned after a multi-hour live debugging
+session -- confirmed real key, confirmed correct project, confirmed
+correct key format -- the very first real API request still returned an
+unresolved 429/API_KEY_INVALID class of error). Cohere and HuggingFace's
+Inference Providers were both considered next and rejected for the same
+underlying risk category (opaque free-tier caps, real reports of
+accounts hitting unexpected errors on steady low usage) before landing
+here.
 
-Requires GEMINI_API_KEY in the environment -- not committed, added as a
-GitHub Secret separately (see CLAUDE.md Section 8).
+Local is the deliberate final choice, not a fallback: no API key, no
+account, no billing tier, no credit balance that can silently run out or
+misconfigure -- the entire category of problem that cost hours with
+Gemini does not exist for a local model. Same model this project's
+original reference script used.
 
-COST_PER_TOKEN_USD is 0.0: Google AI Studio's free tier (10M
-tokens/minute, recurring, not a depleting cap -- see spec Section 3) has
-no per-token charge at this project's volume, as long as billing stays
-off the backing Google Cloud project. This is a deliberate reflection of
-real pricing, not a placeholder.
+Shared by semantic dedup (discovery/semantic_dedup.py), the
+taste-similarity pre-filter (discovery/taste_vectors.py), and topic-vector
+recompute (discovery/taste_vectors.recompute_topic_vectors, called from
+sunday/nodes/update_profile.py's Sunday consolidated rewrite).
 
-Response shape verified directly against the installed google-genai SDK
-(2.12.0) source, not guessed: EmbedContentResponse.embeddings is a
-list[ContentEmbedding], each with .values (list[float]). Per-call token
-counts are genuinely unavailable here -- ContentEmbeddingStatistics.
-token_count is documented in the SDK itself as "Gemini Enterprise Agent
-Platform only", not populated on the standard AI Studio API this project
-uses -- so embed_texts returns 0 for total_tokens, a confirmed fact about
-the API surface, not an unverified guess pending a live key.
+No API key, no secret, no environment variable required.
+
+COST_PER_TOKEN_USD is 0.0: local compute, not a billed API call.
+total_tokens IS real (via the model's own attention_mask, not padded
+length -- confirmed by direct inspection: a 2-text batch with one 5-token
+and one 9-token real input pads input_ids to a shared width of 9, but
+attention_mask.sum(dim=1) correctly recovers [5, 9], not [9, 9]).
+
+Model produces 384-dimension vectors -- different from both Voyage's and
+Gemini's. No downstream code hardcodes a dimension: cosine_similarity
+uses zip() over arbitrary-length lists, store schemas hold
+embedding_vector as an opaque list[float], all tests mock
+embed_text/embed_texts directly -- confirmed isolated swap.
+
+`torch` is sentence-transformers' hard dependency -- requirements.txt
+pins the CPU-only build explicitly (this runs in GitHub Actions, no
+GPU). Model weights (~80-90MB) download on first use per machine/cache --
+see .github/workflows/daily.yml and sunday.yml for the HuggingFace
+cache-directory caching this requires in CI, alongside the pip cache.
 
 No langgraph imports.
 """
 
 from __future__ import annotations
 
-import os
+from sentence_transformers import SentenceTransformer
 
-from google import genai
-from google.genai import types
+MODEL_NAME = "all-MiniLM-L6-v2"
+COST_PER_TOKEN_USD = 0.0  # local compute, not a billed API call
 
-MODEL = "gemini-embedding-001"
-COST_PER_TOKEN_USD = 0.0  # Google AI Studio free tier -- see module docstring
-
-_client: genai.Client | None = None
+_model: SentenceTransformer | None = None
 
 
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    return _client
+def _get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(MODEL_NAME)
+    return _model
 
 
 def embed_texts(texts: list[str]) -> tuple[list[list[float]], int]:
-    """Embeds a batch of texts. Returns (vectors, total_tokens) -- caller
-    uses total_tokens * COST_PER_TOKEN_USD for NodeCost.cost_usd (always
-    0.0 on the free tier; total_tokens is always 0, see module docstring
-    -- kept as a field for NodeCost shape consistency with the rest of
-    the codebase, not because it carries real data here).
+    """Embeds a batch of texts locally. Returns (vectors, total_tokens) --
+    total_tokens is real (summed from the model's own attention_mask,
+    not padded batch width), used for NodeCost.input_tokens/observability;
+    cost_usd is always 0.0 regardless, since this is local compute.
 
-    task_type=SEMANTIC_SIMILARITY -- every caller of this module compares
-    embeddings against each other via cosine similarity (dedup,
-    taste-matching), the symmetric use case that task type is documented
-    for, as opposed to asymmetric retrieval (query vs. document).
-
-    Raises whatever the genai SDK raises on failure (auth error, network
-    error, etc.) -- callers are responsible for the graceful-degradation
-    handling this project's spec requires (skip the pre-filter for that
-    item, don't drop it), not this function."""
-    result = _get_client().models.embed_content(
-        model=MODEL,
-        contents=texts,
-        config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
-    )
-    vectors = [e.values for e in result.embeddings]
-    total_tokens = 0
+    Raises whatever sentence-transformers/torch raises on failure --
+    callers are responsible for the graceful-degradation handling this
+    project's spec requires (skip the pre-filter for that item, don't
+    drop it), not this function."""
+    model = _get_model()
+    vectors = model.encode(texts, convert_to_numpy=True).tolist()
+    encoded = model.preprocess(texts)
+    total_tokens = int(encoded["attention_mask"].sum().item())
     return vectors, total_tokens
 
 

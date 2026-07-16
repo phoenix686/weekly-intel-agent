@@ -4,8 +4,8 @@ Cross-source/cross-run semantic dedup (batch2-dedup-taste-spec.md Section
 (discovery/nodes/cluster_dedupe.py's _dedupe) and seen_items (both
 URL-keyed) structurally cannot -- different URL, same underlying story.
 
-Embeds each surviving item's title+text (gemini-embedding-001 via Google
-AI Studio, discovery/embeddings.py), compares cosine similarity against a
+Embeds each surviving item's title+text locally (sentence-transformers,
+all-MiniLM-L6-v2, discovery/embeddings.py), compares cosine similarity against a
 rolling 7-day window of previously-processed item embeddings stored under
 namespace=("weekly_intel","recent_item_embeddings"). Threshold 0.90 --
 looser than a general-news dedup API's 0.95, since this project's AI/tech

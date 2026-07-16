@@ -46,7 +46,7 @@ list directly against the real codebase. Findings, and what each changed:
    7–8.
 
 **Also resolved this session, all confirmed:**
-- Embedding provider: **Gemini, confirmed, proceed** — Section 3.
+- Embedding provider: **local `sentence-transformers`, `all-MiniLM-L6-v2` — final, see Section 3.** (Gemini was tried and abandoned this session after an unresolved multi-hour quota issue; history preserved in Section 3.)
 - `blog_sources.yaml` has **12 entries, confirmed intentional** —
   ByteByteGo and Daily Dose of Data Science were deliberately removed.
   Every reference to "14 sources" elsewhere in this spec or
@@ -102,19 +102,46 @@ misses (documented to catch only ~10% of real near-duplicates alone). At
 this project's scale (dozens of items/day, not millions), plain pairwise
 cosine comparison against a small rolling window is fully sufficient.
 
-**Embedding provider: `gemini-embedding-001` via Google AI Studio —
-confirmed, proceed.** Not Vertex AI (no equivalent free path, different
-enterprise-oriented auth). Free tier: 10 million tokens/minute,
-**recurring, not a depleting lifetime cap** — genuinely free at this
-project's volume, indefinitely, as long as billing stays off the backing
-Google Cloud project (enabling billing for any reason kills the free
-tier project-wide, permanently — use a dedicated, billing-disabled
-project). New secret: `GEMINI_API_KEY`. Known tradeoff, stated plainly:
-Google's free-tier terms permit using inputs to improve their models
-(human review possible) — low stakes for this content. API-based, not
-local — avoids `sentence-transformers`' hard `torch` dependency, a
-documented, unresolved CI/container-size pain point that would weigh
-down every scheduled GitHub Actions run.
+**Embedding provider: `sentence-transformers`, model `all-MiniLM-L6-v2`,
+run locally — final decision.** History, stated plainly so this doesn't
+get re-litigated: Voyage AI was the original choice, replaced by
+Gemini's `gemini-embedding-001` for a better free-tier shape. Gemini was
+then abandoned after a multi-hour live debugging session — confirmed
+real key, confirmed correct project, confirmed correct key format
+(Google's `AIza`→`AQ.` migration was investigated and ruled out as the
+cause) — and the project's very first API request still returned `429`,
+unresolved. Cohere (1,000 calls/month free cap, likely exceeded within
+weeks at this project's real volume) and HuggingFace's Inference
+Providers (conflicting documented free-credit figures, real reports of
+accounts hitting unexpected `402` errors on steady low usage) were both
+considered next and rejected before implementation, for the same
+underlying risk category that just cost hours with Gemini.
+
+**Local, not API-based, is now the deliberate choice, not the rejected
+option it was earlier in this spec's history.** No API key, no account,
+no billing tier, no credit balance that can silently run out or
+misconfigure — the entire category of problem that blocked this
+checkpoint for hours does not exist for a local model. Same model the
+project's original reference script used.
+
+**Known, accepted tradeoffs:**
+- Model quality is lower-tier than Gemini/Voyage/Cohere on standard
+  benchmarks — accepted, since both use cases here (cross-source dedup,
+  taste pre-filter) are coarse comparisons, not high-precision search.
+- `torch` is a hard dependency (~503 MB for the default CUDA build,
+  confirmed; meaningfully smaller but not independently verified for the
+  CPU-only build). **Required mitigation:** pin the CPU-only `torch`
+  index explicitly in `requirements.txt`, don't let pip resolve the
+  default CUDA build.
+- Model weights (~80-90MB) also download fresh each run, a separate cost
+  from the `pip install` itself. **Required mitigation:** cache **both**
+  the pip package cache and the HuggingFace model-weights cache
+  directory across GitHub Actions runs — caching only one leaves the
+  other cost unaddressed.
+
+**No new secret required.** Remove any `GEMINI_API_KEY`,
+`VOYAGE_API_KEY`, or `GOOGLE_STUDIO_KEY` references remaining in code or
+GitHub Secrets — none needed going forward.
 
 **Blast-radius check, done:** `semantic_dedup.py`, `taste_vectors.py`,
 and `embeddings.py` have no hardcoded vector-length coupling —
@@ -122,8 +149,10 @@ and `embeddings.py` have no hardcoded vector-length coupling —
 schemas hold `embedding_vector` as an opaque `list[float]`, and all
 existing tests mock `embed_text`/`embed_texts` directly. **This is an
 isolated swap**: `embeddings.py`'s client/model/env-var-name, and
-`requirements.txt`'s `voyageai` → the Gemini SDK. Nothing else needs
-structural changes.
+`requirements.txt`'s embedding-provider dependency. `all-MiniLM-L6-v2`
+produces 384-dimension vectors (different from both Voyage's and
+Gemini's) — re-confirm nothing downstream assumed a specific dimension
+before treating this swap as complete.
 
 ## 4. Cross-source/cross-run semantic dedup
 
@@ -307,8 +336,10 @@ dedup target.
 ## 13. Non-functional requirements
 
 - **Cost:** embedding calls cheap relative to Haiku; net effect is cost
-  reduction (fewer unnecessary `score_node` calls). Gemini's free tier
-  means $0 at current volume. The sentiment-classification call and the
+  reduction (fewer unnecessary `score_node` calls). Local
+  `sentence-transformers` means $0 embedding cost regardless of volume —
+  the real cost is CI weight (Section 3's `torch`/caching mitigations),
+  not per-call spend. The sentiment-classification call and the
   Sunday consolidated rewrite are both small additional Haiku costs,
   same class as existing `score_node`/`classify_item` calls — and this
   is actually a cost *reduction* versus the current uncapped
@@ -325,8 +356,11 @@ dedup target.
 **Locked:** cosine-similarity semantic dedup, 7-day rolling window, 0.90
 threshold, earliest-published tie-breaker; multi-vector per-tag taste
 pre-filter, 0.30 threshold, max-similarity; Day-1 bootstrap from
-`score.py`'s `TASTE_PROFILE` constant; embedding provider Gemini
-`gemini-embedding-001` via AI Studio, confirmed proceed, isolated swap;
+`score.py`'s `TASTE_PROFILE` constant; embedding provider **local
+`sentence-transformers` (`all-MiniLM-L6-v2`)** — final, after Voyage,
+Gemini, Cohere, and HuggingFace were all tried or evaluated and rejected
+this session, isolated swap, CPU-only `torch` index + dual caching
+(pip + model weights) required as mitigation;
 `blog_sources.yaml` confirmed correct at 12 entries with three
 intentional daily-bucket reassignments; taste-profile updates restored
 to Sunday batch cadence (consolidated rewrite over the week's linked
