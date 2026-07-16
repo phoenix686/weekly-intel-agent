@@ -1,13 +1,28 @@
 """
-Voyage AI embedding client wrapper (voyage-4-lite), per
-batch2-dedup-taste-spec.md Section 9: Anthropic's officially recommended
-embeddings partner, $0.02/1M tokens, first 200M tokens free. Shared by
-semantic dedup (discovery/semantic_dedup.py), the taste-similarity
-pre-filter (discovery/taste_vectors.py), and topic-vector recompute
-(sunday/approval_actions.py).
+Gemini embedding client wrapper (gemini-embedding-001 via Google AI
+Studio), per batch2-dedup-taste-spec.md Section 3. Shared by semantic
+dedup (discovery/semantic_dedup.py), the taste-similarity pre-filter
+(discovery/taste_vectors.py), and the Sunday consolidated taste-profile
+rewrite's topic-vector recompute (sunday/nodes/update_profile.py, via
+discovery/taste_vectors.recompute_topic_vectors).
 
-Requires VOYAGE_API_KEY in the environment -- not committed, added as a
+Requires GEMINI_API_KEY in the environment -- not committed, added as a
 GitHub Secret separately (see CLAUDE.md Section 8).
+
+COST_PER_TOKEN_USD is 0.0: Google AI Studio's free tier (10M
+tokens/minute, recurring, not a depleting cap -- see spec Section 3) has
+no per-token charge at this project's volume, as long as billing stays
+off the backing Google Cloud project. This is a deliberate reflection of
+real pricing, not a placeholder.
+
+Response shape verified directly against the installed google-genai SDK
+(2.12.0) source, not guessed: EmbedContentResponse.embeddings is a
+list[ContentEmbedding], each with .values (list[float]). Per-call token
+counts are genuinely unavailable here -- ContentEmbeddingStatistics.
+token_count is documented in the SDK itself as "Gemini Enterprise Agent
+Platform only", not populated on the standard AI Studio API this project
+uses -- so embed_texts returns 0 for total_tokens, a confirmed fact about
+the API surface, not an unverified guess pending a live key.
 
 No langgraph imports.
 """
@@ -16,31 +31,46 @@ from __future__ import annotations
 
 import os
 
-import voyageai
+from google import genai
+from google.genai import types
 
-MODEL = "voyage-4-lite"
-COST_PER_TOKEN_USD = 0.02 / 1_000_000  # $0.02 per 1M tokens
+MODEL = "gemini-embedding-001"
+COST_PER_TOKEN_USD = 0.0  # Google AI Studio free tier -- see module docstring
 
-_client: voyageai.Client | None = None
+_client: genai.Client | None = None
 
 
-def _get_client() -> voyageai.Client:
+def _get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = voyageai.Client(api_key=os.environ["VOYAGE_API_KEY"])
+        _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     return _client
 
 
 def embed_texts(texts: list[str]) -> tuple[list[list[float]], int]:
     """Embeds a batch of texts. Returns (vectors, total_tokens) -- caller
-    uses total_tokens * COST_PER_TOKEN_USD for NodeCost.cost_usd.
+    uses total_tokens * COST_PER_TOKEN_USD for NodeCost.cost_usd (always
+    0.0 on the free tier; total_tokens is always 0, see module docstring
+    -- kept as a field for NodeCost shape consistency with the rest of
+    the codebase, not because it carries real data here).
 
-    Raises whatever voyageai raises on failure (auth error, network error,
-    etc.) -- callers are responsible for the graceful-degradation handling
-    this project's spec requires (skip the pre-filter for that item,
-    don't drop it), not this function."""
-    result = _get_client().embed(texts, model=MODEL, input_type="document")
-    return result.embeddings, result.total_tokens
+    task_type=SEMANTIC_SIMILARITY -- every caller of this module compares
+    embeddings against each other via cosine similarity (dedup,
+    taste-matching), the symmetric use case that task type is documented
+    for, as opposed to asymmetric retrieval (query vs. document).
+
+    Raises whatever the genai SDK raises on failure (auth error, network
+    error, etc.) -- callers are responsible for the graceful-degradation
+    handling this project's spec requires (skip the pre-filter for that
+    item, don't drop it), not this function."""
+    result = _get_client().models.embed_content(
+        model=MODEL,
+        contents=texts,
+        config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY"),
+    )
+    vectors = [e.values for e in result.embeddings]
+    total_tokens = 0
+    return vectors, total_tokens
 
 
 def embed_text(text: str) -> tuple[list[float], int]:
