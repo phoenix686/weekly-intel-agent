@@ -15,6 +15,8 @@ from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from state import DiscoverySubgraphState, RawItem, ClusteredItem, NodeCost
 from discovery.seen_items import filter_unseen
+from discovery.semantic_dedup import dedupe_semantic
+from discovery.taste_vectors import taste_prefilter
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +97,21 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     if seen_urls:
         logger.info(f"cluster_dedupe: skipped {len(seen_urls)} already-seen item(s): {seen_urls}")
 
+    costs = [NodeCost(
+        node_name="cluster_dedupe",
+        input_tokens=0,
+        output_tokens=0,
+        latency_ms=round((time.perf_counter() - t0) * 1000, 4),
+        cost_usd=0.0
+    )]
+
+    deduped, semantic_costs = dedupe_semantic(unseen)
+    costs.extend(semantic_costs)
+
+    relevant, taste_costs = taste_prefilter(deduped)
+    costs.extend(taste_costs)
+
     return {
-        "clustered_items": unseen,
-        "costs": [NodeCost(
-            node_name="cluster_dedupe",
-            input_tokens=0,
-            output_tokens=0,
-            latency_ms=round((time.perf_counter() - t0) * 1000, 4),
-            cost_usd=0.0
-        )],
+        "clustered_items": relevant,
+        "costs": costs,
     }
