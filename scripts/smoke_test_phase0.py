@@ -58,16 +58,16 @@ def main():
     assert "score_node" in cost_node_names, f"Expected score_node in costs, got: {cost_node_names}"
     print(f"Assertions passed: {len(final_state['costs'])} cost record(s) total, node names present: {sorted(cost_node_names)}\n")
 
-    # NOT asserted here, flagged separately rather than silently patched:
-    # final_state["stage"] never advances past "start" -- no node in the
-    # discovery subgraph (scrape_blogs, cluster_dedupe, score_node) writes
-    # to state["stage"] in its return dict, despite DiscoverySubgraphState's
-    # schema defining a start->searched->clustered->scored->done progression.
-    # This predates this checkpoint (present since at least commit 78b0869,
-    # Phase 1) and is out of Checkpoint 5's scope (smoke-test-node-count-fix
-    # is about the cost-count assertion specifically) -- a real gap, not
-    # fixed here, reported to Pooja instead of silently patched in passing.
-    print(f"KNOWN GAP (pre-existing, out of scope): final_state['stage'] = {final_state['stage']!r}, never advances past 'start' -- no discovery-subgraph node writes to it.\n")
+    # final_state["stage"] now really advances: scrape_blogs/process_adhoc_input
+    # write "sourced", cluster_dedupe_node writes "clustered", score_node
+    # writes "scored" -- score_node's own "scored" is the natural terminal
+    # marker (no separate "done" value). "stage" uses a last-write-wins
+    # reducer (state.py's _last_write_wins) because on Sunday runs
+    # scrape_blogs and process_adhoc_input both write "sourced" in the same
+    # superstep -- a plain key would raise InvalidUpdateError on that
+    # concurrent write, the same class of bug operator.add fixed for 'errors'.
+    assert final_state["stage"] == "scored", f"Expected final stage 'scored', got: {final_state['stage']!r}"
+    print(f"Assertion passed: final_state['stage'] == {final_state['stage']!r}\n")
 
     # 4. Emit Mermaid source for rendering
     mermaid_src = graph.get_graph().draw_mermaid()

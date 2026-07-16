@@ -90,6 +90,19 @@ class NodeCost(TypedDict):
                                      # call site keeps constructing without it
 
 
+def _last_write_wins(_old: str, new: str) -> str:
+    """Reducer for 'stage': on Sunday runs, scrape_blogs and
+    process_adhoc_input both run concurrently in the same superstep and
+    both write stage='sourced' -- a plain (non-Annotated) key would raise
+    InvalidUpdateError on that concurrent write ('Can receive only one
+    value per step'), the same class of bug operator.add fixed for
+    'errors'. Since every concurrent writer at a given pipeline stage
+    writes the identical value, simply taking the latest one is safe and
+    correct -- there's no real conflict to resolve, just a channel that
+    needs a reducer to tolerate more than one writer per step."""
+    return new
+
+
 class DiscoverySubgraphState(TypedDict):
     """State threaded through the discovery subgraph.
 
@@ -107,7 +120,7 @@ class DiscoverySubgraphState(TypedDict):
 
     # bookkeeping
     run_id: str
-    stage: Literal["start", "searched", "clustered", "scored", "done"]
+    stage: Annotated[Literal["start", "sourced", "clustered", "scored"], _last_write_wins]
     costs: Annotated[list[NodeCost], operator.add]
     errors: Annotated[list[str], operator.add]
     source_context: Literal["daily", "sunday"]  # read by route_sources() to

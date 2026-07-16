@@ -726,6 +726,55 @@ external account/key/billing tier of any kind).
   store -- see `feature_list.json` for evidence. No external account, key,
   or secret involved anywhere in this provider.
 
+## Checkpoint 5 loose ends, closed out (post-embedding-verification session)
+
+Four items Pooja asked to be confirmed/closed before moving to anything new,
+each verified for real rather than assumed:
+
+- **`stage` field now actually progresses.** `DiscoverySubgraphState.stage`
+  renamed to `Literal["start","sourced","clustered","scored"]` (no separate
+  `"done"` -- `score_node`'s own `"scored"` is the terminal marker).
+  `scrape_blogs`, `process_adhoc_input`, `cluster_dedupe_node`, and
+  `score_node` each now set `state["stage"]` on return. Real technical
+  subtlety found and handled: on Sunday runs `scrape_blogs` and
+  `process_adhoc_input` both run in the same LangGraph superstep and both
+  write `stage="sourced"` -- a plain key raises `InvalidUpdateError` on
+  more than one write per step regardless of value equality (confirmed
+  against `langgraph`'s own `LastValue.update()` source), the same class of
+  bug `operator.add` previously fixed for `errors`. `stage` now uses a
+  small last-write-wins reducer (`state.py`'s `_last_write_wins`, via
+  `BinaryOperatorAggregate`) so concurrent identical writes are safe.
+  Verified live against both daily and Sunday contexts (the Sunday case
+  being the actual concurrent-write risk) with no error, and via a real run
+  of `scripts/smoke_test_phase0.py` asserting `final_state["stage"] ==
+  "scored"`.
+- **`same-day-capped-nudge`, `item-feedback-logging`** — re-confirmed
+  passing, not just assumed from `feature_list.json`'s prior state. Unit
+  tests re-run fresh (7/7 and 3/3). Both live roundtrip scripts
+  (`scripts/test_same_day_nudge_roundtrip.py`,
+  `scripts/test_item_feedback_logging_roundtrip.py`) re-run against the
+  real Supabase store + real Haiku calls this session, producing fresh
+  real numbers, not reused evidence.
+- **Ad-hoc bypass, re-verified against the real (unmocked) embedding
+  path.** `tests/test_cluster_dedupe_adhoc_bypass.py` (2/2, mocks
+  `dedupe_semantic`/`taste_prefilter` themselves to isolate the
+  call-boundary split) re-run fresh. Additionally ran a real, non-mocked
+  check: `cluster_dedupe_node` invoked with one real `adhoc_telegram` item
+  and one real `blog_scrape` item, spying on the real `embed_texts` call
+  site directly -- confirmed `embed_texts` was called exactly once, for
+  the blog item's text only; the ad-hoc item's marker text was never
+  embedded, and it survived to `clustered_items` untouched. Note: the
+  real source value is `"adhoc_telegram"`, not the literal `"adhoc"` --
+  a pre-existing, already-documented spec-vs-code naming difference from
+  Checkpoint 3, re-confirmed still accurate.
+- **Full `feature_list.json` status** — 27 features total across
+  Checkpoints 1-5: 20 passing, 1 `in_progress` (`scrape-blogs-node`,
+  Checkpoint 2, unrelated to this session), 6 `not_started`
+  (`content-quality-review`, `resume-live-check`,
+  `classification-decision-logging`, `approval-outcome-logging`,
+  `score-eval-script`, `ingest-bookmarks-ci-removal`). All 5 Checkpoint 5
+  features (plus the newly added `stage-field-progression`) are passing.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
@@ -752,13 +801,6 @@ actual code, not assumed from the spec's prior draft).
   `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) and
   `sunday/approval_actions.py` (log-only as of Checkpoint 5).
 - Numeric score field on `ScoredItem`, tag feedback loop — deferred.
-- **`final_state["stage"]` progression** — `DiscoverySubgraphState`'s schema
-  defines `start -> searched -> clustered -> scored -> done`, but no node in
-  the discovery subgraph actually writes to `state["stage"]` -- it stays
-  `"start"` for the life of every run. Predates Checkpoint 5 (present since
-  at least commit `78b0869`, Phase 1); found while re-running
-  `smoke_test_phase0.py` for this checkpoint's node-count fix, flagged
-  rather than silently patched since it's outside this checkpoint's scope.
 - **`resume-live-check`** (Checkpoint 3) — a real Telegram approve/reject
   round-trip against a real paused Sunday proposal, confirming `poll.yml`'s
   next run actually resumes the graph and writes the correct Trello outcome.

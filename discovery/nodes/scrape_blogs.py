@@ -38,4 +38,5 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
         "raw_items": items,
         "costs": [cost],
         "errors": [f"{feed}: {msg}" for feed, msg in result.errors],
+        "stage": "sourced",
     }

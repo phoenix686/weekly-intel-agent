@@ -140,6 +140,7 @@ def score_node(state: DiscoverySubgraphState) -> dict:
     return {
         "scored_items": all_scored,
         "costs": [cost],
+        "stage": "scored",
     }
 
 if __name__ == "__main__":
