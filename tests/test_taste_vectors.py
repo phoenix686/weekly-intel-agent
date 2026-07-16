@@ -58,7 +58,7 @@ def test_item_matching_one_topic_strongly_survives_via_max_not_average():
 
     strong_agentic_vector = [0.95] + [0.0] * 19  # dim 0 = agentic-engineering
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
-         patch("discovery.taste_vectors.embed_text", return_value=(strong_agentic_vector, 10)):
+         patch("discovery.taste_vectors.embed_texts", return_value=([strong_agentic_vector], [10])):
         survivors, costs = taste_prefilter([item], run_id="run-1")
 
     assert survivors == [item]
@@ -70,7 +70,7 @@ def test_item_below_threshold_against_every_topic_is_dropped():
     fake_store = _FakeStore(seed=_topic_vectors_seed())
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
-         patch("discovery.taste_vectors.embed_text", return_value=(_IRRELEVANT_VECTOR, 10)):
+         patch("discovery.taste_vectors.embed_texts", return_value=([_IRRELEVANT_VECTOR], [10])):
         survivors, costs = taste_prefilter([item], run_id="run-1")
 
     assert survivors == []
@@ -82,7 +82,7 @@ def test_empty_topic_vector_store_lets_everything_through():
     fake_store = _FakeStore(seed={})
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
-         patch("discovery.taste_vectors.embed_text") as mock_embed:
+         patch("discovery.taste_vectors.embed_texts") as mock_embed:
         survivors, costs = taste_prefilter([item], run_id="run-1")
 
     assert survivors == [item]
@@ -90,16 +90,22 @@ def test_empty_topic_vector_store_lets_everything_through():
     mock_embed.assert_not_called()  # never even tries to embed if there's nothing to compare against
 
 
-def test_failed_embed_call_passes_item_through_unfiltered():
-    item = _item("https://a.com/1", "Item", "text")
+def test_failed_batch_embed_call_passes_all_items_through_unfiltered():
+    """embed_texts() is called once for the whole batch now (not once per
+    item) -- a failure degrades every item in the batch at once, not just
+    one, since a local-model failure realistically means the model itself
+    is broken."""
+    item_a = _item("https://a.com/1", "Item A", "text a")
+    item_b = _item("https://b.com/1", "Item B", "text b")
     fake_store = _FakeStore(seed=_topic_vectors_seed())
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
-         patch("discovery.taste_vectors.embed_text", side_effect=RuntimeError("API down")):
-        survivors, costs = taste_prefilter([item], run_id="run-1")
+         patch("discovery.taste_vectors.embed_texts", side_effect=RuntimeError("model broken")):
+        survivors, costs = taste_prefilter([item_a, item_b], run_id="run-1")
 
-    assert survivors == [item]
-    assert any("embed failed" in c["error"] and "passed through unfiltered" in c["error"] for c in costs)
+    assert survivors == [item_a, item_b]
+    assert len(costs) == 2
+    assert all("embed failed" in c["error"] and "passed through unfiltered" in c["error"] for c in costs)
 
 
 def test_recompute_topic_vectors_writes_one_entry_per_mapped_tag():

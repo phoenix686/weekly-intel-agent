@@ -43,7 +43,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from discovery.embeddings import embed_text, cosine_similarity, COST_PER_TOKEN_USD
+from discovery.embeddings import embed_text, embed_texts, cosine_similarity, COST_PER_TOKEN_USD
 from discovery.nodes.score import ALLOWED_TAGS
 from sunday.memory_store_config import get_store
 from state import ClusteredItem, NodeCost
@@ -150,19 +150,29 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
     survivors: list[ClusteredItem] = []
     costs: list[NodeCost] = []
 
-    for item in items:
-        try:
-            vector, tokens = embed_text(f"{item['title']}\n\n{item['text']}")
-        except Exception as e:
-            logger.warning(f"taste_vectors: embed failed for {item['url']!r}, passing through unfiltered: {e}")
-            survivors.append(item)
-            costs.append(NodeCost(
+    if not items:
+        return survivors, costs
+
+    # Embed every item in ONE batched call -- see semantic_dedup.py's
+    # dedupe_semantic() for the same fix and the measured ~3.4x speedup
+    # (150-item local benchmark: 3.05s looped vs 0.89s batched). A
+    # batch-wide failure now degrades every item at once rather than
+    # per-item -- acceptable for a local model, where a failure here
+    # realistically means the model itself is broken.
+    try:
+        all_vectors, all_tokens = embed_texts([f"{item['title']}\n\n{item['text']}" for item in items])
+    except Exception as e:
+        logger.warning(f"taste_vectors: batch embed failed, all {len(items)} item(s) passed through unfiltered: {e}")
+        return list(items), [
+            NodeCost(
                 node_name="taste_prefilter", input_tokens=0, output_tokens=0,
                 cost_usd=0.0, latency_ms=0.0,
                 error=f"embed failed, item passed through unfiltered: {e}",
-            ))
-            continue
+            )
+            for _ in items
+        ]
 
+    for item, vector, tokens in zip(items, all_vectors, all_tokens):
         best_tag, best_sim = max(
             ((tv["tag"], cosine_similarity(vector, tv["embedding_vector"])) for tv in topic_vectors),
             key=lambda pair: pair[1],

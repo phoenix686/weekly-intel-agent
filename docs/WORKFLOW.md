@@ -901,13 +901,86 @@ DecodingAI, TheNeuralMaze, MarkTechPost, TheNewStack) -- confirms
 `scrape_blogs` fired correctly. Zero references to `ingest_bookmarks` or
 `data/tweets.json` anywhere in the output.
 
-**NOT YET RESOLVED**: the actual fix for production is pushing local
-`main` to `origin/main` (a clean fast-forward, no conflicts). This has
-**not been done** -- deliberately not pushed unilaterally, since it
-affects live scheduled infrastructure and is exactly the kind of
-shared-state action that needs explicit confirmation first. Until this
-push happens, every real scheduled GitHub Actions run will keep failing
-identically, no matter what local evidence says.
+**RESOLVED**: local `main` pushed to `origin/main` (commit `9003ce9`,
+clean fast-forward, confirmed no divergence) after Pooja explicitly
+authorized it. `origin/main` now matches local exactly.
+
+**Systemic follow-up finding, same session**: went through every
+currently-`passing` feature's evidence checking for this same shape (real
+entrypoint script vs. direct function/graph call) -- found it's the
+dominant pattern, not isolated to these two. Only `poll-once-three-way-
+routing` actually ran its real entrypoint (`scripts/run_poll.py`) as
+evidence; everything else touching the discovery subgraph or Sunday-
+specific logic used direct calls in ad-hoc test/roundtrip scripts, or a
+dedicated smoke-test script (`smoke_test_phase0.py`) distinct from the
+real production entrypoints. `process-adhoc-input-node`'s evidence text
+was also found stale -- it describes calling
+`build_discovery_subgraph(include_sunday_only=True)`, a parameter that no
+longer exists in the current signature (confirmed via grep: zero matches
+in the current test file). Not re-verified across the board this
+session -- flagged as scope for a future pass, not silently left implied
+as already fine.
+
+## sunday.yml timeout: real root cause, not just "give it more time"
+
+Pooja reported a real `sunday.yml` run cancelled at almost exactly its
+`timeout-minutes: 20` (20m17s), with real progress visible in the log
+(51 real already-seen items correctly skipped) right up to the cutoff --
+not a real error, a genuine timeout. That limit predates Checkpoint 5's
+local embedding workload entirely (set for the interrupt/resume design).
+Investigated two real causes before just raising the number:
+
+1. **Per-item embed loop, confirmed real** -- `dedupe_semantic()` and
+   `taste_prefilter()` both called `embed_text()` (singular) once per
+   item in a loop, never `embed_texts()`, the batch API that already
+   existed. Real local benchmark (150 items): looped 3.05s vs batched
+   0.89s -- a real 3.4x speedup, but only a few seconds at typical item
+   counts, nowhere near enough to explain an 18-20 minute stall by
+   itself. Fixed anyway (see `discovery/embeddings.py`,
+   `discovery/semantic_dedup.py`, `discovery/taste_vectors.py` below).
+2. **Model-load network chatter, the far bigger real factor** -- isolated
+   measurement: `SentenceTransformer(MODEL_NAME)`'s constructor took
+   14.97s in this process, vs 0.10s for the actual batched embed call on
+   60 items. The weights are already cached locally on this exact
+   machine (run dozens of times tonight) -- the cost is a chain of
+   ~10-15 real network round-trips to huggingface.co checking file
+   revisions, which happens on every model load regardless of cache
+   state, unless offline mode is set. This is a one-time-per-run cost
+   (not per item), and on GitHub Actions' network this chain could run
+   considerably slower than the 15s measured locally. NOT fixed this
+   session -- `HF_HUB_OFFLINE=1` would make the very first real CI run
+   of this dependency fail outright (no cache yet to read offline from)
+   rather than slowly succeed. Flagged as a real follow-up once a run has
+   actually completed and the HuggingFace cache action has something to
+   restore.
+
+### `discovery/embeddings.py`
+`embed_texts()` now returns `(vectors, per_item_tokens: list[int])`
+instead of one aggregate token int -- computed from
+`attention_mask.sum(dim=1)` per row (already had the right tensor, was
+just collapsing it to one scalar). `embed_text()` unpacks
+`per_item_tokens[0]`, unchanged for existing single-item callers.
+
+### `discovery/semantic_dedup.py`, `discovery/taste_vectors.py`
+`dedupe_semantic()`/`taste_prefilter()` embed the whole item batch in ONE
+`embed_texts()` call upfront, then run the same per-item comparison/
+tie-break/audit-log logic against the precomputed vectors. One real
+behavior change, flagged not hidden: a batch-wide embed failure now
+degrades every item in that call at once (previously per-item) --
+acceptable since a local-model failure realistically means the model
+itself is broken, not that one request failed (the original per-item
+graceful-degradation design was written for an API-based provider where
+one request could fail while others succeeded). `recompute_topic_vectors`
+(taste_vectors.py) intentionally NOT changed -- only ~5-6 calls total,
+and its partial-failure test relies on per-tag independent failure.
+tests/test_semantic_dedup.py, test_taste_vectors.py, test_prefilter_drops.py
+updated to patch `embed_texts` instead of `embed_text` -- all passing,
+117 total suite-wide, zero regressions.
+
+### `.github/workflows/sunday.yml`
+`timeout-minutes: 20 -> 45` -- a starting-point buffer for both real
+costs above, not a precisely-derived number. Adjust with a real
+completed run's actual duration once one exists.
 
 ## Store-namespace registry
 

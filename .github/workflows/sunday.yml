@@ -19,9 +19,27 @@ jobs:
     # proposal has been sent, regardless of whether any are still pending
     # approval. Resuming a paused proposal happens later, in a separate
     # process, via telegram/polling.py's poll_once() -- not by this job
-    # staying alive. 20 minutes is a safety net against a genuine hang,
-    # not a wait for Telegram replies.
-    timeout-minutes: 20
+    # staying alive. This is a safety net against a genuine hang, not a
+    # wait for Telegram replies.
+    #
+    # Raised from 20 -> 45 (2026-07-16): the original 20 predates
+    # Checkpoint 5's local CPU-based embedding workload (semantic dedup +
+    # taste pre-filter) entirely -- it was sized for the interrupt/resume
+    # design, not for this. A real run hit exactly 20:17 and got killed
+    # mid-progress, not from a real error. Real local investigation found
+    # two distinct costs this timeout now needs to absorb: (1) the
+    # per-item embed_text() loop in dedupe_semantic/taste_prefilter was
+    # fixed to batch via embed_texts() instead (measured ~3.4x faster,
+    # 150 items: 3.05s -> 0.89s) -- real but small, a few seconds; (2) far
+    # more significant, SentenceTransformer's model-load step makes a
+    # chain of ~10-15 real network round-trips to huggingface.co checking
+    # file revisions EVEN WHEN the model is already cached (measured
+    # ~15s locally on a fast connection) -- on GitHub Actions' network
+    # this could run considerably slower, and this is a one-time-per-run
+    # cost regardless of item count. 45 is a starting-point buffer for
+    # both, not a precisely-derived number -- adjust with a real
+    # completed run's actual duration once one exists.
+    timeout-minutes: 45
     env:
       PYTHONPATH: "."
       DB_URI: ${{ secrets.DB_URI }}

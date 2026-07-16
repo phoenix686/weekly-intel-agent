@@ -49,14 +49,19 @@ def test_dedup_drop_logs_item_id_field_not_tag_field():
     fake_store = _FakeStore()
     vectors = {"short": [1.0, 0.0], "same story elsewhere": [0.999, 0.001]}
 
-    def _embed_side_effect(text):
-        for key, vec in vectors.items():
-            if key in text:
-                return vec, 10
-        raise KeyError(text)
+    def _embed_texts_side_effect(texts):
+        result = []
+        for text in texts:
+            for key, vec in vectors.items():
+                if key in text:
+                    result.append(vec)
+                    break
+            else:
+                raise KeyError(text)
+        return result, [10] * len(texts)
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=_embed_side_effect):
+         patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect):
         dedupe_semantic([a, b], run_id="run-1")
 
     drops = [p for p in fake_store.puts if p[0] == _DEDUP_DROPS_NAMESPACE]
@@ -75,7 +80,7 @@ def test_taste_drop_logs_tag_field_not_item_id_field():
     fake_store = _FakeStore(seed=topic_vectors_seed)
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
-         patch("discovery.taste_vectors.embed_text", return_value=([0.0, 1.0], 10)):
+         patch("discovery.taste_vectors.embed_texts", return_value=([[0.0, 1.0]], [10])):
         taste_prefilter([item], run_id="run-2")
 
     drops = [p for p in fake_store.puts if p[0] == _TASTE_DROPS_NAMESPACE]
@@ -93,14 +98,19 @@ def test_no_drop_entry_ever_has_both_fields_set_or_both_null():
     fake_store = _FakeStore()
     vectors = {"short": [1.0, 0.0], "same story elsewhere": [0.999, 0.001]}
 
-    def _embed_side_effect(text):
-        for key, vec in vectors.items():
-            if key in text:
-                return vec, 10
-        raise KeyError(text)
+    def _embed_texts_side_effect(texts):
+        result = []
+        for text in texts:
+            for key, vec in vectors.items():
+                if key in text:
+                    result.append(vec)
+                    break
+            else:
+                raise KeyError(text)
+        return result, [10] * len(texts)
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=_embed_side_effect):
+         patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect):
         dedupe_semantic([a, b], run_id="run-3")
 
     drop_entries = [entry for namespace, _, entry in fake_store.puts if namespace == _DEDUP_DROPS_NAMESPACE]

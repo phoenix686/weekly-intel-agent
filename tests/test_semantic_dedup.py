@@ -38,12 +38,20 @@ def _item(url, title, text, fetched_at="2026-07-16T00:00:00+00:00"):
             "expanded_urls": [], "source": "blog_scrape", "duplicate_count": 1}
 
 
-def _embed_side_effect(vectors_by_text):
-    def _fn(text):
-        for key, vec in vectors_by_text.items():
-            if key in text:
-                return vec, 10
-        raise KeyError(f"no fixture vector for text containing: {text[:50]}")
+def _embed_texts_side_effect(vectors_by_text):
+    """Batched embed_texts() fixture -- looks up each text in the batch
+    independently and returns (vectors, per_item_tokens), matching the
+    real function's post-batching signature."""
+    def _fn(texts):
+        vectors = []
+        for text in texts:
+            for key, vec in vectors_by_text.items():
+                if key in text:
+                    vectors.append(vec)
+                    break
+            else:
+                raise KeyError(f"no fixture vector for text containing: {text[:50]}")
+        return vectors, [10] * len(texts)
     return _fn
 
 
@@ -58,7 +66,7 @@ def test_within_run_near_duplicates_keep_earliest_published():
     vectors = {"short version": [1.0, 0.0], "fuller version": [0.999, 0.001]}  # cosine ~1.0, above 0.90
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=_embed_side_effect(vectors)):
+         patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect(vectors)):
         survivors, costs = dedupe_semantic([earlier, later_but_fuller], run_id="run-1")
 
     assert len(survivors) == 1
@@ -78,7 +86,7 @@ def test_within_run_duplicate_arriving_earlier_in_list_but_published_later_gets_
     vectors = {"processed first": [1.0, 0.0], "processed second": [0.999, 0.001]}
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=_embed_side_effect(vectors)):
+         patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect(vectors)):
         survivors, costs = dedupe_semantic([later, earlier], run_id="run-1")
 
     assert len(survivors) == 1
@@ -93,7 +101,7 @@ def test_items_below_threshold_both_survive():
     vectors = {"about agents": [1.0, 0.0], "about databases": [0.0, 1.0]}  # orthogonal, cosine 0.0
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=_embed_side_effect(vectors)):
+         patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect(vectors)):
         survivors, costs = dedupe_semantic([a, b], run_id="run-1")
 
     assert len(survivors) == 2
@@ -112,7 +120,7 @@ def test_cross_run_match_drops_new_item_unconditionally():
     vectors = {"repeat of an old story": [0.9999, 0.0001]}
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=_embed_side_effect(vectors)):
+         patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect(vectors)):
         survivors, costs = dedupe_semantic([new_item], run_id="run-1")
 
     assert survivors == []
@@ -134,21 +142,27 @@ def test_window_entries_older_than_7_days_are_excluded_and_deleted():
     vectors = {"genuinely new content": [1.0, 0.0]}
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=_embed_side_effect(vectors)):
+         patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect(vectors)):
         survivors, costs = dedupe_semantic([item], run_id="run-1")
 
     assert len(survivors) == 1  # stale entry excluded from comparison, so no match -> survives
     assert "https://stale.com/1" in fake_store.deleted  # lazily cleaned up
 
 
-def test_failed_embed_call_passes_item_through_unfiltered():
-    item = _item("https://a.com/1", "Story A", "some text")
+def test_failed_batch_embed_call_passes_all_items_through_unfiltered():
+    """embed_texts() is called once for the whole batch now (not once per
+    item) -- a failure degrades every item in the batch at once, not just
+    one, since a local-model failure realistically means the model itself
+    is broken."""
+    item_a = _item("https://a.com/1", "Story A", "some text")
+    item_b = _item("https://b.com/1", "Story B", "other text")
     fake_store = _FakeStore()
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
-         patch("discovery.semantic_dedup.embed_text", side_effect=RuntimeError("API down")):
-        survivors, costs = dedupe_semantic([item], run_id="run-1")
+         patch("discovery.semantic_dedup.embed_texts", side_effect=RuntimeError("model broken")):
+        survivors, costs = dedupe_semantic([item_a, item_b], run_id="run-1")
 
-    assert survivors == [item]
-    assert any("embed failed" in c["error"] and "passed through unfiltered" in c["error"] for c in costs)
-    assert fake_store.puts == []  # nothing to persist, no vector was produced
+    assert survivors == [item_a, item_b]
+    assert len(costs) == 2
+    assert all("embed failed" in c["error"] and "passed through unfiltered" in c["error"] for c in costs)
+    assert fake_store.puts == []  # nothing to persist, no vectors were produced
