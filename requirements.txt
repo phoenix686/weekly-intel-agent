@@ -6,3 +6,4 @@ langmem>=0.0.15
 psycopg[binary]>=3.1.0
 psycopg-pool>=3.1.0
 python-dotenv>=1.2.2
+voyageai>=0.5.0

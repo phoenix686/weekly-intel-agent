@@ -85,6 +85,9 @@ class NodeCost(TypedDict):
     output_tokens: int
     latency_ms: float
     cost_usd: float
+    error: NotRequired[str | None]  # non-user-facing failure/drop visibility --
+                                     # optional so every existing NodeCost(...)
+                                     # call site keeps constructing without it
 
 
 class DiscoverySubgraphState(TypedDict):
