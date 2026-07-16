@@ -8,6 +8,7 @@ import anthropic
 from sunday.trello_client import create_trello_card, update_trello_card, get_dump_list_id
 from telegram.bot_client import send_message
 from sunday.memory_store_config import get_store
+from discovery.taste_vectors import recompute_topic_vectors
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,14 @@ def handle_rejection(item: dict, run_id: str) -> None:
 
 
 def _update_yaml_for_feedback(item: dict, feedback_text: str, sentiment: str) -> None:
+    """Regenerates taste_profile.yaml from feedback, then immediately
+    recomputes the per-tag topic vectors from the freshly-written text --
+    same call, not a separately-scheduled job, per
+    batch2-dedup-taste-spec.md Section 5. NOTE: the spec text says this
+    recompute belongs 'inside update_profile' -- but sunday/nodes/update_profile.py
+    no longer regenerates the YAML at all (moved here in an earlier Part 7
+    refactor; update_profile.py is cost-log-only now). Wired into the
+    real current call site instead of the stale one the spec assumed."""
     current_profile = (
         TASTE_PROFILE_PATH.read_text(encoding="utf-8")
         if TASTE_PROFILE_PATH.exists()
@@ -128,4 +137,12 @@ def _update_yaml_for_feedback(item: dict, feedback_text: str, sentiment: str) ->
     logger.info(
         f"_update_yaml_for_feedback: updated taste profile "
         f"(sentiment={sentiment}, tokens: {input_tokens}/{output_tokens}, cost: ${cost:.6f})"
+    )
+
+    vector_costs = recompute_topic_vectors(updated_yaml)
+    vector_ok = sum(1 for c in vector_costs if not c.get("error"))
+    vector_cost_usd = sum(c["cost_usd"] for c in vector_costs)
+    logger.info(
+        f"_update_yaml_for_feedback: recomputed {vector_ok}/{len(vector_costs)} "
+        f"topic vectors (${vector_cost_usd:.6f})"
     )
