@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Checkpoint 4 closeout + scrape-blogs-node fix (see bottom sections)
+Last updated: origin/main deployment-gap finding (see bottom sections) -- local main unpushed, 19 commits ahead
 
 ## Scheduled runs (GitHub Actions)
 
@@ -856,6 +856,58 @@ across every `.yml`/`.yaml` in the repo) as a side effect of the Phase 5B
 `route_sources` rebuild, which never registered it as a graph node in the
 first place. `tests/test_ingest_bookmarks_gating.py` (4/4) re-confirms
 this against the real compiled graphs.
+
+## CRITICAL: local main is 19 commits ahead of origin/main, unpushed
+
+**Found this session, triggered by a real production failure**: Pooja
+reported `scripts/run_sunday.py` hitting the exact `data/tweets.json`
+`FileNotFoundError` `ingest-bookmarks-gating` was supposed to have fixed,
+on a real scheduled Sunday run. Investigation traced this to a deployment
+gap, not a code regression:
+
+- `git rev-list --count origin/main..HEAD` = 19; `..origin/main` = 0 --
+  local `main` is strictly ahead, origin has nothing local is missing.
+- `origin/main`'s HEAD (`0a756ae`) is the commit **immediately before**
+  `11fd528`, the original ingest_bookmarks fix commit -- so `origin/main`
+  predates that fix, the entire `route_sources` rebuild (`81e96c8`), and
+  every commit since, including all of Checkpoint 5 and Checkpoint 4
+  closeout.
+- `git show origin/main:discovery/graph.py` confirms it directly: still
+  the old `DAILY_SOURCE_NODES`/`SUNDAY_ONLY_SOURCE_NODES` additive-dict
+  design, `ingest_bookmarks` unconditionally in `DAILY_SOURCE_NODES`,
+  merged into Sunday too -- the exact original bug, still live.
+- GitHub Actions' `daily.yml`/`sunday.yml`/`poll.yml` all check out
+  `origin/main` (`actions/checkout@v4`'s default). Every real scheduled
+  run this entire session -- and the session before it -- has executed
+  this stale, pre-fix code, regardless of how much local passing evidence
+  was gathered against local `main` in the meantime.
+
+**A compounding, independent gap** also found in this investigation:
+`ingest-bookmarks-gating`'s prior evidence tested the Sunday path only by
+calling `build_discovery_subgraph()` directly in Python -- never by
+actually running `scripts/run_sunday.py`, the real entrypoint script
+GitHub Actions invokes. So even setting the origin/main gap aside, the
+claim of having verified "real entrypoints" for Sunday specifically was
+inaccurate.
+
+**Local code re-confirmed correct, real evidence this time**: ran
+`uv run --env-file .env python scripts/run_sunday.py` for real (the
+actual script, not a direct graph call) against the live Supabase
+Postgres store, real Trello board, real Anthropic calls -- completed
+cleanly, `Run cf85bab6 complete`, zero errors, $0.0044 total cost. The
+log shows `cluster_dedupe` skipping 57 already-seen items, every one a
+real `blog_scrape` URL (LangChain, Latent Space, Anthropic Engineering,
+DecodingAI, TheNeuralMaze, MarkTechPost, TheNewStack) -- confirms
+`scrape_blogs` fired correctly. Zero references to `ingest_bookmarks` or
+`data/tweets.json` anywhere in the output.
+
+**NOT YET RESOLVED**: the actual fix for production is pushing local
+`main` to `origin/main` (a clean fast-forward, no conflicts). This has
+**not been done** -- deliberately not pushed unilaterally, since it
+affects live scheduled infrastructure and is exactly the kind of
+shared-state action that needs explicit confirmation first. Until this
+push happens, every real scheduled GitHub Actions run will keep failing
+identically, no matter what local evidence says.
 
 ## Store-namespace registry
 
