@@ -5,13 +5,16 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	ingest_bookmarks(ingest_bookmarks)
 	cluster_dedupe(cluster_dedupe)
 	score(score)
+	scrape_blogs(scrape_blogs)
+	process_adhoc_input(process_adhoc_input)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> ingest_bookmarks;
+	__start__ -.-> process_adhoc_input;
+	__start__ -.-> scrape_blogs;
 	cluster_dedupe --> score;
-	ingest_bookmarks --> cluster_dedupe;
+	process_adhoc_input --> cluster_dedupe;
+	scrape_blogs --> cluster_dedupe;
 	score --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0

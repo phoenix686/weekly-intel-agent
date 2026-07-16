@@ -324,14 +324,31 @@ graph TD
     send_telegram_digest --> END(["__end__"])
 ```
 
-**Discovery subgraph** (shared):
+**Discovery subgraph** (shared) -- regenerated for real via
+`graph.get_graph().draw_mermaid()` during Checkpoint 5's smoke-test fix
+(the previous version of this diagram was stale, still showing the
+long-removed `ingest_bookmarks` entry point). `route_sources` is a real
+conditional entry point (`set_conditional_entry_point`), so both
+`scrape_blogs` and `process_adhoc_input` show as reachable from
+`__start__` in the compiled graph shape -- which one actually fires for a
+given invocation is decided at runtime by `state["source_context"]`
+("daily" -> `scrape_blogs` only; "sunday" -> both), not by two separate
+compiled graphs:
 
 ```mermaid
 graph TD
-    START(["__start__"]) --> ingest_bookmarks
-    ingest_bookmarks --> cluster_dedupe
+    __start__([__start__]):::first
+    cluster_dedupe(cluster_dedupe)
+    score(score)
+    scrape_blogs(scrape_blogs)
+    process_adhoc_input(process_adhoc_input)
+    __end__([__end__]):::last
+    __start__ -.-> process_adhoc_input
+    __start__ -.-> scrape_blogs
     cluster_dedupe --> score
-    score --> END(["__end__"])
+    process_adhoc_input --> cluster_dedupe
+    scrape_blogs --> cluster_dedupe
+    score --> __end__
 ```
 
 **Sunday parent graph** (Parts 1-7 — `write_outputs` removed, `proposal_worker` → `update_profile` directly):
@@ -615,11 +632,108 @@ correct.
   Telegram/Postgres via Bash — completed cleanly with no pending items to
   process.
 
+## Checkpoint 5 additions (semantic dedup + taste pre-filter + taste-profile update mechanism + search_web retirement)
+
+Scope: `batch2-dedup-taste-spec.md`. Built across two passes -- an initial
+pass against Voyage AI that a mid-checkpoint investigation (the spec's own
+Section 0) found had drifted from the locked spec (embedding provider,
+Section 7's whole taste-update design), and a second pass that corrected
+both after explicit confirmation.
+
+### `discovery/embeddings.py`
+- Gemini (`gemini-embedding-001` via Google AI Studio) embedding wrapper,
+  shared by dedup, taste pre-filter, and topic-vector recompute.
+  `COST_PER_TOKEN_USD = 0.0` (real free-tier pricing, not a placeholder).
+  Response shape (`.embeddings[i].values`) verified directly against the
+  installed `google-genai` SDK's source, not guessed.
+
+### `discovery/semantic_dedup.py`
+- Cross-source/cross-run dedup: embeds title+text, cosine >=0.90 against a
+  7-day rolling window (`recent_item_embeddings`). Cross-run match drops
+  the new item unconditionally; within-run match keeps whichever item was
+  **published earlier** (`fetched_at`) -- not fuller text, per the spec's
+  revised tie-breaker. Logs every drop to `prefilter_drops`.
+
+### `discovery/taste_vectors.py`
+- Multi-vector per-tag pre-filter, max-similarity, threshold 0.30. Bootstrap
+  embedding input is `score.py`'s `TASTE_PROFILE` prompt constant, mapped
+  best-effort per tag -- `learning-resource` has no clearly corresponding
+  bullet and is flagged (no vector computed), not guessed. Logs every drop
+  to `prefilter_drops`.
+
+### `discovery/nodes/cluster_dedupe.py`
+- Ad-hoc items (`source == "adhoc_telegram"`) are split out before either
+  filter runs and merged back into `clustered_items` untouched -- one
+  source-based bypass point, not a duplicated check inside each filter.
+
+### `sunday/approval_actions.py`
+- `handle_feedback` now ONLY logs a `feedback_events` record and triggers
+  the same-day nudge -- no Haiku call, no `taste_profile.yaml` write. This
+  **replaced** a pre-existing (Part-7-era) uncapped full-profile rewrite
+  that had been firing on every single reply, daily included -- found by
+  this checkpoint's own investigation, not assumed.
+
+### `sunday/same_day_nudge.py`  _(new)_
+- Haiku classifies each reply's `feedback_text` into direction/magnitude,
+  applies the mapped delta to every tag on the item, stacked and capped at
+  +/-0.3 per tag per week in `same_day_adjustments`.
+
+### `sunday/nodes/update_profile.py`
+- Restored from cost-log-only to real work: reads `feedback_events` from
+  the last 7 days, ONE consolidated Haiku rewrite (not one per reply),
+  recomputes topic vectors on the fresh text, clears `same_day_adjustments`.
+  File-layout decision (spec Section 7 item 2): here, not
+  `approval_actions.py` -- that file's handlers are live per-reply
+  functions outside any graph invocation with no natural "Sunday path"
+  signal; this node already runs exactly once per Sunday graph invocation.
+
+### `scripts/smoke_test_phase0.py`
+- Cost-count assertion corrected: the old hardcoded `== 3` assumed one
+  `NodeCost` per node, no longer true now that `semantic_dedup`/
+  `taste_prefilter` append one record per item processed. Now asserts the
+  three always-present per-invocation node names appear, not an exact
+  total. Also fixed an unrelated Windows console encoding crash
+  (`sys.stdout.reconfigure(encoding="utf-8")`) blocking the script from
+  completing at all.
+
+## Store-namespace registry
+
+Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
+Section 11 (Section 0's investigation confirmed this list against the
+actual code, not assumed from the spec's prior draft).
+
+| Namespace | Shape | Written by | Read by |
+|---|---|---|---|
+| `polling_state` | `{value: int}` (update_offset) | `telegram/polling.py` | `telegram/polling.py` |
+| `pending_resume_map` | `{thread_id, proposal_id, run_id}` | `sunday/nodes/await_approval.py` | `telegram/polling.py` |
+| `adhoc_queue` | `{text, queued_at}` | `telegram/polling.py` | `sunday/nodes/process_adhoc_input.py` |
+| `digest_item_map` | `{run_id, items: {number: {url,title,tags,reasoning}}}` | `daily/nodes/send_telegram_digest.py`, `sunday/nodes/send_telegram_plan.py` | `telegram/feedback_router.py` |
+| `feedback_events` | `{item_id, feedback_text, replied_at, run_id, tags, title, content_summary, sentiment}` | `sunday/approval_actions.py` (`handle_feedback`) | `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) |
+| `seen_items` | `{seen: true}` | `discovery/seen_items.py` (`mark_seen`) | `discovery/seen_items.py` (`filter_unseen`) |
+| `recent_item_embeddings` | `{item_id, url, embedding_vector, fetched_at, scored_at}` | `discovery/semantic_dedup.py` | `discovery/semantic_dedup.py` |
+| `taste_topic_vectors` | `{tag, embedding_vector, updated_at}` | `discovery/taste_vectors.py` (`recompute_topic_vectors`) | `discovery/taste_vectors.py` (`taste_prefilter`) |
+| `prefilter_drops` | `{item_id, filter_type: "dedup"\|"taste", similarity_score, compared_against_item_id, compared_against_tag, run_id}` | `discovery/semantic_dedup.py`, `discovery/taste_vectors.py` | audit log only -- no reader yet |
+| `same_day_adjustments` | `{tag, cumulative_adjustment, item_ids_contributing, week_of}` | `sunday/same_day_nudge.py` | `sunday/nodes/update_profile.py` (cleared weekly; not yet consumed to influence live scoring/pre-filter comparisons -- spec Section 7 scopes this namespace's build to storage/computation/clearing only, no consumer described) |
+| `rejection_events` | **KNOWN-DEAD** -- orphaned, no schema in production use | `scripts/test_update_profile_rejections.py` only (manual test script) | none in production |
+
 ## What does NOT exist yet
 
 - **Taste profile in LangMem** — currently a plain YAML file, read/written by
-  `sunday/approval_actions.py`.
+  `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) and
+  `sunday/approval_actions.py` (log-only as of Checkpoint 5).
 - Numeric score field on `ScoredItem`, tag feedback loop — deferred.
+- **`final_state["stage"]` progression** — `DiscoverySubgraphState`'s schema
+  defines `start -> searched -> clustered -> scored -> done`, but no node in
+  the discovery subgraph actually writes to `state["stage"]` -- it stays
+  `"start"` for the life of every run. Predates Checkpoint 5 (present since
+  at least commit `78b0869`, Phase 1); found while re-running
+  `smoke_test_phase0.py` for this checkpoint's node-count fix, flagged
+  rather than silently patched since it's outside this checkpoint's scope.
+- **Live verification of every Gemini-embedding-dependent feature** —
+  `GEMINI_API_KEY` is not present in this environment; graceful-degradation
+  paths are confirmed working for real (a live smoke test run showed every
+  item correctly passing through unfiltered on embed failure), but no real
+  embedding has ever actually been computed.
 - **`resume-live-check`** (Checkpoint 3) — a real Telegram approve/reject
   round-trip against a real paused Sunday proposal, confirming `poll.yml`'s
   next run actually resumes the graph and writes the correct Trello outcome.
