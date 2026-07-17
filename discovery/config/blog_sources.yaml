@@ -2,13 +2,24 @@
 # source-fetching node -- TLDR AI, Smol AI News, and Anthropic's dev blog
 # used to be separate dedicated node files; all sources are RSS/HTML reads
 # through this one config now). Each entry has a `name`, a `bucket`
-# (daily | sunday), and exactly one of `feed_url` (RSS/Atom, fetched via
+# (daily | sunday), exactly one of `feed_url` (RSS/Atom, fetched via
 # discovery/parsers/rss_common.py) or `scrape_url` (HTML fallback, only
-# used by the Anthropic entry today via discovery/parsers/anthropic_blog.py).
+# used by the Anthropic entry today via discovery/parsers/anthropic_blog.py),
+# and an optional `fetch_limit` (max items fetched from that source per
+# run -- falls back to fetch_one_source()'s own default of 30 when
+# omitted, see discovery/parsers/scrape_blogs.py).
 #
 # bucket=daily entries fire on both daily and sunday invocations.
 # bucket=sunday entries fire on sunday only. See
 # discovery/parsers/scrape_blogs.py's fetch_blog_entries().
+#
+# fetch_limit set per-bucket (2026-07-17, deliberate volume reduction, not
+# left at the prior blanket default of 30): daily-bucket sources get 15
+# (fire on both daily and sunday invocations, so a higher cap there costs
+# more twice); sunday-only sources get 6 (weekly-or-slower cadence --
+# these publications rarely post more than a handful of new items in a
+# week, so 30 was always fetching mostly items seen_items would filter
+# out anyway).
 #
 # All entries live-verified 2026-07-15 (real fetch, not assumed from prior
 # commits) via discovery/parsers/rss_common.py's fetch_rss_feed(). Part 7
@@ -30,47 +41,59 @@
 - name: "TLDR AI"
   feed_url: "https://tldr.tech/api/rss/ai"
   bucket: daily
+  fetch_limit: 15
 
 - name: "LangChain Blog"
   feed_url: "https://blog.langchain.dev/rss.xml"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "JamWithAI"
   feed_url: "https://jamwithai.substack.com/feed"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "Latent Space"
   feed_url: "https://www.latent.space/feed"
   bucket: daily
+  fetch_limit: 15
 
 - name: "Anthropic Engineering Blog"
   scrape_url: "https://www.anthropic.com/engineering"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "Decoding AI Magazine"
   feed_url: "https://www.decodingai.com/feed"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "The Nuanced Perspective"
   feed_url: "https://thenuancedperspective.substack.com/feed"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "AI with Aish"
   feed_url: "https://aishwaryasrinivasan.substack.com/feed"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "The Neural Maze"
   feed_url: "https://theneuralmaze.substack.com/feed"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "MarkTechPost"
   feed_url: "https://www.marktechpost.com/feed/"
   bucket: daily
+  fetch_limit: 15
 
 - name: "Ahead of AI"
   feed_url: "https://magazine.sebastianraschka.com/feed"
   bucket: sunday
+  fetch_limit: 6
 
 - name: "The New Stack (AI)"
   feed_url: "https://thenewstack.io/ai/feed/"
   bucket: daily
+  fetch_limit: 15

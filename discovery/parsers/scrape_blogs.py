@@ -60,6 +60,9 @@ class SourceResult:
     error: str | None = None
 
 
+_DEFAULT_FETCH_LIMIT = 30
+
+
 def fetch_one_source(entry: dict) -> SourceResult:
     """Dispatch a single blog_sources.yaml entry to its fetcher (feed_url
     -> fetch_rss_feed, scrape_url -> fetch_anthropic_engineering), applying
@@ -68,11 +71,17 @@ def fetch_one_source(entry: dict) -> SourceResult:
     rows and a non-None error message -- never raises. Public (not
     underscore-prefixed): discovery/nodes/scrape_blogs.py calls this
     directly, one entry at a time, so it can time each source's real fetch
-    latency individually for its own NodeCost record."""
+    latency individually for its own NodeCost record.
+
+    entry['fetch_limit'] (optional, per blog_sources.yaml entry) caps how
+    many items are fetched from that source -- falls back to
+    _DEFAULT_FETCH_LIMIT when the entry doesn't set one."""
+    fetch_limit = entry.get("fetch_limit", _DEFAULT_FETCH_LIMIT)
+
     if "feed_url" in entry:
         max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]
         result = fetch_rss_feed(
-            entry["feed_url"], source_name=entry["name"], max_age_hours=max_age
+            entry["feed_url"], source_name=entry["name"], limit=fetch_limit, max_age_hours=max_age
         )
         rows = [
             row for row in result.rows
@@ -82,7 +91,7 @@ def fetch_one_source(entry: dict) -> SourceResult:
         error = result.errors[0][1] if result.errors else None
         return SourceResult(name=entry["name"], rows=rows, error=error)
 
-    result = fetch_anthropic_engineering(url=entry["scrape_url"])
+    result = fetch_anthropic_engineering(url=entry["scrape_url"], limit=fetch_limit)
     rows = [row for row in result.rows if row["title"]]
     error = result.errors[0][1] if result.errors else None
     return SourceResult(name=entry["name"], rows=rows, error=error)

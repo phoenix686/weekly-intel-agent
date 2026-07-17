@@ -982,6 +982,53 @@ updated to patch `embed_texts` instead of `embed_text` -- all passing,
 costs above, not a precisely-derived number. Adjust with a real
 completed run's actual duration once one exists.
 
+**Follow-up question answered, same investigation**: is
+`SentenceTransformer(MODEL_NAME)` instantiated once per `run_sunday.py`
+execution, or once per call site (`dedupe_semantic`, `taste_prefilter`,
+`recompute_topic_vectors`)? Verified empirically (not just by reading the
+code): called all three real functions in sequence in one process and
+tracked the actual model object identity. First call (`dedupe_semantic`)
+paid the full ~10s model-load cost; the other two took under 1.1s each;
+`id(embeddings_mod._model)` was identical across all three. Confirmed:
+`discovery/embeddings.py`'s module-level `_get_model()` singleton already
+works as intended -- the ~15s tax is genuinely paid once per real run,
+not multiplied by call-site count. No fix needed here.
+
+## `blog_sources.yaml` per-source `fetch_limit` (2026-07-17)
+
+Schema gap confirmed before making any change (per instruction, not
+assumed): `blog_sources.yaml` had no per-source limit override at all --
+`fetch_rss_feed(feed_url, source_name, limit=30, ...)`'s `limit` param
+was never passed by any caller, so every source silently used the same
+hardcoded default of 30 regardless of bucket/cadence. Added a small
+schema addition, not a redesign: an optional `fetch_limit` key per entry.
+
+### `discovery/config/blog_sources.yaml`
+All 12 entries now have `fetch_limit` set explicitly, per-bucket:
+daily-bucket (TLDR AI, Latent Space, MarkTechPost, The New Stack (AI)) ->
+15; sunday-only bucket (the other 8) -> 6. Deliberate volume reduction
+from the prior blanket 30, not left unchanged.
+
+### `discovery/parsers/scrape_blogs.py`
+`fetch_one_source()` reads `entry.get("fetch_limit", _DEFAULT_FETCH_LIMIT)`
+(default 30, unchanged for any future entry that omits it) and passes it
+through as `limit=` to both `fetch_rss_feed()` (feed_url entries) and
+`fetch_anthropic_engineering()` (scrape_url entries -- confirmed that
+function already accepted a `limit` param, just never received one from
+this call site before).
+
+tests/test_scrape_blogs_fetch_limit.py (new): 6/6 passing -- confirms
+`fetch_one_source()` passes an entry's own `fetch_limit` through
+correctly for both feed_url and scrape_url entries, falls back to 30 when
+absent, and asserts the real `blog_sources.yaml`'s 4 daily entries all
+have `fetch_limit=15` and all 8 sunday entries have `fetch_limit=6`
+(fails loudly if a future edit drops one). REAL LIVE VERIFICATION (ad-hoc
+script, all 12 real sources, no mocks): every source's real returned row
+count sat at or under its configured limit; LangChain Blog and Anthropic
+Engineering Blog both hit exactly 6 (the cap), confirming it's actually
+binding for at least two sources, not just coincidentally satisfied by
+low natural volume.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
