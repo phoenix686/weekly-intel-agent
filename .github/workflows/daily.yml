@@ -70,4 +70,10 @@ jobs:
           key: ${{ runner.os }}-hf-all-MiniLM-L6-v2
 
       - name: Run daily digest
+        # HF_HUB_OFFLINE=1 only on this step, not the warm-up step above --
+        # see sunday.yml for the full reasoning and real local verification
+        # (model construction time 6.58s -> 0.92s, 86% reduction, no
+        # silent fallback).
         run: python scripts/run_daily.py
+        env:
+          HF_HUB_OFFLINE: "1"

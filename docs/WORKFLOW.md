@@ -1420,6 +1420,74 @@ from a genuinely new production run, already carrying the pushed UA fix
 the same 4 Substack 403s, unprompted additional confirmation that the
 UA change alone doesn't resolve them.
 
+## HF_HUB_OFFLINE on the main step + Substack 403s confirmed graceful (2026-07-17, same day follow-up)
+
+### 1. `HF_HUB_OFFLINE=1` on the main pipeline step -- closes the cross-process gap found above
+The prior section flagged that the warm-up step's cache does NOT get
+reused in-memory by the main step's separate process, so the main step
+was still paying the huggingface.co revision-check network tax on every
+real run. That blocker (needing real network access on a genuinely cold
+run) is now gone -- the warm-up step + explicit cache restore/save
+already guarantee the model is present on disk before the main step
+starts, so the main step can safely skip that network check entirely.
+
+Verified locally with two genuinely separate subprocesses (matching how
+Actions steps actually work, not two calls in one script): first
+measurement (full subprocess wall time, including one-time Python
+import overhead) showed a real but modest 13.70s -> 8.87s. Isolated
+further to separate `import torch` (1.99s) + `import sentence_transformers`
+(6.13s) from actual model construction time, then re-measured
+construction time alone: **6.58s -> 0.92s, an 86% reduction**, exit
+code 0 both times (no silent fallback/failure). Also tried adding
+`TRANSFORMERS_OFFLINE=1` alongside -- no additional benefit (0.95s vs
+0.92s), so `HF_HUB_OFFLINE=1` alone is sufficient.
+
+Added `env: HF_HUB_OFFLINE: "1"` to the "Run Sunday pipeline" step in
+`sunday.yml` and the "Run daily digest" step in `daily.yml` -- both
+main steps only, deliberately not the warm-up step (which still needs
+real network access to populate a genuinely cold cache).
+
+### 2. Substack 403s -- confirmed graceful, not attempted to fix further
+Per prior instruction, stopped attempting to fix these directly (already
+confirmed unreproducible from this machine, most likely GitHub-runner-IP
+blocking). Confirmed graceful failure with real, current evidence rather
+than re-deriving it from code alone: queried the live `node_summary`
+store directly for the two most recent `scrape_blogs` entries --
+
+```
+items_in (sources): 12   items_out (raw items): 26
+error_summary: JamWithAI: HTTP Error 403: Forbidden; The Nuanced
+  Perspective: HTTP Error 403: Forbidden; AI with Aish: HTTP Error 403:
+  Forbidden; The Neural Maze: HTTP Error 403: Forbidden
+```
+in both of the last two real runs. This confirms all three required
+properties at once: the error is captured (per-source, by name, in
+`error_summary`), the run continues (the node completes and returns a
+`node_summary` row rather than crashing), and other sources are
+unaffected (`items_out=26` -- the other 8 sources' items came through
+fine both times). This was already true at the code level
+(`fetch_rss_feed`'s per-source try/except in `rss_common.py`,
+`scrape_blogs`'s per-source loop in `discovery/nodes/scrape_blogs.py`
+isolating one source's exception from the others) -- this just
+confirms it held in two real production runs, not only in tests.
+
+Documented directly in `discovery/config/blog_sources.yaml` (a dated
+comment block naming all 4 affected sources, the real evidence, and the
+IP-blocking hypothesis) so this isn't mistaken for a new bug by a future
+session encountering the same 403s again.
+
+### Full verification before pushing
+`pytest tests/` (the real test suite -- `scripts/test_*.py` files are
+manual live-run scripts requiring a real checkpointer/interrupt setup,
+not automated tests, and were already failing collection for unrelated
+reasons before this session touched anything): **148 passed, 1 skipped,
+zero regressions**. Both YAML files (`blog_sources.yaml`, `daily.yml`,
+`sunday.yml`) parse cleanly via `yaml.safe_load`.
+
+Next: Sunday Pipeline to be triggered once more (no `gh` CLI/API access
+in this environment to do it directly) to get one real measured
+duration with every fix from today in place.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`

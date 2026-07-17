@@ -37,6 +37,23 @@
 #
 # deeplearning.ai / The Batch intentionally excluded -- no public RSS feed,
 # confirmed independently twice.
+#
+# JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze (all
+# Substack-hosted): currently unreachable specifically from GitHub Actions
+# runners -- real production node_summary entries (2026-07-17) show all
+# four failing with HTTP 403 Forbidden on every run, while the other 8
+# sources' items still come through fine (items_out=26 both times) and the
+# node completes normally, so this is a known, isolated, gracefully-handled
+# failure, not a pipeline bug. Re-tested all four from a non-Actions
+# machine and every one succeeded -- the 403 does not reproduce there, so
+# this is most likely Substack rate-limiting/blocking GitHub's shared
+# runner IP ranges rather than anything about the request itself (a
+# browser-realistic User-Agent was already tried in
+# discovery/parsers/rss_common.py and made no difference). Don't
+# re-diagnose this as a new regression if it shows up again -- it's a
+# standing, already-investigated condition. If Substack ever starts
+# allowing these through again, or an alternative feed host is found, this
+# note can be removed.
 
 - name: "TLDR AI"
   feed_url: "https://tldr.tech/api/rss/ai"
