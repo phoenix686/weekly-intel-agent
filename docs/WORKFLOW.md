@@ -1162,6 +1162,59 @@ classified a routine item as `plan_item`, not a proposal -- `items_in=1,
 items_out=0`. All three produced real, resolvable LangSmith URLs. All
 test entries deleted after assertion.
 
+### Follow-up close-out (same day): junk cleanup, rigor upgrade, real test coverage
+
+Three explicit asks, each with real evidence, not assumed:
+
+**1. Junk entries deleted, confirmed with a fresh query.** Both
+`run-classify-1:classify_item` and `run-1:cluster_dedupe` deleted from
+the live `node_summary` namespace. Re-queried directly afterward (both
+the two specific keys AND a full namespace scan): `ABSENT` for both
+keys, `0 entries total` in the namespace.
+
+**2. Test-suite fix, verified the only way that actually proves it.**
+Plain `pytest` can't distinguish "properly mocked" from "not mocked" --
+`DB_URI` is absent from that environment entirely, so any real store
+attempt fails in ~0ms via `KeyError`, caught silently by
+`record_node_summary`'s own try/except regardless of whether a test
+mocks it. Checked with real credentials instead
+(`uv run --env-file .env`): queried the live `node_summary` namespace
+(0 entries), ran all four test files that touch a `record_node_summary`-
+wired node (`test_score_node.py`, `test_correlate_trello.py`,
+`test_classify_item.py`, `test_cluster_dedupe_adhoc_bypass.py`) -- 15/15
+passed, all under 0.01s each -- then queried the namespace again: still
+0 entries. Real before/after proof, not an inference from green tests or
+timing alone.
+
+**3. Real unit test coverage for `score_node` and `correlate_trello`
+(previously zero, confirmed by grep).**
+
+`tests/test_score_node.py` (5 new): keep=True and keep=False items both
+survive into `scored_items` with the real decision intact (score_node
+doesn't filter -- that's `correlate_trello`'s job); an invalid tag gets
+filtered out of the item's tags and passed to `_log_dropped_tag`
+(mocked, no real file write); `mark_seen` is called with every scored
+URL regardless of keep/drop; `record_node_summary`'s `items_out`
+reflects the real kept count, not the total; items beyond `BATCH_SIZE`
+(50) still all get scored across multiple real (mocked) Haiku calls, not
+silently dropped (60 items -> exactly 2 calls, sized 50 + 10).
+
+`tests/test_correlate_trello.py` (5 new): an item matches a specific
+card when the model says so; an item with no real connection stays
+`matched_card_id: None`; only `keep=True` scored items are ever
+correlated or even reach the prompt (a `keep=False` item's URL confirmed
+absent from the actual prompt text sent to the model); the
+JSON-parse-failure fallback path sets every item's `matched_card_id` to
+`None` and calls `record_node_summary` with `items_out=0` and a real
+`error_summary`; `record_node_summary`'s `items_out` reflects the real
+matched count (1 of 3), not the total correlated count.
+
+Both files mock every real external dependency the same way the rest of
+this suite already does (Anthropic client, `record_node_summary`,
+`mark_seen`, the dropped-tag file write) -- built with the mocking gap
+in mind from the start, not discovered after the fact. Full suite: 140
+passed, 1 skipped, zero regressions.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
