@@ -57,6 +57,7 @@ def test_classification_log_written_for_both_plan_item_and_proposal():
     ]
 
     with patch.object(classify_item_mod, "get_store", return_value=fake_store), \
+         patch.object(classify_item_mod, "record_node_summary"), \
          patch.object(classify_item_mod.client.messages, "create", return_value=_haiku_response(haiku_reply)):
         result = classify_item(_state(correlated_items))
 
@@ -85,6 +86,7 @@ def test_failed_store_write_does_not_affect_node_return_value():
     ]
 
     with patch.object(classify_item_mod, "get_store", return_value=fake_store), \
+         patch.object(classify_item_mod, "record_node_summary"), \
          patch.object(classify_item_mod.client.messages, "create", return_value=_haiku_response(haiku_reply)):
         result = classify_item(_state(correlated_items))  # must not raise
 
@@ -108,6 +110,7 @@ def test_json_parse_failure_fallback_path_still_logs_classifications():
     bad_resp.usage.output_tokens = 5
 
     with patch.object(classify_item_mod, "get_store", return_value=fake_store), \
+         patch.object(classify_item_mod, "record_node_summary"), \
          patch.object(classify_item_mod.client.messages, "create", return_value=bad_resp):
         result = classify_item(_state(correlated_items))
 

@@ -5,6 +5,7 @@ import logging
 import anthropic
 
 from state import SundayGraphState, NodeCost
+from observability import record_node_summary
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic()
@@ -108,6 +109,11 @@ def correlate_trello(state: SundayGraphState) -> dict:
                 cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
                 latency_ms=round((time.perf_counter() - t0) * 1000, 2),
             )
+            record_node_summary(
+                run_id=state["run_id"], node_name="correlate_trello",
+                items_in=len(kept_items), items_out=0, cost_usd=cost["cost_usd"],
+                error_summary="JSON parse failed after retry",
+            )
             return {
                 "correlated_items": [{**item, "matched_card_id": None} for item in kept_items],
                 "costs": [cost],
@@ -120,7 +126,8 @@ def correlate_trello(state: SundayGraphState) -> dict:
         for item in kept_items
     ]
 
-    logger.info(f"correlate_trello matched {sum(1 for i in correlated_items if i['matched_card_id'])} / {len(correlated_items)} items (run_id={state['run_id']})")
+    matched_count = sum(1 for i in correlated_items if i["matched_card_id"])
+    logger.info(f"correlate_trello matched {matched_count} / {len(correlated_items)} items (run_id={state['run_id']})")
 
     cost = NodeCost(
         node_name="correlate_trello",
@@ -128,6 +135,15 @@ def correlate_trello(state: SundayGraphState) -> dict:
         output_tokens=output_tokens,
         cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+    )
+
+    # items_out = matched count (not total correlated_items -- nothing is
+    # actually dropped here, every kept item survives; the real judgment
+    # call this node makes is matched-vs-not, so that's what "dropped"
+    # should reflect).
+    record_node_summary(
+        run_id=state["run_id"], node_name="correlate_trello",
+        items_in=len(kept_items), items_out=matched_count, cost_usd=cost["cost_usd"],
     )
 
     return {"correlated_items": correlated_items, "costs": [cost]}

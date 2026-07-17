@@ -7,6 +7,7 @@ import anthropic
 
 from state import SundayGraphState, NodeCost
 from sunday.memory_store_config import get_store
+from observability import record_node_summary
 
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic()
@@ -171,6 +172,11 @@ def classify_item(state: SundayGraphState) -> dict:
                 for item in state["correlated_items"]
             ]
             _log_classifications(fallback_items, state["run_id"])
+            record_node_summary(
+                run_id=state["run_id"], node_name="classify_item",
+                items_in=len(state["correlated_items"]), items_out=0, cost_usd=cost["cost_usd"],
+                error_summary="JSON parse failed after retry",
+            )
             return {
                 "classified_items": fallback_items,
                 "pending_approvals": [],
@@ -203,6 +209,14 @@ def classify_item(state: SundayGraphState) -> dict:
         output_tokens=output_tokens,
         cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+    )
+
+    # items_out = proposal count, not total classified_items -- nothing is
+    # dropped here either; the real judgment call is plan_item-vs-proposal,
+    # so that's what "dropped" (= plan_items) should reflect.
+    record_node_summary(
+        run_id=state["run_id"], node_name="classify_item",
+        items_in=len(state["correlated_items"]), items_out=len(pending_approvals), cost_usd=cost["cost_usd"],
     )
 
     return {

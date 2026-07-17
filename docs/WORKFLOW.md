@@ -1113,11 +1113,54 @@ invocation produced a real `run_history` entry: `{path: "poll", status:
 place (not cleaned up) since it's genuine production data, exactly what
 this namespace is for, not test pollution.
 
-**Not built this session, flagged as a natural follow-up**: `score_node`,
-`classify_item`, and `correlate_trello` would fit the same
-`record_node_summary` pattern (each has a real items-in/items-out
-decision), but weren't explicitly named in scope for this build --
-suggested, not assumed.
+**Extended (2026-07-17, follow-up turn)**: `score_node`, `correlate_trello`,
+and `classify_item` -- the three most consequential decision-making nodes
+(keep/drop, correlation match, plan/proposal) -- now call
+`record_node_summary` too, same fail-safe wiring, same LangSmith pointer.
+`score_node`: `items_in`/`items_out` = clustered_items in / kept count out.
+`correlate_trello`/`classify_item`: neither node actually drops items
+(every item survives, just annotated) -- `items_out` is redefined per-node
+to reflect the real judgment call instead (matched-count for
+`correlate_trello`, proposal-count for `classify_item`), so the derived
+`dropped` field means "unmatched"/"plan_items" respectively, not a
+literal loss of items. Both nodes' JSON-parse-failure fallback paths also
+call `record_node_summary` (`items_out=0`, `error_summary` set), not just
+their happy paths.
+
+**Real regression found again, more rigorously this time**: plain
+`pytest` (no `.env` loaded) can't prove this either way -- `DB_URI` is
+absent from that environment, so `get_connection_pool()` raises
+`KeyError` immediately, which `record_node_summary`'s try/except
+swallows in ~0ms regardless of whether the test mocks it. Wall-clock
+timing under plain `pytest` is not a reliable signal by itself. Checked
+properly instead: ran `tests/test_classify_item.py` via
+`uv run --env-file .env` (real `DB_URI` loaded) BEFORE fixing its mocks --
+one test call took a real 0.60s, and a real junk entry
+(`run-classify-1:classify_item`) landed in the live `node_summary`
+namespace, confirmed by directly querying the store before/after. This
+also retroactively confirms last turn's `cluster_dedupe_node` fix was
+catching a real issue too, not just responding to noisy timing --a
+second leftover junk entry (`run-1:cluster_dedupe`) from before that fix
+was still sitting in the live store. Both cleaned up. Fixed by adding
+`patch.object(classify_item_mod, "record_node_summary")` to all three of
+that file's tests (same pattern as the `cluster_dedupe` fix), then
+re-ran under `uv run --env-file .env` again -- 0 new entries, confirmed
+clean. No pre-existing tests reference `score_node`/`correlate_trello`
+directly at all (confirmed by grep, the only 3 hits were the literal
+string "score_node" inside unrelated test fixture text) and no test
+anywhere calls `.invoke()` on a real graph, so there was nothing else to
+fix for those two.
+
+tests/test_classify_item.py: 3/3 still passing after the mock fix.
+REAL LIVE VERIFICATION (all three nodes, each invoked inside a real
+traced single-node graph, real Haiku calls, real store): `score_node`
+correctly kept 1/2 items (a real agentic-engineering item survived, a
+fabricated off-topic hiking item didn't) -- `items_in=2, items_out=1`;
+`correlate_trello` correctly found no match against an unrelated fake
+Trello card -- `items_in=1, items_out=0`; `classify_item` correctly
+classified a routine item as `plan_item`, not a proposal -- `items_in=1,
+items_out=0`. All three produced real, resolvable LangSmith URLs. All
+test entries deleted after assertion.
 
 ## Store-namespace registry
 
