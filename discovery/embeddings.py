@@ -48,7 +48,12 @@ No langgraph imports.
 
 from __future__ import annotations
 
+import logging
+import time
+
 from sentence_transformers import SentenceTransformer
+
+logger = logging.getLogger(__name__)
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 COST_PER_TOKEN_USD = 0.0  # local compute, not a billed API call
@@ -59,7 +64,10 @@ _model: SentenceTransformer | None = None
 def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
+        logger.info("embeddings: BEFORE SentenceTransformer(MODEL_NAME) construction (HF_HUB_OFFLINE-gated)")
+        t0 = time.perf_counter()
         _model = SentenceTransformer(MODEL_NAME)
+        logger.info(f"embeddings: AFTER SentenceTransformer(MODEL_NAME) construction ({time.perf_counter() - t0:.3f}s)")
     return _model
 
 
@@ -81,8 +89,17 @@ def embed_texts(texts: list[str]) -> tuple[list[list[float]], list[int]]:
     project's spec requires (skip the pre-filter for that item, don't
     drop it), not this function."""
     model = _get_model()
+
+    logger.info(f"embeddings: BEFORE model.encode() ({len(texts)} text(s))")
+    t0 = time.perf_counter()
     vectors = model.encode(texts, convert_to_numpy=True).tolist()
+    logger.info(f"embeddings: AFTER model.encode() ({time.perf_counter() - t0:.3f}s)")
+
+    logger.info(f"embeddings: BEFORE model.preprocess() ({len(texts)} text(s))")
+    t0 = time.perf_counter()
     encoded = model.preprocess(texts)
+    logger.info(f"embeddings: AFTER model.preprocess() ({time.perf_counter() - t0:.3f}s)")
+
     per_item_tokens = encoded["attention_mask"].sum(dim=1).tolist()
     return vectors, per_item_tokens
 

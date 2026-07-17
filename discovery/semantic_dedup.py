@@ -41,6 +41,7 @@ No langgraph imports.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -65,11 +66,20 @@ def _load_window() -> list[dict]:
     store = get_store()
     cutoff = datetime.now(timezone.utc) - timedelta(days=_WINDOW_DAYS)
     live: list[dict] = []
-    for item_obj in store.search(_NAMESPACE, limit=1000):
+
+    logger.info("semantic_dedup: BEFORE store.search() (_load_window)")
+    t0 = time.perf_counter()
+    window_entries = store.search(_NAMESPACE, limit=1000)
+    logger.info(f"semantic_dedup: AFTER store.search() (_load_window) ({time.perf_counter() - t0:.3f}s, {len(window_entries)} entries)")
+
+    for item_obj in window_entries:
         value = item_obj.value
         scored_at = datetime.fromisoformat(value["scored_at"])
         if scored_at < cutoff:
+            logger.info(f"semantic_dedup: BEFORE store.delete() (stale window entry {item_obj.key!r})")
+            t0 = time.perf_counter()
             store.delete(_NAMESPACE, item_obj.key)
+            logger.info(f"semantic_dedup: AFTER store.delete() (stale window entry {item_obj.key!r}) ({time.perf_counter() - t0:.3f}s)")
             continue
         live.append(value)
     return live
@@ -110,8 +120,11 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
     # API-based provider (one request can fail while others succeed); for
     # a local model, a failure here realistically means the model itself
     # is broken, which would fail every item regardless of looping.
+    logger.info(f"semantic_dedup: BEFORE embed_texts() ({len(items)} item(s))")
+    t0 = time.perf_counter()
     try:
         all_vectors, all_tokens = embed_texts([f"{item['title']}\n\n{item['text']}" for item in items])
+        logger.info(f"semantic_dedup: AFTER embed_texts() ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
         logger.warning(f"semantic_dedup: batch embed failed, all {len(items)} item(s) passed through unfiltered: {e}")
         return list(items), [
@@ -185,10 +198,15 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
     # filter_unseen/mark_seen (2026-07-17), applied to the two per-item
     # write loops named specifically as still-unbatched.
     if drop_records:
+        logger.info(f"semantic_dedup: BEFORE store.batch() (drop_records, {len(drop_records)} record(s))")
+        t0 = time.perf_counter()
         store.batch([PutOp(_DROPS_NAMESPACE, str(uuid.uuid4()), record) for record in drop_records])
+        logger.info(f"semantic_dedup: AFTER store.batch() (drop_records) ({time.perf_counter() - t0:.3f}s)")
 
     if survivors:
         scored_at = datetime.now(timezone.utc).isoformat()
+        logger.info(f"semantic_dedup: BEFORE store.batch() (survivors, {len(survivors)} record(s))")
+        t0 = time.perf_counter()
         store.batch([
             PutOp(_NAMESPACE, item["url"], {
                 "item_id": item["url"],
@@ -199,5 +217,6 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
             })
             for item, vector in zip(survivors, survivor_vectors)
         ])
+        logger.info(f"semantic_dedup: AFTER store.batch() (survivors) ({time.perf_counter() - t0:.3f}s)")
 
     return survivors, costs

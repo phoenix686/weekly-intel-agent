@@ -47,6 +47,7 @@ No langgraph imports.
 from __future__ import annotations
 
 import logging
+import time
 
 from sunday.memory_store_config import get_store
 
@@ -93,6 +94,8 @@ def record_node_summary(
     computed the same way their own NodeCost.latency_ms already is."""
     try:
         store = get_store()
+        logger.info(f"observability: BEFORE store.put() (node_summary, {node_name}, run={run_id})")
+        t0 = time.perf_counter()
         store.put(
             _NODE_SUMMARY_NAMESPACE,
             f"{run_id}:{node_name}",
@@ -108,6 +111,7 @@ def record_node_summary(
                 "error_summary": error_summary,
             },
         )
+        logger.info(f"observability: AFTER store.put() (node_summary, {node_name}, run={run_id}) ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
         logger.warning(f"observability: node_summary write failed for {node_name} (run={run_id}): {e}")
 
@@ -124,6 +128,8 @@ def record_run_started(path: str, run_id: str, started_at: str) -> None:
     never finished -- legible, not silence."""
     try:
         store = get_store()
+        logger.info(f"observability: BEFORE store.put() (run_history start-marker, {path}, run={run_id})")
+        t0 = time.perf_counter()
         store.put(
             _RUN_HISTORY_NAMESPACE,
             run_id,
@@ -140,6 +146,7 @@ def record_run_started(path: str, run_id: str, started_at: str) -> None:
                 "error_summary": None,
             },
         )
+        logger.info(f"observability: AFTER store.put() (run_history start-marker, {path}, run={run_id}) ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
         logger.warning(f"observability: run_history start-marker write failed for {path} run {run_id}: {e}")
 
@@ -164,6 +171,8 @@ def record_run_history(
     blind spot, which this replaces for the same use case)."""
     try:
         store = get_store()
+        logger.info(f"observability: BEFORE store.put() (run_history final, {path}, run={run_id})")
+        t0 = time.perf_counter()
         store.put(
             _RUN_HISTORY_NAMESPACE,
             run_id,
@@ -180,5 +189,6 @@ def record_run_history(
                 "error_summary": error_summary,
             },
         )
+        logger.info(f"observability: AFTER store.put() (run_history final, {path}, run={run_id}) ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
         logger.warning(f"observability: run_history write failed for {path} run {run_id}: {e}")

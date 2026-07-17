@@ -11,6 +11,7 @@ No langgraph imports, no LLM calls.
 from __future__ import annotations
 
 import logging
+import time
 
 from langgraph.store.base import GetOp, PutOp
 from sunday.memory_store_config import get_store
@@ -35,7 +36,10 @@ def filter_unseen(items: list[dict]) -> tuple[list[dict], list[str]]:
     if not items:
         return [], []
     store = get_store()
+    logger.info(f"seen_items: BEFORE store.batch() (GetOp, {len(items)} item(s))")
+    t0 = time.perf_counter()
     results = store.batch([GetOp(_NAMESPACE, item["url"]) for item in items])
+    logger.info(f"seen_items: AFTER store.batch() (GetOp) ({time.perf_counter() - t0:.3f}s)")
     unseen: list[dict] = []
     seen_urls: list[str] = []
     for item, result in zip(items, results):
@@ -56,5 +60,8 @@ def mark_seen(urls: list[str]) -> None:
     if not urls:
         return
     store = get_store()
+    logger.info(f"seen_items: BEFORE store.batch() (PutOp, {len(urls)} url(s))")
+    t0 = time.perf_counter()
     store.batch([PutOp(_NAMESPACE, url, {"seen": True}) for url in urls])
+    logger.info(f"seen_items: AFTER store.batch() (PutOp) ({time.perf_counter() - t0:.3f}s)")
     logger.info(f"seen_items: marked {len(urls)} url(s) as seen")
