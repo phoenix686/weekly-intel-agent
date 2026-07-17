@@ -44,6 +44,8 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from langgraph.store.base import PutOp
+
 from discovery.embeddings import embed_texts, cosine_similarity, COST_PER_TOKEN_USD
 from sunday.memory_store_config import get_store
 from state import ClusteredItem, NodeCost
@@ -73,15 +75,19 @@ def _load_window() -> list[dict]:
     return live
 
 
-def _log_drop(store, item_id: str, similarity: float, compared_against_item_id: str, run_id: str) -> None:
-    store.put(_DROPS_NAMESPACE, str(uuid.uuid4()), {
+def _drop_record(item_id: str, similarity: float, compared_against_item_id: str, run_id: str) -> dict:
+    """Builds a prefilter_drops record without writing it -- the caller
+    collects these across the whole per-item loop and writes them all in
+    ONE store.batch() call at the end, instead of one store.put() per
+    drop (same batching fix as filter_unseen/mark_seen, 2026-07-17)."""
+    return {
         "item_id": item_id,
         "filter_type": "dedup",
         "similarity_score": similarity,
         "compared_against_item_id": compared_against_item_id,
         "compared_against_tag": None,
         "run_id": run_id,
-    })
+    }
 
 
 def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tuple[list[ClusteredItem], list[NodeCost]]:
@@ -117,6 +123,8 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
             for _ in items
         ]
 
+    drop_records: list[dict] = []
+
     for item, vector, tokens in zip(items, all_vectors, all_tokens):
         cost_usd = round(tokens * COST_PER_TOKEN_USD, 8)
 
@@ -127,7 +135,7 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
         )
         if cross_run_match is not None:
             entry, sim = cross_run_match
-            _log_drop(store, item["url"], sim, entry["url"], run_id)
+            drop_records.append(_drop_record(item["url"], sim, entry["url"], run_id))
             costs.append(NodeCost(
                 node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
                 cost_usd=cost_usd, latency_ms=0.0,
@@ -158,27 +166,38 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
                 dropped_url = existing["url"]
                 survivors[idx] = item
                 survivor_vectors[idx] = vector
-                _log_drop(store, dropped_url, sim, item["url"], run_id)
+                drop_records.append(_drop_record(dropped_url, sim, item["url"], run_id))
                 costs.append(NodeCost(
                     node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
                     cost_usd=cost_usd, latency_ms=0.0,
                     error=f"kept over near-duplicate {dropped_url} (cosine={sim:.3f}, published earlier)",
                 ))
             else:
-                _log_drop(store, item["url"], sim, existing["url"], run_id)
+                drop_records.append(_drop_record(item["url"], sim, existing["url"], run_id))
                 costs.append(NodeCost(
                     node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
                     cost_usd=cost_usd, latency_ms=0.0,
                     error=f"dropped as duplicate of {existing['url']} (cosine={sim:.3f})",
                 ))
 
-    for item, vector in zip(survivors, survivor_vectors):
-        store.put(_NAMESPACE, item["url"], {
-            "item_id": item["url"],
-            "url": item["url"],
-            "embedding_vector": vector,
-            "fetched_at": item["fetched_at"],
-            "scored_at": datetime.now(timezone.utc).isoformat(),
-        })
+    # Two batched store.batch() calls covering every drop/survivor at
+    # once, instead of one store.put() per item -- same fix as
+    # filter_unseen/mark_seen (2026-07-17), applied to the two per-item
+    # write loops named specifically as still-unbatched.
+    if drop_records:
+        store.batch([PutOp(_DROPS_NAMESPACE, str(uuid.uuid4()), record) for record in drop_records])
+
+    if survivors:
+        scored_at = datetime.now(timezone.utc).isoformat()
+        store.batch([
+            PutOp(_NAMESPACE, item["url"], {
+                "item_id": item["url"],
+                "url": item["url"],
+                "embedding_vector": vector,
+                "fetched_at": item["fetched_at"],
+                "scored_at": scored_at,
+            })
+            for item, vector in zip(survivors, survivor_vectors)
+        ])
 
     return survivors, costs

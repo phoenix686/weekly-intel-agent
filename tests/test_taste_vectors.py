@@ -4,6 +4,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch
 
+from langgraph.store.base import GetOp, PutOp
+
 from discovery.taste_vectors import taste_prefilter, recompute_topic_vectors, TOPIC_TAGS, _TAG_TO_BULLET
 
 
@@ -22,6 +24,19 @@ class _FakeStore:
 
     def put(self, namespace, key, value):
         self._data[key] = value
+
+    def batch(self, ops):
+        """Real PostgresStore.batch() dispatches a list of Get/PutOp in
+        one call -- mirrored here via the existing put() so behavior
+        stays correct, real batching or not."""
+        results = []
+        for op in ops:
+            if isinstance(op, PutOp):
+                self.put(op.namespace, op.key, op.value)
+                results.append(None)
+            elif isinstance(op, GetOp):
+                results.append(self._data.get(op.key))
+        return results
 
 
 def _item(url, title, text):

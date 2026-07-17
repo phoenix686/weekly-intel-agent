@@ -43,6 +43,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from langgraph.store.base import PutOp
+
 from discovery.embeddings import embed_text, embed_texts, cosine_similarity, COST_PER_TOKEN_USD
 from discovery.nodes.score import ALLOWED_TAGS
 from sunday.memory_store_config import get_store
@@ -125,15 +127,19 @@ def _load_topic_vectors() -> list[dict]:
     return [item_obj.value for item_obj in store.search(_NAMESPACE, limit=len(TOPIC_TAGS) + 5)]
 
 
-def _log_drop(store, item_id: str, similarity: float, compared_against_tag: str, run_id: str) -> None:
-    store.put(_DROPS_NAMESPACE, str(uuid.uuid4()), {
+def _drop_record(item_id: str, similarity: float, compared_against_tag: str, run_id: str) -> dict:
+    """Builds a prefilter_drops record without writing it -- collected
+    across the per-item loop and written in ONE store.batch() call at the
+    end, instead of one store.put() per drop (same batching fix as
+    filter_unseen/mark_seen and semantic_dedup.py, 2026-07-17)."""
+    return {
         "item_id": item_id,
         "filter_type": "taste",
         "similarity_score": similarity,
         "compared_against_item_id": None,
         "compared_against_tag": compared_against_tag,
         "run_id": run_id,
-    })
+    }
 
 
 def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tuple[list[ClusteredItem], list[NodeCost]]:
@@ -172,6 +178,8 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
             for _ in items
         ]
 
+    drop_records: list[dict] = []
+
     for item, vector, tokens in zip(items, all_vectors, all_tokens):
         best_tag, best_sim = max(
             ((tv["tag"], cosine_similarity(vector, tv["embedding_vector"])) for tv in topic_vectors),
@@ -186,11 +194,16 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
                 cost_usd=cost_usd, latency_ms=0.0,
             ))
         else:
-            _log_drop(store, item["url"], best_sim, best_tag, run_id)
+            drop_records.append(_drop_record(item["url"], best_sim, best_tag, run_id))
             costs.append(NodeCost(
                 node_name="taste_prefilter", input_tokens=tokens, output_tokens=0,
                 cost_usd=cost_usd, latency_ms=0.0,
                 error=f"dropped by taste pre-filter: best match {best_tag!r} cosine={best_sim:.3f} < {_THRESHOLD}",
             ))
+
+    # One batched call covering every drop, instead of one store.put()
+    # per drop -- same fix as filter_unseen/mark_seen/semantic_dedup.py.
+    if drop_records:
+        store.batch([PutOp(_DROPS_NAMESPACE, str(uuid.uuid4()), record) for record in drop_records])
 
     return survivors, costs

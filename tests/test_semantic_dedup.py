@@ -5,6 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from langgraph.store.base import GetOp, PutOp
+
 from discovery.semantic_dedup import dedupe_semantic, _NAMESPACE
 
 
@@ -30,6 +32,19 @@ class _FakeStore:
     def put(self, namespace, key, value):
         self._data[key] = value
         self.puts.append((namespace, key, value))
+
+    def batch(self, ops):
+        """Real PostgresStore.batch() dispatches a list of Get/PutOp in
+        one call -- mirrored here via the existing put()/get() so
+        self.puts still records every write, real batching or not."""
+        results = []
+        for op in ops:
+            if isinstance(op, PutOp):
+                self.put(op.namespace, op.key, op.value)
+                results.append(None)
+            elif isinstance(op, GetOp):
+                results.append(self._data.get(op.key))
+        return results
 
 
 def _item(url, title, text, fetched_at="2026-07-16T00:00:00+00:00"):

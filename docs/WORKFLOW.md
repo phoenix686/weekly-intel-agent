@@ -1349,6 +1349,77 @@ files (`test_score_node.py`, `test_correlate_trello.py`,
 store: `node_summary` namespace unchanged (still exactly the one real
 production entry from the actual timed-out run) before and after.
 
+## Finishing the batching job + cross-process model reuse check (2026-07-17, same day follow-up)
+
+### 1. `dedupe_semantic`'s survivor persistence + both filters' drop-audit logging -- now batched
+Confirmed still per-item via a fresh grep sweep before touching anything
+(per instruction): `discovery/semantic_dedup.py`'s final survivor-write
+loop and both `_log_drop()` call sites (semantic + taste), plus
+`discovery/taste_vectors.py`'s `_log_drop()`. All four rewritten to
+collect records across the per-item loop into a plain list, then issue
+ONE `store.batch([PutOp(...), ...])` call at the end -- same fix and
+API as `filter_unseen`/`mark_seen`. `_log_drop()` functions renamed to
+`_drop_record()` (build a dict, don't write it) since writing now
+happens once, batched, not inline per call.
+
+**Two per-item `store` calls confirmed still remaining, left alone
+deliberately, not missed**: `semantic_dedup.py`'s `_load_window()` still
+deletes stale (>7-day) window entries one at a time -- bounded by how
+many entries just crossed the staleness threshold since the last run
+(typically 0-few), not by this run's item count, so it doesn't scale
+the same way. `taste_vectors.py`'s `recompute_topic_vectors()` still
+writes topic vectors one per tag -- bounded to ~6 tags total regardless
+of item volume, and its partial-failure test relies on per-tag
+independent failure (already decided against batching this in the
+first round, reconfirmed still correct here).
+
+Existing `_FakeStore` test doubles (`test_semantic_dedup.py`,
+`test_prefilter_drops.py`, `test_taste_vectors.py`) gained a `.batch()`
+method mirroring real `PostgresStore.batch()` (dispatches `PutOp`/`GetOp`
+through the existing `put()`/lookup so `self.puts` still records every
+write). Full suite: 148 passed, 1 skipped, zero regressions.
+
+### 2. Cross-process model reuse -- confirmed NOT shared, a separate real cost
+Tested directly with two genuinely separate OS processes (matching how
+GitHub Actions steps actually work -- not just two function calls in one
+script, which wouldn't answer this): a "warm-up" subprocess loads the
+model (17.31s), then a SECOND, separate subprocess times its own model
+load with the disk cache now fully warm from the first -- **17.56s,
+essentially the same cost, not eliminated**. Confirmed: `discovery/
+embeddings.py`'s `_model` global is process-local; the real "Run Sunday
+pipeline" step's own `python scripts/run_sunday.py` process cannot reuse
+the warm-up step's in-memory model instance no matter how warm the disk
+cache is -- it independently re-triggers the same huggingface.co
+revision-check network chatter every real run. The warm-up step's real
+value is narrower than it might look: it guarantees the cache gets
+populated and saved before the risky main step (the actual crash-
+durability/vicious-cycle fix), but it does NOT remove this network-
+chatter tax from the main step itself. Flagged, not fixed here --
+`HF_HUB_OFFLINE=1` on the main step specifically (now safe to set,
+since the warm-up step guarantees the cache is populated in the same
+job) would close this remaining gap, but wasn't asked for this round.
+
+### Cheap local verification before touching GitHub Actions again
+Timed a real `cluster_dedupe_node` invocation with 13 items (matching
+the real survivor count from tonight's actual production runs) against
+the live store: **11.80s total wall time**, `node_summary`'s own
+`duration_seconds` confirms 10.621s of that -- consistent with the
+one-time model-load tax being the dominant real cost, everything else
+(batched embedding, batched store writes) fast. This is the real "fast
+locally" confirmation the next Sunday Pipeline trigger was gated on.
+
+**Found while re-checking the store for this report, not something I
+triggered**: a real `run_history` entry (`873db6a8...`, `path="sunday"`)
+shows `status="in_progress"`, `finished_at=None`, started
+`2026-07-17T08:21:05Z` -- either a real Sunday Pipeline run is active
+right now, or it already ended and this in-progress marker is the only
+trace left (which would itself be today's crash-durability fix working
+exactly as designed). Also found a second real `node_summary` entry
+from a genuinely new production run, already carrying the pushed UA fix
+(confirmed by the presence of `duration_seconds`) -- and it still hit
+the same 4 Substack 403s, unprompted additional confirmation that the
+UA change alone doesn't resolve them.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
