@@ -34,6 +34,7 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
     source's failure message when it fails. A single failing source's
     exception is already caught inside fetch_one_source -- it can never
     crash this loop or block another source's fetch/cost record."""
+    node_t0 = time.perf_counter()
     items: list[RawItem] = []
     costs: list[NodeCost] = []
     errors: list[str] = []
@@ -63,6 +64,7 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
         node_name="scrape_blogs",
         items_in=len(entries),
         items_out=len(items),
+        duration_seconds=round(time.perf_counter() - node_t0, 3),
         error_summary="; ".join(errors) if errors else None,
     )
 

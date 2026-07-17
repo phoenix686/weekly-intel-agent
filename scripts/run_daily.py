@@ -9,11 +9,19 @@ setup_logging()
 
 from daily.graph import build_daily_graph
 from state import make_daily_initial_state
-from observability import record_run_history
+from observability import record_run_started, record_run_history
 
 run_id = str(uuid.uuid4())
 started_at = datetime.now(timezone.utc)
 t0 = time.perf_counter()
+
+# Written before any real work starts -- a hard external kill (GitHub
+# Actions cancelling on timeout-minutes) may never let the finally block
+# below run at all. This early write is what survives that case: a real
+# status="in_progress" record, overwritten by the real final one below
+# if the process gets that far. See observability.py's module docstring.
+record_run_started(path="daily", run_id=run_id, started_at=started_at.isoformat())
+
 graph = build_daily_graph().compile()
 
 # run_history must still get a real record on a crash, not just a clean

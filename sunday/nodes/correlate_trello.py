@@ -112,6 +112,7 @@ def correlate_trello(state: SundayGraphState) -> dict:
             record_node_summary(
                 run_id=state["run_id"], node_name="correlate_trello",
                 items_in=len(kept_items), items_out=0, cost_usd=cost["cost_usd"],
+                duration_seconds=round(time.perf_counter() - t0, 3),
                 error_summary="JSON parse failed after retry",
             )
             return {
@@ -144,6 +145,7 @@ def correlate_trello(state: SundayGraphState) -> dict:
     record_node_summary(
         run_id=state["run_id"], node_name="correlate_trello",
         items_in=len(kept_items), items_out=matched_count, cost_usd=cost["cost_usd"],
+        duration_seconds=round(time.perf_counter() - t0, 3),
     )
 
     return {"correlated_items": correlated_items, "costs": [cost]}

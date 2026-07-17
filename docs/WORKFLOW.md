@@ -1215,6 +1215,140 @@ this suite already does (Anthropic client, `record_node_summary`,
 in mind from the start, not discovered after the fact. Full suite: 140
 passed, 1 skipped, zero regressions.
 
+## Public-repo security pre-flight (2026-07-17) -- clean, nothing fixed
+
+Before flipping repo visibility to public, searched the FULL git history
+(`git log --all -p`, every commit, not just the current tree) for
+committed secrets. Clean across every pattern checked: Google API key
+shape (`AIza...`), Anthropic (`sk-ant-...`, generic `sk-...`), Telegram
+bot token shape, Postgres connection strings with embedded credentials,
+every real credential env-var name (`GEMINI_API_KEY`, `VOYAGE_API_KEY`,
+`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+`TRELLO_API_KEY`, `TRELLO_TOKEN`, `DB_URI`) assigned to a real literal
+value anywhere, LangSmith key shapes, Supabase/JWT-shaped tokens, and
+literal `password=` assignments. The only `.env`-shaped file ever
+committed, in any commit, is `.env.example` (`ae49909`) -- diffed
+against the current version, both are the template with every value
+left blank.
+
+`.gitignore` confirmed correctly excludes `.env`, `data/` (zero tracked
+files under it, confirmed via `git ls-files`), and `.claude/`. Cross-
+checked that `feature_list.json`/`phase-5b-spec.md`/`session-handoff.md`/
+`tests/closeout-spec.md` are genuinely untracked (present locally, never
+committed) -- nothing got swept into tracked status when `docs/`/
+`.github/` were deliberately un-ignored earlier. Full 124-file tracked
+list is entirely source/tests/docs, spot-checked `discovery_graph.mmd`
+and `eval/parser_fixtures/*.json` -- all clean, fixtures are explicitly
+synthetic (`synth_tester`, `example.com`). The specifically-flagged
+`39d7235` commit (companion-store digest/plan writes) reviewed in full
+diff -- legitimate code + synthetic test fixtures, nothing from another
+project.
+
+**Not checked (no access)**: GitHub's secret scanning / push protection
+repo settings -- no `gh` CLI, no API token in this environment, private
+repo returns 404 unauthenticated. Needs a manual check via the GitHub
+web UI (Settings -> Code security and analysis) before or right after
+going public.
+
+## Real 45-minute Sunday timeout: root-cause fixes (2026-07-17)
+
+Four fixes, in priority order, each with real evidence -- not just
+raising the timeout again without addressing causes.
+
+### 1. Batched `filter_unseen`/`mark_seen` (`discovery/seen_items.py`)
+Both used to issue one `store.get()`/`store.put()` per item -- confirmed
+the most concrete, measured inefficiency: a real benchmark against the
+live store showed 10 individual `store.get()` calls at 2636ms total vs.
+one `store.batch([GetOp(...), ...])` call at 219ms -- a real 12.1x
+speedup. Rewrote both to use `PostgresStore.batch()` with `GetOp`/`PutOp`
+lists covering every item in one call. `tests/test_seen_items.py` (new,
+4 tests, zero prior coverage) confirms correctness of the batched
+rewrite via a `_FakeStore.batch()` that mirrors real Op handling, not
+just that it runs. REAL LIVE VERIFICATION: 20 fresh items -> all unseen
+-> `mark_seen` -> re-checked -> all seen, correct end to end against the
+real store.
+
+### 2. Substack 403s -- real browser User-Agent (`discovery/parsers/rss_common.py`)
+Was `"weekly-intel-bot/1.0"`, an obviously bot-identifying string.
+Changed to the same real browser UA `anthropic_blog.py` already uses
+successfully. **Honest caveat, not overclaimed**: re-tested all four
+blocked sources (JamWithAI, The Nuanced Perspective, AI with Aish, The
+Neural Maze) from this machine -- every one succeeded with BOTH the old
+bot UA and the new browser UA. The block did not reproduce here, so this
+could not be verified as the actual fix the way a reproducible failure
+would allow. Most likely explanation: Substack blocks/rate-limits by IP
+range (GitHub Actions' shared runner IPs specifically), not by this
+exact UA string. Applied as a legitimate defensive improvement regardless
+-- the real test is the next live GitHub Actions run, not this.
+
+### 3. `actions/cache` save skipped on timeout cancellation -- confirmed via GitHub's own community discussions (`.github/workflows/sunday.yml`, `daily.yml`)
+Searched for GitHub's documented behavior rather than assuming: GitHub
+Actions runs post-job steps (which is how `actions/cache@v4`'s combined
+action saves its cache) ONLY if the job reaches a "completed" state.
+Multiple real GitHub community discussions/issues confirm post steps are
+skipped when a job is cancelled -- and a `timeout-minutes` cancellation
+is an external termination, not a completion, the same category of
+problem as the Python `finally`-block gap found in the run itself. This
+closes the vicious cycle Pooja named: every timed-out attempt was
+re-paying the full cold pip-install + HuggingFace-model-download cost
+from scratch, since the cache never got a chance to save. Fixed by
+switching from the combined `actions/cache@v4` action to explicit
+`actions/cache/restore@v4` (early) + `actions/cache/save@v4` (right
+after a new, cheap warm-up step that forces the HuggingFace model
+download -- `python -c "from discovery.embeddings import _get_model;
+_get_model()"` -- confirmed working locally), placed BEFORE the long,
+timeout-risking main pipeline step. Applied to both `sunday.yml` and
+`daily.yml` (same cache pattern, same theoretical risk, for consistency).
+
+### 4. Crash-durability gap for real timeouts, not just exceptions (`observability.py`)
+Question 0 of this investigation confirmed the gap was real: after the
+actual 45-minute timeout, `run_history` had ZERO entries and
+`node_summary` had exactly ONE (`scrape_blogs`, the only node that
+finished before the kill) -- the `finally` block in `run_sunday.py`
+never got to run, and no LangSmith trace existed for the run either
+(tracing wasn't connected during that real execution). A `finally` block
+alone isn't enough against an external kill -- confirmed by the same
+GitHub post-step research above (a killed process may never get to run
+ANY of its own remaining code, `finally` included). Fixed with
+`record_run_started(path, run_id, started_at)`, called at the very
+start of each entrypoint (`run_daily.py`/`run_sunday.py`/`run_poll.py`),
+before any real work -- writes a real `status="in_progress"` record to
+the SAME `run_id` key that `record_run_history` (still called from the
+existing `finally` block) later overwrites if the process survives that
+long. A run stuck at `status="in_progress"` with no later overwrite is
+now itself a legible signal that the run never finished, not silence.
+Also added `duration_seconds` to `node_summary` (missing entirely
+before -- question 4 of the same investigation couldn't be answered
+partly because this field never existed), wired into all five
+`record_node_summary` call sites (`cluster_dedupe`, `scrape_blogs`,
+`score_node`, `correlate_trello`, `classify_item`), each passing their
+own already-measured elapsed time.
+
+REAL LIVE VERIFICATION, the actual crash case: called `record_run_started`
+in one process, deliberately never called `record_run_history` --
+simulating exactly what a hard external kill does. A separate process
+then queried the store directly: a real, complete
+`{status: "in_progress", finished_at: None, ...}` record was there,
+confirmed -- proof the fix survives the exact failure mode it targets,
+not just the happy path. Separately ran the real `scripts/run_poll.py`
+end to end: confirmed the in-progress marker gets correctly overwritten
+by the final `status: "success"` record when the process does survive.
+`duration_seconds` confirmed real and non-zero (9.969s) in a real
+`node_summary` entry from an actual `cluster_dedupe_node` invocation.
+
+`tests/test_observability.py` gained 4 new tests (11 total): `record_run_started`
+writes the correct in-progress shape; confirms the same-key overwrite
+semantics with `record_run_history`; confirms a failed write doesn't
+raise; confirms `record_node_summary`'s `duration_seconds` defaults to
+0.0 for any caller not yet passing it. Full suite: 148 passed, 1
+skipped, zero regressions. Re-verified with real credentials
+(`uv run --env-file .env`) that none of the mocked node-touching test
+files (`test_score_node.py`, `test_correlate_trello.py`,
+`test_classify_item.py`, `test_cluster_dedupe_adhoc_bypass.py`,
+`test_seen_items.py`, `test_observability.py` -- 30 tests) hit the live
+store: `node_summary` namespace unchanged (still exactly the one real
+production entry from the actual timed-out run) before and after.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
@@ -1236,8 +1370,8 @@ actual code, not assumed from the spec's prior draft).
 | `rejection_events` | **KNOWN-DEAD** -- orphaned, no schema in production use | `scripts/test_update_profile_rejections.py` only (manual test script) | none in production |
 | `classification_log` | `{item_id, decision: "plan_item"\|"project_proposal", proposal_type, run_id}` | `sunday/nodes/classify_item.py` (every item, not just proposals) | future eval work (`classify_item` eval, not yet built) |
 | `approval_log` | `{item_id, outcome: "approved"\|"rejected", run_id}` | `sunday/approval_actions.py` (`handle_approval`, `handle_rejection`) | future eval work (`classify_item` eval, not yet built) |
-| `node_summary` | `{run_id, node_name, items_in, items_out, dropped, cost_usd, langsmith_url, error_summary}` | `observability.py` (`record_node_summary`, called from `cluster_dedupe_node`, `scrape_blogs`) | manual query -- durable per-node aggregate + LangSmith pointer, no automated reader yet |
-| `run_history` | `{run_id, path, started_at, finished_at, status, total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `observability.py` (`record_run_history`, called from `run_daily.py`/`run_sunday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet |
+| `node_summary` | `{run_id, node_name, items_in, items_out, dropped, cost_usd, duration_seconds, langsmith_url, error_summary}` | `observability.py` (`record_node_summary`, called from `cluster_dedupe_node`, `scrape_blogs`, `score_node`, `correlate_trello`, `classify_item`) | manual query -- durable per-node aggregate + LangSmith pointer, no automated reader yet |
+| `run_history` | `{run_id, path, started_at, finished_at, status: "in_progress"\|"success"\|"failed"\|"paused", total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `observability.py` (`record_run_started` writes the initial `in_progress` marker; `record_run_history` overwrites the same key with the final outcome -- called from `run_daily.py`/`run_sunday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet. A record stuck at `status="in_progress"` with no overwrite means the run never finished (crashed harder than a Python exception could catch) |
 
 ## What does NOT exist yet
 

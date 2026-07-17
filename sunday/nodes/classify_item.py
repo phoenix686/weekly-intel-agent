@@ -175,6 +175,7 @@ def classify_item(state: SundayGraphState) -> dict:
             record_node_summary(
                 run_id=state["run_id"], node_name="classify_item",
                 items_in=len(state["correlated_items"]), items_out=0, cost_usd=cost["cost_usd"],
+                duration_seconds=round(time.perf_counter() - t0, 3),
                 error_summary="JSON parse failed after retry",
             )
             return {
@@ -217,6 +218,7 @@ def classify_item(state: SundayGraphState) -> dict:
     record_node_summary(
         run_id=state["run_id"], node_name="classify_item",
         items_in=len(state["correlated_items"]), items_out=len(pending_approvals), cost_usd=cost["cost_usd"],
+        duration_seconds=round(time.perf_counter() - t0, 3),
     )
 
     return {

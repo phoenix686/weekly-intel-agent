@@ -15,10 +15,19 @@ setup_logging()
 from sunday.graph import build_sunday_graph
 from state import make_sunday_initial_state
 from checkpointer_config import DEFAULT_RECURSION_LIMIT
-from observability import record_run_history
+from observability import record_run_started, record_run_history
 
 run_id = str(uuid.uuid4())
 thread_id = run_id  # same value — makes checkpoint identifiable by run_id
+started_at = datetime.now(timezone.utc)
+t0 = time.perf_counter()
+
+# Written before any real work starts (graph build, checkpointer
+# connection, the actual invoke) -- a hard external kill (GitHub Actions
+# cancelling on timeout-minutes, the exact real failure mode this is for)
+# may never let the finally block below run at all. See
+# observability.py's module docstring.
+record_run_started(path="sunday", run_id=run_id, started_at=started_at.isoformat())
 
 config = {
     "configurable": {"thread_id": thread_id},
@@ -32,8 +41,6 @@ print(f"Starting Sunday run {run_id[:8]} (thread_id={thread_id})")
 # run_history must still get a real record on a crash, not just a clean
 # finish -- see run_daily.py for the same reasoning. Re-raises so the
 # GitHub Actions job still fails loudly on a real error.
-started_at = datetime.now(timezone.utc)
-t0 = time.perf_counter()
 status = "failed"
 final_state = None
 error_summary = None

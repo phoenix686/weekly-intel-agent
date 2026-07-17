@@ -142,6 +142,7 @@ def score_node(state: DiscoverySubgraphState) -> dict:
     record_node_summary(
         run_id=run_id, node_name="score_node",
         items_in=len(items), items_out=kept_count, cost_usd=round(cost_usd, 6),
+        duration_seconds=round(time.perf_counter() - t0, 3),
     )
 
     return {

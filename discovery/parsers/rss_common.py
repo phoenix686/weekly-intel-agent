@@ -16,6 +16,23 @@ from email.utils import parsedate_to_datetime
 
 _DC_CREATOR = "{http://purl.org/dc/elements/1.1/}creator"
 
+# Real browser UA, not a bot-identifying string (was "weekly-intel-bot/1.0"
+# -- 2026-07-17, real production 403s from 4 Substack-hosted sources on a
+# real Sunday run). Matches discovery/parsers/anthropic_blog.py's already-
+# working UA. Honest caveat: re-tested all four blocked sources from this
+# machine afterward and every one succeeded with BOTH the old bot UA and
+# this one -- the block did not reproduce here, so this could not be
+# verified as the actual fix the way a reproducible failure would allow.
+# Most likely explanation: Substack rate-limits/blocks by IP range (e.g.
+# GitHub Actions' shared runner IPs), not by this exact UA string. Applied
+# as a legitimate defensive improvement regardless -- a bot-labeled UA is
+# objectively more likely to be blocked somewhere than a real browser one
+# -- but the real test is the next live GitHub Actions run, not this.
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+)
+
 # XML 1.0 disallows most C0 control chars in content (only tab/LF/CR are
 # legal). Some real-world feeds embed them anyway (e.g. a <code> sample
 # containing literal control bytes) -- strip rather than let a single
@@ -90,7 +107,7 @@ def fetch_rss_feed(
     errors: list[tuple[str, str]] = []
 
     try:
-        req = urllib.request.Request(feed_url, headers={"User-Agent": "weekly-intel-bot/1.0"})
+        req = urllib.request.Request(feed_url, headers={"User-Agent": _BROWSER_USER_AGENT})
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw_bytes = resp.read()
             charset = resp.headers.get_content_charset() or "utf-8"

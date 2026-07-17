@@ -9,7 +9,7 @@ from logging_config import setup_logging
 setup_logging()
 
 from telegram.polling import poll_once
-from observability import record_run_history
+from observability import record_run_started, record_run_history
 
 # poll_once() has no per-run cost of its own (pure Telegram/Postgres
 # mechanics -- any real Anthropic cost happens inside handle_approval/
@@ -21,6 +21,12 @@ from observability import record_run_history
 run_id = str(uuid.uuid4())
 started_at = datetime.now(timezone.utc)
 t0 = time.perf_counter()
+
+# Written before poll_once() starts -- see observability.py's module
+# docstring for why a finally block alone isn't enough under a hard
+# external kill.
+record_run_started(path="poll", run_id=run_id, started_at=started_at.isoformat())
+
 status = "failed"
 error_summary = None
 updates_in = 0

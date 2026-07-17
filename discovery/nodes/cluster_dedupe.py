@@ -133,6 +133,7 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
         items_in=len(state["raw_items"]),
         items_out=len(clustered_items),
         cost_usd=sum(c["cost_usd"] for c in costs),
+        duration_seconds=round(time.perf_counter() - t0, 3),
     )
 
     return {
