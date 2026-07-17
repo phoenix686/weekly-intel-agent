@@ -46,7 +46,13 @@ def _normalize_decision(text: str) -> str | None:
     return None
 
 
-def poll_once() -> None:
+def poll_once() -> dict:
+    """Returns {"updates_in": N} -- how many real Telegram updates were
+    fetched this call (0 if none). Every fetched update gets routed to
+    exactly one of the three paths (resume/feedback/ad-hoc) in
+    _handle_update, so there's no separate "processed" count to track
+    beyond this -- callers wanting run_history's items_in/items_out use
+    this same number for both."""
     store = get_store()
 
     offset_item = store.get(_OFFSET_NAMESPACE, _OFFSET_KEY)
@@ -54,13 +60,14 @@ def poll_once() -> None:
 
     updates = _get_updates(offset)
     if not updates:
-        return
+        return {"updates_in": 0}
 
     for update in updates:
         _handle_update(update, store)
 
     new_offset = updates[-1]["update_id"] + 1
     store.put(_OFFSET_NAMESPACE, _OFFSET_KEY, {"value": new_offset})
+    return {"updates_in": len(updates)}
 
 
 def _handle_update(update: dict, store) -> None:

@@ -3,6 +3,7 @@ import time
 from discovery.parsers.scrape_blogs import fetch_one_source
 from discovery.blog_sources_config import entries_for_context
 from state import DiscoverySubgraphState, RawItem, NodeCost
+from observability import record_node_summary
 
 
 def _row_to_item(row: dict) -> RawItem:
@@ -37,7 +38,8 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
     costs: list[NodeCost] = []
     errors: list[str] = []
 
-    for entry in entries_for_context(state["source_context"]):
+    entries = entries_for_context(state["source_context"])
+    for entry in entries:
         t0 = time.perf_counter()
         source_result = fetch_one_source(entry)
         cost = NodeCost(
@@ -51,6 +53,18 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
             errors.append(cost["error"])
         costs.append(cost)
         items.extend(_row_to_item(row) for row in source_result.rows)
+
+    # items_in/items_out here mean "active sources attempted" / "raw items
+    # fetched" -- a different unit pair than cluster_dedupe's (items in,
+    # items out of the same kind), but the same generic node_summary shape,
+    # documented per-node rather than inventing a new schema per node.
+    record_node_summary(
+        run_id=state["run_id"],
+        node_name="scrape_blogs",
+        items_in=len(entries),
+        items_out=len(items),
+        error_summary="; ".join(errors) if errors else None,
+    )
 
     return {
         "raw_items": items,

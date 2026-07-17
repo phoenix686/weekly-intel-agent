@@ -17,6 +17,7 @@ from state import DiscoverySubgraphState, RawItem, ClusteredItem, NodeCost
 from discovery.seen_items import filter_unseen
 from discovery.semantic_dedup import dedupe_semantic
 from discovery.taste_vectors import taste_prefilter
+from observability import record_node_summary
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +126,17 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     relevant, taste_costs = taste_prefilter(deduped, run_id)
     costs.extend(taste_costs)
 
+    clustered_items = relevant + adhoc_items
+    record_node_summary(
+        run_id=run_id,
+        node_name="cluster_dedupe",
+        items_in=len(state["raw_items"]),
+        items_out=len(clustered_items),
+        cost_usd=sum(c["cost_usd"] for c in costs),
+    )
+
     return {
-        "clustered_items": relevant + adhoc_items,
+        "clustered_items": clustered_items,
         "costs": costs,
         "stage": "clustered",
     }

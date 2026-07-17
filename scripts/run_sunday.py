@@ -1,5 +1,7 @@
 import sys
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,6 +15,7 @@ setup_logging()
 from sunday.graph import build_sunday_graph
 from state import make_sunday_initial_state
 from checkpointer_config import DEFAULT_RECURSION_LIMIT
+from observability import record_run_history
 
 run_id = str(uuid.uuid4())
 thread_id = run_id  # same value — makes checkpoint identifiable by run_id
@@ -25,21 +28,55 @@ config = {
 graph = build_sunday_graph()
 
 print(f"Starting Sunday run {run_id[:8]} (thread_id={thread_id})")
-final_state = graph.invoke(make_sunday_initial_state(run_id=run_id), config=config)
 
-kept = [i for i in final_state.get("scored_items", []) if i.get("keep")]
+# run_history must still get a real record on a crash, not just a clean
+# finish -- see run_daily.py for the same reasoning. Re-raises so the
+# GitHub Actions job still fails loudly on a real error.
+started_at = datetime.now(timezone.utc)
+t0 = time.perf_counter()
+status = "failed"
+final_state = None
+error_summary = None
+try:
+    final_state = graph.invoke(make_sunday_initial_state(run_id=run_id), config=config)
+    status = "success"
+except Exception as e:
+    error_summary = f"{type(e).__name__}: {e}"
+    raise
+finally:
+    duration = time.perf_counter() - t0
+    scored = final_state.get("scored_items", []) if final_state else []
+    kept = [i for i in scored if i.get("keep")]
+    total_cost = sum(c.get("cost_usd", 0.0) for c in final_state.get("costs", [])) if final_state else 0.0
+    # A paused run (proposals awaiting Telegram approval) is a normal,
+    # expected outcome, not a failure -- distinguished from a genuine crash.
+    if final_state is not None:
+        snapshot = graph.get_state(config)
+        if snapshot.next:
+            status = "paused"
+    record_run_history(
+        path="sunday",
+        run_id=run_id,
+        started_at=started_at.isoformat(),
+        finished_at=datetime.now(timezone.utc).isoformat(),
+        status=status,
+        total_cost_usd=total_cost,
+        items_in=len(scored),
+        items_out=len(kept),
+        duration_seconds=round(duration, 2),
+        error_summary=error_summary,
+    )
+
 plan_items = [i for i in final_state.get("classified_items", []) if i.get("classification") == "plan_item"]
 proposals = final_state.get("pending_approvals", [])
-total_cost = sum(c.get("cost_usd", 0.0) for c in final_state.get("costs", []))
 
-print(f"Scored: {len(kept)} kept / {len(final_state.get('scored_items', []))} total")
+print(f"Scored: {len(kept)} kept / {len(scored)} total")
 print(f"Plan: {len(plan_items)} plan_items · {len(proposals)} proposals pending approval")
 print(f"Total cost: ${total_cost:.4f}")
 if final_state.get("errors"):
     print(f"Errors: {final_state['errors']}")
 
-snapshot = graph.get_state(config)
-if snapshot.next:
+if status == "paused":
     print(f"\nGraph paused — awaiting Telegram replies for {len(proposals)} proposal(s).")
     print(f"Thread ID for resume: {thread_id}")
     print("Reply 'approve' or 'reject' to each proposal message in Telegram.")

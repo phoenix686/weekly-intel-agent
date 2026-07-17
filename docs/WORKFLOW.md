@@ -1029,6 +1029,96 @@ Engineering Blog both hit exactly 6 (the cap), confirming it's actually
 binding for at least two sources, not just coincidentally satisfied by
 low natural volume.
 
+## Durable run/node observability: `run_history` + `node_summary` (2026-07-17)
+
+Motivated by a real question: is there any durable, queryable record of
+"what happened in a given run," or does reconstructing that always
+require piecing together LangSmith + raw GitHub Actions logs + a manual
+Postgres query, the way that night's investigations had to? Answer:
+no such record existed -- `data/cost_log.csv` was the closest thing, and
+it's Sunday-only, lives on the CI runner's local (gitignored, never
+persisted) disk, and is only ever written on a clean finish, so it has
+zero record of exactly the crash case most worth capturing.
+
+**Design confirmed before building, not assumed**: constructed a real
+108-item synthetic stress test (matching genuine fetch-limit volume: 4
+daily x 15 + 8 sunday-only x 6 = 108) through the real `cluster_dedupe_node`
+inside an actual traced LangGraph invocation. The real trace's `costs`
+output held all 125 real per-item records intact (108 semantic_dedup + 16
+taste_prefilter + 1 base), including real `error` strings with genuine
+similarity scores and comparison targets (e.g. `"dropped as duplicate of
+<url> (cosine=0.910)"`). Payload size: 23.6 KB, far under any practical
+limit. Confirmed: LangSmith already holds full per-item detail at real
+scale -- so the new log is deliberately thin (aggregate counts + a
+LangSmith pointer), not a second copy of per-item detail. The granular
+WHY stays queryable from `prefilter_drops` for the rare deep-dive.
+
+### `observability.py` (new, repo root)
+`get_current_trace_url()` -- real LangSmith trace URL for whichever node
+is currently executing, via `langsmith.run_helpers.get_current_run_tree()`;
+returns `None` gracefully if tracing is off or there's no run context
+(e.g. a bare unit test calling a node function directly). `record_node_summary(run_id, node_name, items_in, items_out, cost_usd,
+error_summary)` writes one entry per `(run_id, node_name)` to
+`("weekly_intel","node_summary")` -- `dropped` is derived
+(`items_in - items_out`), not a second value callers compute themselves.
+`record_run_history(path, run_id, started_at, finished_at, status,
+total_cost_usd, items_in, items_out, duration_seconds, error_summary)`
+writes one entry per entrypoint invocation to
+`("weekly_intel","run_history")`. Every write wrapped in try/except,
+logged and swallowed on failure -- same pattern as
+`classification_log`/`approval_log`, a failed observability write must
+never mask or block the real run/node outcome it's describing.
+
+### `discovery/nodes/cluster_dedupe.py`, `discovery/nodes/scrape_blogs.py`
+Both call `record_node_summary` once at the end. `cluster_dedupe`:
+`items_in`/`items_out` = raw_items in / clustered_items out (same unit).
+`scrape_blogs`: `items_in`/`items_out` = active sources attempted / raw
+items fetched (different units, same generic shape -- documented per-node
+in a comment rather than inventing a separate schema per node, matching
+how `NodeCost` itself is one generic shape reused everywhere).
+
+### `scripts/run_daily.py`, `scripts/run_sunday.py`, `scripts/run_poll.py`
+Each wraps its real work in try/except/finally and calls
+`record_run_history` once at the very end -- including on a crash
+(`status="failed"`, `error_summary=str(exception)`), which is the exact
+case `cost_log.csv` could never capture. The real exception still
+re-raises after recording, so the GitHub Actions job keeps failing loudly
+-- this only adds a durable record, never swallows the real failure
+signal. `run_sunday.py` additionally distinguishes `status="paused"`
+(proposals awaiting Telegram approval -- a normal, expected outcome) from
+a genuine crash. `telegram/polling.py`'s `poll_once()` now returns
+`{"updates_in": N}` instead of `None` (minor, backward-compatible return
+contract change -- no existing caller checked the return value) so
+`run_poll.py` has a real count to record.
+
+**Real regression found and fixed during this build**: wiring
+`record_node_summary` into `cluster_dedupe_node` made
+`tests/test_cluster_dedupe_adhoc_bypass.py` silently start hitting the
+real live Postgres store on every test run (that test never mocked the
+new call) -- caught by noticing the test suite's wall time, not assumed
+fine. Fixed by mocking `record_node_summary` in both of that file's tests,
+same as every other real dependency they already mock.
+
+tests/test_observability.py (new): 7/7 passing -- `record_node_summary`
+writes the correct shape with a correctly-derived `dropped` count and a
+real trace URL when tracing is active; both record functions swallow a
+failing store write without raising; `get_current_trace_url` returns
+`None` gracefully both when there's no run context and when the lookup
+itself raises. REAL LIVE VERIFICATION: a real `cluster_dedupe_node`
+invocation (inside a real traced single-node graph) produced a real
+`node_summary` entry with a real, resolvable LangSmith URL, correct
+`items_in`/`items_out`/`dropped`. A real `uv run scripts/run_poll.py`
+invocation produced a real `run_history` entry: `{path: "poll", status:
+"success", items_in: 0, items_out: 0, duration_seconds: 2.48}` -- left in
+place (not cleaned up) since it's genuine production data, exactly what
+this namespace is for, not test pollution.
+
+**Not built this session, flagged as a natural follow-up**: `score_node`,
+`classify_item`, and `correlate_trello` would fit the same
+`record_node_summary` pattern (each has a real items-in/items-out
+decision), but weren't explicitly named in scope for this build --
+suggested, not assumed.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
@@ -1050,6 +1140,8 @@ actual code, not assumed from the spec's prior draft).
 | `rejection_events` | **KNOWN-DEAD** -- orphaned, no schema in production use | `scripts/test_update_profile_rejections.py` only (manual test script) | none in production |
 | `classification_log` | `{item_id, decision: "plan_item"\|"project_proposal", proposal_type, run_id}` | `sunday/nodes/classify_item.py` (every item, not just proposals) | future eval work (`classify_item` eval, not yet built) |
 | `approval_log` | `{item_id, outcome: "approved"\|"rejected", run_id}` | `sunday/approval_actions.py` (`handle_approval`, `handle_rejection`) | future eval work (`classify_item` eval, not yet built) |
+| `node_summary` | `{run_id, node_name, items_in, items_out, dropped, cost_usd, langsmith_url, error_summary}` | `observability.py` (`record_node_summary`, called from `cluster_dedupe_node`, `scrape_blogs`) | manual query -- durable per-node aggregate + LangSmith pointer, no automated reader yet |
+| `run_history` | `{run_id, path, started_at, finished_at, status, total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `observability.py` (`record_run_history`, called from `run_daily.py`/`run_sunday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet |
 
 ## What does NOT exist yet
 

@@ -39,7 +39,8 @@ def test_adhoc_item_bypasses_both_filters_with_zero_embed_calls():
 
     with patch.object(cluster_dedupe_mod, "filter_unseen", side_effect=lambda items: (items, [])), \
          patch.object(cluster_dedupe_mod, "dedupe_semantic", wraps=None) as mock_dedupe, \
-         patch.object(cluster_dedupe_mod, "taste_prefilter", wraps=None) as mock_taste:
+         patch.object(cluster_dedupe_mod, "taste_prefilter", wraps=None) as mock_taste, \
+         patch.object(cluster_dedupe_mod, "record_node_summary"):
         mock_dedupe.return_value = ([blog_item], [])
         mock_taste.return_value = ([blog_item], [])
 
@@ -63,7 +64,8 @@ def test_adhoc_only_run_never_calls_dedupe_or_taste_with_any_items():
 
     with patch.object(cluster_dedupe_mod, "filter_unseen", side_effect=lambda items: (items, [])), \
          patch.object(cluster_dedupe_mod, "dedupe_semantic", return_value=([], [])) as mock_dedupe, \
-         patch.object(cluster_dedupe_mod, "taste_prefilter", return_value=([], [])) as mock_taste:
+         patch.object(cluster_dedupe_mod, "taste_prefilter", return_value=([], [])) as mock_taste, \
+         patch.object(cluster_dedupe_mod, "record_node_summary"):
         result = cluster_dedupe_node(_state([adhoc_item]))
 
     assert mock_dedupe.call_args[0][0] == []
