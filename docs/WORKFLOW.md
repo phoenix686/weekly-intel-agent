@@ -1488,6 +1488,96 @@ Next: Sunday Pipeline to be triggered once more (no `gh` CLI/API access
 in this environment to do it directly) to get one real measured
 duration with every fix from today in place.
 
+## Real hang diagnosis: fine-grained checkpoints + missing psycopg timeouts (2026-07-17, same day follow-up)
+
+Two consecutive Sunday runs stopped being merely slow -- they hung. Both
+died silently right after cluster_dedupe's "skipped N already-seen" log
+line: zero traceback, zero exception, nothing until GitHub's own
+45-minute timeout killed the job externally. That signature (silence, not
+a raised error) points at a call that never returns, not one that's
+merely slow -- a different failure class than the earlier duration-based
+investigation, and not fixable by more batching.
+
+### 1. Fine-grained BEFORE/AFTER checkpoints on every remaining network call
+Added a paired `logger.info()` immediately before and immediately after
+every store.get/put/search/batch/delete call, every embed_texts()/
+embed_text() call, and the SentenceTransformer construction itself, across
+`cluster_dedupe_node -> dedupe_semantic -> taste_prefilter`:
+`connection_pool.py` (ConnectionPool construction), `sunday/
+memory_store_config.py` (store.setup()), `discovery/seen_items.py`
+(filter_unseen/mark_seen's store.batch()), `discovery/semantic_dedup.py`
+(_load_window's search/delete, embed_texts(), both batch writes),
+`discovery/taste_vectors.py` (_load_topic_vectors's search, embed_texts(),
+drop-records batch), `discovery/embeddings.py` (SentenceTransformer
+construction, model.encode(), model.preprocess()), `observability.py`
+(all three store.put() call sites). One log per actual blocking call, not
+one per node -- the next real run's log will show exactly which specific
+line it stalls on. `logging_config.py`'s `setup_logging()` is already
+called at the top of every entrypoint script, so these reach GitHub
+Actions' captured stdout, not silently dropped.
+
+REAL LOCAL VERIFICATION (live store, real credentials): ran
+`cluster_dedupe_node` end to end against 2 real items -- every single
+BEFORE paired with an AFTER, nothing hung, full round trip ~10s
+(dominated by a cold model load). Full test suite: 148 passed, 1 skipped,
+zero regressions from adding the logging.
+
+### 2. Missing connect_timeout / statement_timeout -- the real root cause candidate
+Checked huggingface_hub first: `constants.py` bakes in
+`DEFAULT_REQUEST_TIMEOUT = 10` / `DEFAULT_ETAG_TIMEOUT = 10` regardless of
+HF_HUB_OFFLINE -- worst case there is a bounded 10s stall, not an infinite
+hang. Ruled out as the likely cause on this basis.
+
+psycopg is a different story. `connection_pool.py` set no
+`connect_timeout` anywhere. Read psycopg_pool 3.3.1's actual source
+(`pool.py`): the pool's own `timeout=30.0` only bounds how long a *caller*
+waits in queue for an already-open connection -- it does NOT bound the
+underlying libpq `connect()` call itself. `_add_connection()` (the method
+that opens every real connection the pool ever uses, both initial fill
+and any reconnect after a lost connection) calls `self._connect()` with
+**no timeout argument at all** (confirmed at the exact call site), so
+`_connect()`'s own `if timeout: kwargs["connect_timeout"] = ...` override
+never fires for these connections. libpq's documented default for an
+unset `connect_timeout` is "wait indefinitely." No `statement_timeout` was
+configured anywhere either (no conninfo option, no post-connect SET), so
+a query that gets past connection but stalls server-side (e.g. lock
+contention) had no bound of its own either. This is a real, code-verified
+match for "hangs forever, no exception" -- not a hypothesis needing a
+separate validation round, since the source itself was read directly.
+
+**Fix**: `connection_pool.py` now sets `connect_timeout=10` (same order of
+magnitude as huggingface_hub's own default) directly in the `kwargs` dict
+passed to `ConnectionPool()` -- this makes it part of the *resolved*
+kwargs dict every real `connect()` call uses regardless of which code path
+opens the connection, sidestepping `_connect()`'s optional
+timeout-override parameter entirely rather than depending on it. A new
+`configure` callback (`_configure_connection`) runs `SET
+statement_timeout = '30s'` on every newly-opened connection (psycopg_pool
+calls `configure` from `_add_connection()` each time a connection is
+created, not just once at pool construction) -- generous for real work,
+well short of the 45-minute job ceiling.
+
+REAL LOCAL VERIFICATION (live store, real credentials) that both values
+actually take effect rather than being silently ignored:
+- `SHOW statement_timeout` on a real pooled connection returned exactly
+  `'30s'`.
+- `pool._resolve_kwargs()` (the actual dict passed to every real
+  `connect()` call) contains `connect_timeout: 10`.
+- A direct `psycopg.connect(...)` with the same kwarg shows
+  `connect_timeout: '10'` as a real libpq-level parameter in
+  `conn.info.get_parameters()`, not just a Python-side dict entry.
+
+Full test suite re-run after this change: 148 passed, 1 skipped, zero
+regressions.
+
+### Next real run
+This environment has no `gh` CLI/API access to trigger GitHub Actions
+directly. Pooja triggers Sunday Pipeline manually after this push. Given
+the new checkpoint logging, the next run tells us something real either
+way: a clean success, or -- if the timeouts are what was needed -- a
+fast, specific timeout exception naming the exact stuck call, replacing
+another silent 45-minute kill with an actual diagnosis.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
