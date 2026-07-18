@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from state import SundayGraphState, NodeCost
 from sunday.memory_store_config import get_store
+from sunday.plan_history import record_plan_history
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,15 @@ def assemble_plan(state: SundayGraphState) -> dict:
         state["run_id"],
         state["trello_cards"],
     )
+
+    surfaced_card_ids = [
+        i["matched_card_id"]
+        for i in state["classified_items"]
+        if i["classification"] == "plan_item"
+        and "course" not in i.get("tags", [])
+        and i.get("matched_card_id") is not None
+    ]
+    record_plan_history(state["run_id"], surfaced_card_ids)
 
     get_store().put(
         ("companion",),

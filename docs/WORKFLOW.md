@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 2 (Trello card staleness) -- see bottom section
+Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 3 (plan_history namespace) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -291,8 +291,24 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   `matched_card_id` -- added Sunday-plan-LLM-prioritization checkpoint, sub-phase 1,
   reversing the earlier implicit fold into Reading & Learning), **Existing Project
   Work** (no `course` tag, has `matched_card_id`). Numbering is continuous across
-  all three sections.
+  all three sections. The node wrapper also calls `record_plan_history()` (sub-phase
+  3) with the run's `run_id` and the deduped `matched_card_id`s of exactly the items
+  that rendered in Existing Project Work (course-tagged items excluded even if
+  matched) -- same predicate as the Existing Project Work section itself, kept in
+  sync deliberately.
 - **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`
+
+### `sunday/plan_history.py`  _(new, sub-phase 3)_
+- **What it does:** `record_plan_history(run_id, card_ids)` writes one entry per
+  Sunday run to `("weekly_intel", "plan_history")`, keyed by `run_id`, recording
+  which real Trello card IDs got surfaced as Existing Project Work plan items that
+  week (deduped, sorted). Entries accumulate across weeks (never overwritten) --
+  sub-phase 4's cross-week movement detection needs the most recent PRIOR entry,
+  not just the latest. Not wrapped in try/except -- unlike `observability.py`'s
+  pure-observability writes, this is real domain data sub-phase 4 depends on, same
+  distinction `discovery/seen_items.py`'s `mark_seen()` already makes.
+- **Key exports:** `record_plan_history(run_id, card_ids) -> None`
+- **Depended on by:** `sunday/nodes/assemble_plan.py`
 
 ### `sunday/nodes/send_telegram_plan.py`
 - **What it does:** Posts `state["plan_text"]` to Telegram.
@@ -1983,6 +1999,7 @@ actual code, not assumed from the spec's prior draft).
 | `approval_log` | `{item_id, outcome: "approved"\|"rejected", run_id}` | `sunday/approval_actions.py` (`handle_approval`, `handle_rejection`) | future eval work (`classify_item` eval, not yet built) |
 | `node_summary` | `{run_id, node_name, items_in, items_out, dropped, cost_usd, duration_seconds, langsmith_url, error_summary}` | `observability.py` (`record_node_summary`, called from `cluster_dedupe_node`, `scrape_blogs`, `score_node`, `correlate_trello`, `classify_item`) | manual query -- durable per-node aggregate + LangSmith pointer, no automated reader yet |
 | `run_history` | `{run_id, path, started_at, finished_at, status: "in_progress"\|"success"\|"failed"\|"paused", total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `observability.py` (`record_run_started` writes the initial `in_progress` marker; `record_run_history` overwrites the same key with the final outcome -- called from `run_daily.py`/`run_sunday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet. A record stuck at `status="in_progress"` with no overwrite means the run never finished (crashed harder than a Python exception could catch) |
+| `plan_history` | `{run_id, card_ids: list[str], generated_at}` (one entry per Sunday run, keyed by `run_id`, never overwritten) | `sunday/plan_history.py` (`record_plan_history`, called from `sunday/nodes/assemble_plan.py`) | not yet read -- sub-phase 4 (cross-week movement detection) will query the most recent prior entry |
 
 ## What does NOT exist yet
 
@@ -1995,11 +2012,11 @@ actual code, not assumed from the spec's prior draft).
   next run actually resumes the graph and writes the correct Trello outcome.
   Human-only per `feature_list.json` — Claude Code must not and did not mark
   this passing.
-- **Sub-phases 3-5 of the Sunday plan LLM prioritization checkpoint** (see
-  below) — `plan_history` namespace, cross-week movement detection (including
-  fetching Trello's real `Done` list), and the new bounded LLM prioritization
-  node are all NOT started. Sub-phases 1 (Courses digest section) and 2
-  (Trello card staleness) are built so far.
+- **Sub-phases 4-5 of the Sunday plan LLM prioritization checkpoint** (see
+  below) — cross-week movement detection (including fetching Trello's real
+  `Done` list) and the new bounded LLM prioritization node are NOT started.
+  Sub-phases 1 (Courses digest section), 2 (Trello card staleness), and 3
+  (`plan_history` namespace) are built so far.
 
 ## Sunday plan LLM prioritization checkpoint (2026-07-18)
 
@@ -2013,10 +2030,10 @@ build. Full scope, for context (later sub-phases not yet started):
    implicit fold into Reading & Learning) — **DONE.**
 2. `read_trello` exposes the full card list with per-card staleness
    (last-activity date), not just what `correlate_trello`'s match-checking
-   needs today — **DONE, this entry.**
+   needs today — **DONE.**
 3. New store namespace `("weekly_intel", "plan_history")` — each Sunday run
    records which Trello card IDs got surfaced as plan items that week, tied
-   to `run_id` — **not started.**
+   to `run_id` — **DONE, this entry.**
 4. Cross-week movement detection: before generating each new plan,
    re-fetch current Trello state for every card in the most recent prior
    `plan_history` entry, and determine real movement (list change, archive,
@@ -2173,3 +2190,75 @@ exposes the raw timestamp, any threshold/judgment is item 5's (the new LLM
 node)'s job; `correlate_trello` was not modified and does not read
 `last_activity` — it still only uses `card_id`/`list_name`/`name`/
 `checklist_items`, confirmed unchanged by the full test suite passing.
+
+### Sub-phase 3: `plan_history` store namespace — what was built
+
+**Files changed:**
+- `sunday/plan_history.py` — **new file.** `record_plan_history(run_id,
+  card_ids)` writes one entry per run to `("weekly_intel", "plan_history")`,
+  keyed by `run_id`, value `{run_id, card_ids: list[str] (deduped, sorted),
+  generated_at}`. Deliberately not wrapped in try/except — see the file
+  entry above for why (real domain data, not observability).
+- `sunday/nodes/assemble_plan.py` — `assemble_plan()` node wrapper now
+  computes `surfaced_card_ids` (the deduped `matched_card_id`s of items
+  that satisfy the exact same predicate as the Existing Project Work
+  section: `classification == "plan_item"`, no `course` tag, real
+  `matched_card_id`) and calls `record_plan_history(run_id,
+  surfaced_card_ids)` before the existing `current_weekly_plan` write.
+  `format_plan()`'s own tested 2-tuple return signature was left
+  unchanged (no third return value added) — the predicate is recomputed
+  directly from `state["classified_items"]` in the node wrapper instead,
+  a small deliberate duplication that avoids touching every existing
+  `format_plan()` call site's tuple-unpacking.
+- `state.py` — no change needed; `trello_cards`/`classified_items` shapes
+  already carried everything this sub-phase needed.
+- `tests/test_plan_history.py` — **new file.** 4 tests: one entry written
+  per `run_id`; duplicate `card_ids` collapsed; an empty-list week still
+  records a real entry (not skipped — "zero cards surfaced" is meaningful
+  data, distinct from no record at all); `card_ids` sorted for
+  deterministic output. `get_store()` mocked, no real store touched.
+- `tests/test_assemble_plan.py` — 5 new tests on the `assemble_plan()` node
+  wrapper (previously untested — only the pure `format_plan()` function had
+  coverage): records only Existing-Project-Work card IDs; excludes a
+  course-tagged item's card ID even when `matched_card_id` is set (mirrors
+  the Courses-takes-priority rule from sub-phase 1); excludes proposals
+  (`classification != "plan_item"`); records an empty list when there's no
+  project work; the pre-existing `current_weekly_plan` write still happens
+  unchanged. `get_store` and `record_plan_history` both mocked at the
+  `sunday.nodes.assemble_plan` import site.
+
+**Real evidence:**
+- Full test suite: `175 passed, 1 skipped` (up from 167 — 9 new tests, 0
+  broken). One unrelated flake seen mid-run (`test_blog_sources_yaml.py`'s
+  live Hacker News RSS fetch timed out) — confirmed transient, passed
+  clean on immediate re-run; not caused by anything in this sub-phase.
+- **Live write against the real Supabase store** (not mocked): ran the
+  real `assemble_plan()` node with a synthetic run_id
+  (`smoke-test-plan-history-DELETE-ME`) and two fabricated classified
+  items (one Reading & Learning, one Existing Project Work matched to a
+  real card ID). Confirmed via `store.get()` the real entry landed exactly
+  as expected: `{"run_id": "smoke-test-plan-history-DELETE-ME",
+  "card_ids": ["realcard123"], "generated_at": "2026-07-18T15:32:45...Z"}`
+  — only the project-work card ID present, the reading-section item
+  correctly excluded. The test entry was then deleted (`store.delete()`),
+  confirmed gone via a follow-up `store.get()` returning `None` — no
+  permanent pollution of the real `plan_history` table.
+
+**Real mistake made and disclosed, not buried:** the same live smoke test
+also ran the node's pre-existing `("companion",) "current_weekly_plan"`
+write (unrelated to this sub-phase's own change, but part of the same node
+function) against the real store, overwriting Pooja's real current plan
+with fake placeholder text ("Article A" / "Project B", 218 chars) — done
+without reading/saving the real prior value first, so it can't be cleanly
+restored. Flagged to Pooja immediately; her call was to leave it (self-
+heals at the next real Sunday run; the placeholder text is obviously fake,
+low risk of being mistaken for a real plan in the meantime). Lesson for
+future live smoke tests against singleton overwrite-in-place keys: read
+and stash the existing value first, or avoid exercising that code path
+live at all when only a different part of the same function needs
+verifying.
+
+**Explicitly NOT done in this sub-phase:** no reading of `plan_history`
+anywhere (no "most recent prior entry" query exists yet — that's sub-phase
+4's job); no cross-week comparison logic; no change to what
+`correlate_trello` or `classify_item` do with card data.

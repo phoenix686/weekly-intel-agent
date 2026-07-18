@@ -1,7 +1,9 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sunday.nodes.assemble_plan import format_plan
+from unittest.mock import patch, MagicMock
+
+from sunday.nodes.assemble_plan import format_plan, assemble_plan
 
 RUN_ID = "abc12345-0000-0000-0000-000000000000"
 
@@ -251,3 +253,74 @@ def test_item_map_numbering_continues_across_all_three_sections():
     assert item_map[1]["title"] == "Article A"
     assert item_map[2]["title"] == "Course B"
     assert item_map[3]["title"] == "Project C"
+
+
+# ── assemble_plan() node wrapper: plan_history recording ───────────────────────
+# (Sunday plan LLM prioritization checkpoint, sub-phase 3 -- get_store() and
+# record_plan_history() both mocked so this stays fully offline.)
+
+def _sunday_state(classified_items, trello_cards=None, run_id=RUN_ID):
+    return {
+        "run_id": run_id, "classified_items": classified_items,
+        "trello_cards": trello_cards or [], "pending_approvals": [],
+    }
+
+
+def test_assemble_plan_records_only_project_work_card_ids():
+    items = [
+        _plan_item(matched_card_id=None, title="Article A"),
+        _plan_item(matched_card_id="card1", title="Project B"),
+    ]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
+        assemble_plan(_sunday_state(items, [_card("card1")]))
+
+    mock_record.assert_called_once_with(RUN_ID, ["card1"])
+
+
+def test_assemble_plan_excludes_course_tagged_card_ids_even_when_matched():
+    """A course-tagged item that happens to have a matched_card_id renders
+    in the Courses section, not Existing Project Work (sub-phase 1) -- its
+    card should not be recorded in plan_history either, same rule."""
+    items = [_plan_item(matched_card_id="card1", title="Agents Course", tags=["course"])]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
+        assemble_plan(_sunday_state(items, [_card("card1")]))
+
+    mock_record.assert_called_once_with(RUN_ID, [])
+
+
+def test_assemble_plan_excludes_proposals_from_plan_history():
+    items = [_plan_item(matched_card_id="card1", title="Project B"), _proposal()]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
+        assemble_plan(_sunday_state(items, [_card("card1")]))
+
+    mock_record.assert_called_once_with(RUN_ID, ["card1"])
+
+
+def test_assemble_plan_records_empty_list_when_no_project_work():
+    items = [_plan_item(matched_card_id=None, title="Article A")]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
+        assemble_plan(_sunday_state(items))
+
+    mock_record.assert_called_once_with(RUN_ID, [])
+
+
+def test_assemble_plan_still_writes_current_weekly_plan():
+    items = [_plan_item(matched_card_id=None, title="Article A")]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.record_plan_history"):
+        assemble_plan(_sunday_state(items))
+
+    fake_store.put.assert_called_once()
+    namespace, key, value = fake_store.put.call_args[0]
+    assert namespace == ("companion",)
+    assert key == "current_weekly_plan"
+    assert value["run_id"] == RUN_ID
