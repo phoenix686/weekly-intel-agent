@@ -7,12 +7,13 @@ RUN_ID = "abc12345-0000-0000-0000-000000000000"
 
 
 def _plan_item(matched_card_id=None, title="A title", reasoning="Good content.",
-               url="https://example.com", text="body text"):
+               url="https://example.com", text="body text", tags=None):
     return {
         "url": url, "title": title, "text": text, "reasoning": reasoning,
         "classification": "plan_item", "proposal_type": None,
         "classification_reasoning": "routed as plan_item",
-        "matched_card_id": matched_card_id, "tags": ["agentic-engineering"],
+        "matched_card_id": matched_card_id,
+        "tags": tags if tags is not None else ["agentic-engineering"],
     }
 
 
@@ -85,6 +86,46 @@ def test_both_sections_present_when_both_types_exist():
     assert text.index("Article A") < text.index("Project B")
 
 
+# ── Courses section ─────────────────────────────────────────────────────────────
+
+def test_course_tagged_item_in_courses_section_not_reading():
+    items = [_plan_item(matched_card_id=None, title="Deep Learning Specialization", tags=["course"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "**Courses**" in text
+    assert "Deep Learning Specialization" in text
+    assert "**Reading & Learning**" not in text
+
+
+def test_courses_section_omitted_when_no_course_items():
+    items = [_plan_item(matched_card_id=None, title="Article A")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "**Courses**" not in text
+
+
+def test_course_tagged_item_goes_to_courses_even_when_matched_to_a_card():
+    """A course tag takes priority over matched_card_id -- courses are a
+    format-based section, not routed by Trello correlation like project
+    work is."""
+    items = [_plan_item(matched_card_id="card1", title="Agents Course", tags=["course"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert "**Courses**" in text
+    assert "Agents Course" in text
+    assert "**Existing Project Work**" not in text
+
+
+def test_all_three_sections_present_and_ordered():
+    items = [
+        _plan_item(matched_card_id=None, title="Article A"),
+        _plan_item(matched_card_id=None, title="Course B", tags=["course"]),
+        _plan_item(matched_card_id="card1", title="Project C"),
+    ]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert "**Reading & Learning**" in text
+    assert "**Courses**" in text
+    assert "**Existing Project Work**" in text
+    assert text.index("Article A") < text.index("Course B") < text.index("Project C")
+
+
 # ── Numbering ─────────────────────────────────────────────────────────────────
 
 def test_items_numbered_sequentially_across_sections():
@@ -95,6 +136,18 @@ def test_items_numbered_sequentially_across_sections():
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
     assert "1. [Article A]" in text
     assert "2. [Project B]" in text
+
+
+def test_items_numbered_sequentially_across_all_three_sections():
+    items = [
+        _plan_item(matched_card_id=None, title="Article A"),
+        _plan_item(matched_card_id=None, title="Course B", tags=["course"]),
+        _plan_item(matched_card_id="card1", title="Project C"),
+    ]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert "1. [Article A]" in text
+    assert "2. [Course B]" in text
+    assert "3. [Project C]" in text
 
 
 # ── Card name resolution ──────────────────────────────────────────────────────
@@ -185,3 +238,16 @@ def test_item_map_numbering_continues_across_both_sections():
     assert set(item_map.keys()) == {1, 2}
     assert item_map[1]["title"] == "Article A"
     assert item_map[2]["title"] == "Project B"
+
+
+def test_item_map_numbering_continues_across_all_three_sections():
+    items = [
+        _plan_item(matched_card_id=None, title="Article A"),
+        _plan_item(matched_card_id=None, title="Course B", tags=["course"]),
+        _plan_item(matched_card_id="card1", title="Project C"),
+    ]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    assert set(item_map.keys()) == {1, 2, 3}
+    assert item_map[1]["title"] == "Article A"
+    assert item_map[2]["title"] == "Course B"
+    assert item_map[3]["title"] == "Project C"

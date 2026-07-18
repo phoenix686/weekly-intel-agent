@@ -124,10 +124,12 @@ def test_failed_batch_embed_call_passes_all_items_through_unfiltered():
 
 
 def test_recompute_topic_vectors_writes_one_entry_per_mapped_tag():
-    """learning-resource has no clearly corresponding TASTE_PROFILE
-    bullet (Section 0 item 1 / Section 6) -- flagged, not guessed, no
-    vector computed for it. The other 5 tags all have a mapped bullet
-    and get a real vector."""
+    """learning-resource and course have no clearly corresponding
+    TASTE_PROFILE bullet (Section 0 item 1 / Section 6; course added for
+    the Courses digest section, Checkpoint: Sunday plan LLM
+    prioritization, sub-phase 1 -- same "format, not topic" reasoning) --
+    flagged, not guessed, no vector computed for either. The other 6 tags
+    all have a mapped bullet and get a real vector."""
     fake_store = _FakeStore()
     mapped_tags = [t for t in TOPIC_TAGS if _TAG_TO_BULLET.get(t) is not None]
     unmapped_tags = [t for t in TOPIC_TAGS if _TAG_TO_BULLET.get(t) is None]
@@ -136,11 +138,11 @@ def test_recompute_topic_vectors_writes_one_entry_per_mapped_tag():
          patch("discovery.taste_vectors.embed_text", return_value=([0.1] * 6, 20)) as mock_embed:
         costs = recompute_topic_vectors("current profile text")
 
-    assert unmapped_tags == ["learning-resource"]
+    assert unmapped_tags == ["course", "learning-resource"]
     assert set(fake_store._data.keys()) == set(mapped_tags)
-    assert len(fake_store._data) == len(TOPIC_TAGS) - 1
-    assert mock_embed.call_count == len(mapped_tags)  # never even attempted for the unmapped tag
-    assert len(costs) == len(TOPIC_TAGS)  # one cost record per tag, including the flagged one
+    assert len(fake_store._data) == len(TOPIC_TAGS) - 2
+    assert mock_embed.call_count == len(mapped_tags)  # never even attempted for the unmapped tags
+    assert len(costs) == len(TOPIC_TAGS)  # one cost record per tag, including the flagged ones
     unmapped_cost = next(c for c in costs if "learning-resource" in (c.get("error") or ""))
     assert "no clearly corresponding TASTE_PROFILE bullet" in unmapped_cost["error"]
     for tag, value in fake_store._data.items():
@@ -164,10 +166,10 @@ def test_recompute_topic_vectors_degrades_gracefully_on_partial_failure():
          patch("discovery.taste_vectors.embed_text", side_effect=_flaky_embed):
         costs = recompute_topic_vectors("profile text")
 
-    # 5 mapped tags attempted, 1 of those fails -> 4 written; 1 unmapped
-    # tag never attempted at all -> 0 written for it either way.
+    # 6 mapped tags attempted, 1 of those fails -> 5 written; 2 unmapped
+    # tags never attempted at all -> 0 written for them either way.
     assert len(fake_store._data) == len(mapped_tags) - 1
     errored = [c for c in costs if c.get("error")]
-    assert len(errored) == 2  # 1 embed failure + 1 unmapped-tag flag
+    assert len(errored) == 3  # 1 embed failure + 2 unmapped-tag flags
     assert any("rate limited" in c["error"] for c in errored)
     assert any("no clearly corresponding TASTE_PROFILE bullet" in c["error"] for c in errored)

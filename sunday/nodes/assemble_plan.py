@@ -47,8 +47,9 @@ def format_plan(
         msg += "_"
         return msg, {}
 
-    reading = [i for i in plan_items if i.get("matched_card_id") is None]
-    project = [i for i in plan_items if i.get("matched_card_id") is not None]
+    courses = [i for i in plan_items if "course" in i.get("tags", [])]
+    reading = [i for i in plan_items if "course" not in i.get("tags", []) and i.get("matched_card_id") is None]
+    project = [i for i in plan_items if "course" not in i.get("tags", []) and i.get("matched_card_id") is not None]
 
     lines = ["📋 *Weekly Plan*", ""]
     counter = 1
@@ -57,6 +58,21 @@ def format_plan(
     if reading:
         lines.append("**Reading & Learning**")
         for item in reading:
+            title = (item.get("title") or item["text"])[:80]
+            reasoning = item["reasoning"].replace("_", r"\_")
+            lines.append(f"{counter}. [{title}]({item['url']})")
+            lines.append(f"   _{reasoning}_")
+            lines.append("")
+            item_map[counter] = {
+                "url": item["url"], "title": title,
+                "text": item["text"], "tags": item.get("tags", []),
+                "reasoning": item["reasoning"],
+            }
+            counter += 1
+
+    if courses:
+        lines.append("**Courses**")
+        for item in courses:
             title = (item.get("title") or item["text"])[:80]
             reasoning = item["reasoning"].replace("_", r"\_")
             lines.append(f"{counter}. [{title}]({item['url']})")

@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: origin/main deployment-gap finding (see bottom sections) -- local main unpushed, 19 commits ahead
+Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 1 (Courses digest section) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -245,8 +245,12 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 
 ### `discovery/nodes/score.py`
 - **What it does:** Scores `ClusteredItem`s against taste profile using Claude Haiku.
-- **Key exports:** `score_node(state) -> dict`
-- **Depended on by:** `discovery/graph.py`
+  `ALLOWED_TAGS` now includes `course` (added Sunday-plan-LLM-prioritization
+  checkpoint, sub-phase 1) -- a format tag distinct from the pre-existing
+  catch-all `learning-resource`: assigned only to structured, multi-lesson
+  courses/bootcamps/certifications, not single articles/tutorials/essays.
+- **Key exports:** `score_node(state) -> dict`, `ALLOWED_TAGS`
+- **Depended on by:** `discovery/graph.py`, `discovery/taste_vectors.py` (imports `ALLOWED_TAGS`)
 
 ### `sunday/__init__.py`, `sunday/nodes/__init__.py`
 - **What it does:** Empty package markers.
@@ -270,7 +274,13 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **Key exports:** `classify_item(state) -> dict`
 
 ### `sunday/nodes/assemble_plan.py`
-- **What it does:** `format_plan()` + `assemble_plan` node wrapper. Produces weekly plan text.
+- **What it does:** `format_plan()` + `assemble_plan` node wrapper. Produces weekly plan
+  text with three sections in order: **Reading & Learning** (no `course` tag, no
+  `matched_card_id`), **Courses** (any plan item tagged `course`, regardless of
+  `matched_card_id` -- added Sunday-plan-LLM-prioritization checkpoint, sub-phase 1,
+  reversing the earlier implicit fold into Reading & Learning), **Existing Project
+  Work** (no `course` tag, has `matched_card_id`). Numbering is continuous across
+  all three sections.
 - **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`
 
 ### `sunday/nodes/send_telegram_plan.py`
@@ -668,8 +678,11 @@ external account/key/billing tier of any kind).
 - Multi-vector per-tag pre-filter, max-similarity, threshold 0.30. Bootstrap
   embedding input is `score.py`'s `TASTE_PROFILE` prompt constant, mapped
   best-effort per tag -- `learning-resource` has no clearly corresponding
-  bullet and is flagged (no vector computed), not guessed. Logs every drop
-  to `prefilter_drops`.
+  bullet and is flagged (no vector computed), not guessed. `course` (added
+  sub-phase 1 of the Sunday-plan-LLM-prioritization checkpoint) is
+  deliberately unmapped the same way -- it's a format tag, not a topic, so
+  it has no corresponding topic bullet either. `TOPIC_TAGS` now has 7
+  entries, 2 unmapped. Logs every drop to `prefilter_drops`.
 
 ### `discovery/nodes/cluster_dedupe.py`
 - Ad-hoc items (`source == "adhoc_telegram"`) are split out before either
@@ -1971,3 +1984,125 @@ actual code, not assumed from the spec's prior draft).
   next run actually resumes the graph and writes the correct Trello outcome.
   Human-only per `feature_list.json` — Claude Code must not and did not mark
   this passing.
+- **Sub-phases 2-5 of the Sunday plan LLM prioritization checkpoint** (see
+  below) — full Trello staleness/card list, `plan_history` namespace,
+  cross-week movement detection, and the new bounded LLM prioritization
+  node are all NOT started. Only sub-phase 1 (Courses digest section) is
+  built so far.
+
+## Sunday plan LLM prioritization checkpoint (2026-07-18)
+
+Real design expansion to the Sunday plan pipeline, resolving the
+long-deferred "`assemble_plan`: templating vs LLM judgment" question in
+favor of LLM judgment. Built sub-phase by sub-phase per the standing
+approval-gate discipline (`CLAUDE.md` Section 1) — this is NOT a one-pass
+build. Full scope, for context (later sub-phases not yet started):
+
+1. **Courses get their own digest section** (reversal of the earlier
+   implicit fold into Reading & Learning) — **DONE, this entry.**
+2. `read_trello` exposes the full card list with per-card staleness
+   (last-activity date), not just what `correlate_trello`'s match-checking
+   needs today — **not started.**
+3. New store namespace `("weekly_intel", "plan_history")` — each Sunday run
+   records which Trello card IDs got surfaced as plan items that week, tied
+   to `run_id` — **not started.**
+4. Cross-week movement detection: before generating each new plan,
+   re-fetch current Trello state for every card in the most recent prior
+   `plan_history` entry, and determine real movement (list change, archive,
+   move to a Done-equivalent list) from Trello's actual state. Requires
+   fixing `read_trello` to fetch a Done-equivalent list at all, which it
+   currently never does — **not started.**
+5. New node/step, after `classify_item` and before `assemble_plan`: one
+   real Anthropic API call combining this week's scored/classified items,
+   real Trello board state, and the completion signal from item 4, to
+   produce a bounded, prioritized selection. Persona: Pooja is an AI/ML
+   engineer doing this project as a side effort alongside a full-time job,
+   specifically to reclaim time her job doesn't give her — the goal is
+   identifying what's genuinely worth her limited weekly hours, not listing
+   everything relevant, including surfacing stale/idle Trello cards weighed
+   honestly against new discoveries, and acknowledging (not silently
+   repeating or dropping) cards unchanged since last week — **not
+   started.**
+6. Bounding: Reading & Learning and Courses stay unbounded. Only the
+   Trello-derived plan-item selection is bounded (target 3-5 items,
+   adjustable with real evidence) — **not started** (no bounding exists
+   anywhere in `assemble_plan.py` yet, including for the new Courses
+   section, per this sub-phase's scope).
+7. `assemble_plan` renders item 5's curated output in priority order, not
+   source order — **not started** (Courses/Reading & Learning still render
+   in the order items arrive in `classified_items` today).
+
+Ownership: the new LLM call (item 5) is a direct Anthropic API call,
+covered by the standing full-delegation override (`CLAUDE.md` Section 8) —
+same arrangement as every other Anthropic/LangGraph call built this
+session.
+
+### Sub-phase 1: Courses digest section — what was built
+
+Real ambiguity surfaced before writing any code: there was no existing
+signal that distinguished "course" content from any other learning
+content. The only per-item classification field is `tags: list[str]`, and
+the closest existing tag, `learning-resource`, is explicitly a catch-all in
+`score.py`'s `TASTE_PROFILE` ("tutorials, opinion pieces, critiques,
+essays, walkthroughs, courses, papers, and threads all qualify"), not
+course-specific. Per-source identity is also unrecoverable at this layer —
+every blog/newsletter item (including "The Batch") gets `source =
+"blog_scrape"` hardcoded at ingestion (`scrape_blogs.py`); the real
+feed/sender name is used only for fetching, then discarded. Asked Pooja how
+to identify Courses content; she chose a new dedicated tag over a
+source-based mapping.
+
+**Files changed:**
+- `discovery/nodes/score.py` — added `course` to `ALLOWED_TAGS` and to the
+  `_score_batch` prompt's permitted-tags list; added tagging guidance to
+  `TASTE_PROFILE` distinguishing `course` (structured, multi-lesson course/
+  bootcamp/certification) from `learning-resource` (single article/
+  tutorial/essay/walkthrough).
+- `discovery/taste_vectors.py` — `course` added to `_TAG_TO_BULLET` mapped
+  to `None`, deliberately unmapped for the same reason `learning-resource`
+  is: it's a format tag, not a topic, so there's no corresponding
+  `TASTE_PROFILE` topic bullet to embed. `TOPIC_TAGS` (derived from
+  `ALLOWED_TAGS`) now has 7 entries, 2 unmapped.
+- `sunday/nodes/assemble_plan.py` — `format_plan()` now splits `plan_items`
+  into three buckets instead of two: `courses` (any item tagged `course`,
+  checked first — takes priority over `matched_card_id`), `reading`
+  (no `course` tag, no `matched_card_id`), `project` (no `course` tag, has
+  `matched_card_id`). Renders in that order: Reading & Learning, Courses,
+  Existing Project Work. Numbering (`counter`/`item_map`) stays continuous
+  across all three sections, same pattern as the pre-existing two-section
+  numbering.
+- `tests/test_assemble_plan.py` — added 6 new tests covering: course-tagged
+  item routes to Courses not Reading & Learning; Courses section omitted
+  when no course items exist; course tag takes priority over a matched
+  `card_id` (still routes to Courses, not Existing Project Work); all three
+  sections present and correctly ordered; numbering continuous across all
+  three sections; `item_map` correctness across all three sections. `_plan_item()`
+  test helper extended with an optional `tags` param (previously hardcoded
+  to `["agentic-engineering"]`).
+- `tests/test_taste_vectors.py` — updated the two `recompute_topic_vectors`
+  tests to expect 2 unmapped tags (`["course", "learning-resource"]`,
+  alphabetically sorted) instead of 1, since `course` joining `ALLOWED_TAGS`
+  as an unmapped tag changes `TOPIC_TAGS`' composition. No behavioral
+  regression — same "flagged, not guessed" pattern, just one more tag going
+  through it.
+
+**Real evidence:**
+- Full test suite: `162 passed, 1 skipped` (`tests/`), including all 6 new
+  Courses tests and the 2 updated `taste_vectors` tests — no pre-existing
+  test broken by this change. (`session-handoff.md`'s note that
+  `test_assemble_plan.py` was failing turned out to be stale as of this
+  session — all 19 pre-existing tests in that file already passed before
+  any change here.)
+- Manual `format_plan()` smoke test (three real items: one Reading &
+  Learning, one `course`-tagged, one Existing Project Work) confirmed real
+  rendered output: three headers in the right order, continuous numbering
+  1/2/3, Courses item correctly excluded from Reading & Learning despite
+  having no `matched_card_id`.
+
+**Explicitly NOT done in this sub-phase** (scope discipline, `CLAUDE.md`
+Section 5): no bounding logic added anywhere (item 6 is a later
+sub-phase); no priority-order rendering (item 7); no change to
+`read_trello`, no `plan_history` namespace, no cross-week detection, no new
+LLM node (items 2-5). `daily/nodes/assemble_digest.py` (the daily digest,
+separate from the Sunday plan) was not touched — this checkpoint is
+Sunday-plan-only per the request.

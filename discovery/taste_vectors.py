@@ -32,7 +32,11 @@ Bootstrap/embedding input per tag is score.py's TASTE_PROFILE prompt
 constant, mapped best-effort to the 6 fixed tags (Section 0 item 1,
 Section 6) -- 'learning-resource' has no clearly corresponding bullet in
 TASTE_PROFILE and is flagged rather than guessed: no vector is computed
-for it until a real mapping is confirmed.
+for it until a real mapping is confirmed. 'course' (added for the
+Courses digest section, Checkpoint: Sunday plan LLM prioritization,
+sub-phase 1) is deliberately unmapped for the same reason -- it's a
+format tag (structured course vs. single article), not a topic, so it
+has no corresponding topic bullet either.
 
 No langgraph imports.
 """
@@ -68,7 +72,9 @@ TOPIC_TAGS = sorted(ALLOWED_TAGS - {"noise"})
 # no bullet that clearly corresponds to it (the closest candidate, "AI
 # engineering as a role", is about career/interview content, not learning
 # format) -- mapped to None deliberately, flagged in recompute rather
-# than guessed.
+# than guessed. 'course' is the same kind of format tag (structured course
+# vs. single article) rather than a topic -- also mapped to None on
+# purpose, not an oversight.
 _TAG_TO_BULLET = {
     "agentic-engineering": "Agentic frameworks and patterns (LangGraph, LangChain, agent loops, harness engineering)",
     "memory-systems": "Memory systems for AI agents (LangMem, Mem0, vector stores, knowledge graphs)",
@@ -77,6 +83,7 @@ _TAG_TO_BULLET = {
     "distributed-systems": "Distributed systems and infrastructure applicable to AI agents",
     "new-tool-launch": "New AI tool, framework, API, or agent project launches",
     "learning-resource": None,
+    "course": None,
 }
 
 

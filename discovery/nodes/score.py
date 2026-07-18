@@ -23,6 +23,15 @@ Keep content that is technical, specific, and actionable about any of these topi
 Content format doesn't matter — tutorials, opinion pieces, critiques, essays,
 walkthroughs, courses, papers, and threads all qualify if the topic is in scope.
 
+Tagging guidance for the course tag specifically: assign course (instead of
+learning-resource) only when the item itself is or directly announces a
+structured, multi-lesson course, bootcamp, or certification program (e.g. a
+DeepLearning.AI course, a Coursera/Udemy listing, a multi-part video
+series). A single standalone article, tutorial, essay, or walkthrough stays
+tagged learning-resource even if it teaches something — course is about
+the format being a structured program, not about how educational the
+content is.
+
 Drop content that is:
 - Pure job hunting, salary negotiation, or hiring posts
 - Generic AI hype with no actionable technical content
@@ -49,7 +58,7 @@ the usual criteria above, same as any other source.
 ALLOWED_TAGS = {
     "agentic-engineering", "memory-systems", "llm-tooling",
     "evals", "learning-resource", "distributed-systems",
-    "new-tool-launch", "noise",
+    "new-tool-launch", "noise", "course",
 }
 
 DROPPED_TAG_LOG = "data/dropped_tags.log"
@@ -82,7 +91,7 @@ def _score_batch(batch: list, offset: int, run_id: str = "unknown") -> tuple[lis
 
 Assign 1-3 tags from EXACTLY this list — no other tags are permitted:
 agentic-engineering, memory-systems, llm-tooling, evals, learning-resource,
-distributed-systems, new-tool-launch, noise
+distributed-systems, new-tool-launch, noise, course
 
 Score each bookmark below. Return a JSON array with one object per item,
 in the same order. Each object must have:
