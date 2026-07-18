@@ -25,6 +25,7 @@ Rules:
 - Do NOT surface a card whose movement status above is "completed" or "archived" -- that work is done or shelved, leave it out entirely.
 - If you include a card whose movement status is "unchanged", you MUST explicitly acknowledge in movement_note that it hasn't moved since last week -- never silently repeat it as if it were new, and never silently drop it either without deciding it's not worth including.
 - A card with no listed movement status (was not in last week's plan, or this is the first-ever run) has no prior-week context -- judge it purely on its own merits (staleness per last_activity, or being matched to strong new content).
+- CRITICAL: if a card has NO entry in the cross-week movement list above, you have ZERO real data on whether it moved, and movement_note MUST reflect that -- it must be null, or if non-null must say only that movement status is unavailable/unknown. Do NOT write movement_note text that states or implies a cross-week change status (e.g. "unchanged since last week", "no movement in N days", "still stuck") for such a card -- that would be inventing a claim with no real data behind it, even if it sounds plausible from last_activity alone. Staleness reasoning from last_activity belongs in priority_reasoning (e.g. "idle 43 days per last_activity"), never phrased in movement_note as if it were a real cross-week comparison.
 
 New items matched to existing cards this week:
 {items_block}

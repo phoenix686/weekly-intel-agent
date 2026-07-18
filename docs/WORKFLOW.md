@@ -2626,19 +2626,38 @@ misleading, so these were deleted rather than rewritten to pass.
   piece — `new_item` rendering, `stale_nudge` rendering from a card,
   `movement_note` concatenation, priority-order rendering, and bounded
   footer counting — works end-to-end against real data, not just mocks.
-- **Honest observation from the same live run, not a bug:** `card_movements`
-  was passed as `[]` in this particular test (deliberately simplified, no
-  sub-phase 4 data wired up for this specific live check) — yet the model
-  still populated `movement_note` for the `stale_nudge` entries with
-  plausible-sounding staleness text ("Unchanged since last check; no
-  movement in 43 days..."), inferred from `last_activity` rather than from
-  any real cross-week signal, since none was provided. In a real Sunday
-  run this can't happen — `read_trello` always populates `card_movements`
-  before this node runs — but it's a real prompt-robustness observation
-  worth Pooja knowing: the model will happily narrate "movement" from
-  staleness alone if the real movement block is empty, rather than leaving
-  `movement_note` null. Not fixed here (out of scope for this smoke test to
-  patch unilaterally); flagged for awareness.
+- **Honest observation from the same live run, not a bug (fixed as a
+  follow-up, see below):** `card_movements` was passed as `[]` in this
+  particular test (deliberately simplified, no sub-phase 4 data wired up
+  for this specific live check) — yet the model still populated
+  `movement_note` for the `stale_nudge` entries with plausible-sounding
+  staleness text ("Unchanged since last check; no movement in 43
+  days..."), inferred from `last_activity` rather than from any real
+  cross-week signal, since none was provided.
+
+### Follow-up fix: movement_note fabrication when card_movements is empty (2026-07-19)
+
+The observation above was a real fabrication risk, not cosmetic: this
+content ships directly into a real Telegram message Pooja reads as fact.
+Added an explicit `CRITICAL` rule to `PRIORITIZE_PROMPT`
+(`sunday/nodes/prioritize_plan_items.py`) -- if a card has no entry in the
+cross-week movement block, `movement_note` must be `null` or explicitly
+say movement status is unavailable, never state or imply a cross-week
+change (e.g. "unchanged since last week"). Staleness reasoning from
+`last_activity` belongs in `priority_reasoning` instead, phrased as
+staleness, not as a movement claim.
+
+**Real evidence:** re-ran the identical live test (real Trello board, real
+Anthropic call, `card_movements=[]`) that originally surfaced the
+fabrication. Result: all 3 `stale_nudge` entries now return
+`movement_note: "Movement status unknown; idle per last_activity."` (or
+equivalent) instead of fabricated "unchanged since last week" text.
+Explicitly checked all returned `movement_note` values against a list of
+fabrication-indicating phrases ("unchanged since", "no movement in",
+"still stuck", "since last week/check") -- zero matches. Staleness
+reasoning correctly still appears, just relocated to `priority_reasoning`
+("idle 35 days per last_activity") rather than fabricated into
+`movement_note`.
 
 **Checkpoint complete.** All 7 items across 5 sub-phases (Courses section;
 Trello card staleness; `plan_history` namespace; cross-week movement
