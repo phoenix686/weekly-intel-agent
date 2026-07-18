@@ -1578,6 +1578,52 @@ way: a clean success, or -- if the timeouts are what was needed -- a
 fast, specific timeout exception naming the exact stuck call, replacing
 another silent 45-minute kill with an actual diagnosis.
 
+## seen_items rolling 35-day expiry + poll.yml schedule change (2026-07-18)
+
+### 1. seen_items expiry
+Same pattern as `recent_item_embeddings`' 7-day window
+(`discovery/semantic_dedup.py`'s `_WINDOW_DAYS`): every source only ever
+fetches its 5-15 most recent items, so an entry older than the window is
+provably unreachable again -- dead weight, not real dedup coverage.
+`mark_seen()` now writes a `seen_at` timestamp alongside `seen`.
+`filter_unseen()` runs a lazy sweep (`_expire_stale_entries()`) once per
+call -- one `store.search()` + one batched `store.batch()` of deletes
+(`store.delete()` is itself just `PutOp(namespace, key, None)` under the
+hood, per `langgraph.store.base`, so N deletes batch into one round trip
+the same way N writes do). Window set to 35 days -- top half of the
+30-45 day range this was scoped to, giving real buffer for the slowest
+sunday-bucket/weekly-cadence sources (`fetch_limit=6`).
+
+Deliberate choice, not the literal ask: an entry with no `seen_at` at all
+(everything written before today) is treated as **not yet eligible for
+expiry**, not as already-expired. There's no real signal for how old
+those 422 real entries actually are, and deleting them on a guess would
+repeat the exact mistake flagged earlier tonight (bulk-deleting real
+cross-run dedup history with no way to verify what's actually safe to
+remove). `scripts/backfill_seen_items_timestamp.py` backfills every
+pre-existing entry with today's date once; the window then applies
+honestly going forward.
+
+REAL LIVE VERIFICATION: queried the live store directly before and after
+the backfill -- **422 entries before, 422 after** (count unchanged,
+nothing deleted), all 422 now carry a real `seen_at`. `tests/
+test_seen_items.py` gained 2 new tests (11 total) covering the sweep
+itself: a genuinely stale entry (40 days old) gets deleted and correctly
+reappears as unseen; an entry with no `seen_at` is left alone. Full test
+suite: 150 passed, 1 skipped, zero regressions.
+
+### 2. poll.yml schedule change
+Checked git history first: no stated reason was ever recorded for the
+original 08:30 IST time, just carried over from whenever the workflow
+was first written -- confirmed via `git log --follow -p`, not assumed.
+Changed `poll.yml`'s cron from `0 3 * * *` (03:00 UTC = 08:30 IST) to
+`30 16 * * *` (16:30 UTC = 22:00 IST), all 7 days unchanged.
+`daily.yml`'s cron was already exactly `30 2 * * 1-6` (02:30 UTC = 08:00
+IST, Mon-Sat) -- confirmed matching the requested value with zero diff,
+including the Sunday-exclusion logic (daily-bucket sources are already
+covered by Sunday's own run that day) still intact. Both YAML files
+validated via `yaml.safe_load`.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`
@@ -1591,7 +1637,7 @@ actual code, not assumed from the spec's prior draft).
 | `adhoc_queue` | `{text, queued_at}` | `telegram/polling.py` | `sunday/nodes/process_adhoc_input.py` |
 | `digest_item_map` | `{run_id, items: {number: {url,title,tags,reasoning}}}` | `daily/nodes/send_telegram_digest.py`, `sunday/nodes/send_telegram_plan.py` | `telegram/feedback_router.py` |
 | `feedback_events` | `{item_id, feedback_text, replied_at, run_id, tags, title, content_summary, sentiment}` | `sunday/approval_actions.py` (`handle_feedback`) | `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) |
-| `seen_items` | `{seen: true}` | `discovery/seen_items.py` (`mark_seen`) | `discovery/seen_items.py` (`filter_unseen`) |
+| `seen_items` | `{seen: true, seen_at}` (rolling 35-day expiry, 2026-07-18) | `discovery/seen_items.py` (`mark_seen`) | `discovery/seen_items.py` (`filter_unseen`, also runs `_expire_stale_entries`) |
 | `recent_item_embeddings` | `{item_id, url, embedding_vector, fetched_at, scored_at}` | `discovery/semantic_dedup.py` | `discovery/semantic_dedup.py` |
 | `taste_topic_vectors` | `{tag, embedding_vector, updated_at}` | `discovery/taste_vectors.py` (`recompute_topic_vectors`) | `discovery/taste_vectors.py` (`taste_prefilter`) |
 | `prefilter_drops` | `{item_id, filter_type: "dedup"\|"taste", similarity_score, compared_against_item_id, compared_against_tag, run_id}` | `discovery/semantic_dedup.py`, `discovery/taste_vectors.py` | audit log only -- no reader yet |

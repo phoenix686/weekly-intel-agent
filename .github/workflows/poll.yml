@@ -2,10 +2,13 @@ name: Telegram Poll
 
 on:
   schedule:
-    # 03:00 UTC = 08:30 IST, every day including Sunday -- unlike daily.yml
-    # (which skips Sunday), this must run all 7 days: approval resumes,
-    # ad-hoc queuing, and digest/plan feedback can all arrive on any day.
-    - cron: "0 3 * * *"
+    # 16:30 UTC = 22:00 IST (2026-07-18, moved from 03:00 UTC/08:30 IST --
+    # no stated reason found in git history for the original 08:30 IST time,
+    # just carried over from whenever this workflow was first written), every
+    # day including Sunday -- unlike daily.yml (which skips Sunday), this
+    # must run all 7 days: approval resumes, ad-hoc queuing, and digest/plan
+    # feedback can all arrive on any day.
+    - cron: "30 16 * * *"
   workflow_dispatch:
 
 concurrency:
