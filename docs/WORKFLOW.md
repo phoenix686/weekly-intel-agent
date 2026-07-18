@@ -1854,6 +1854,88 @@ regressions. `tests/test_agentmail_newsletters.py` fully rewritten (mocks
 `_resolve_redirect`, not raw HTML parsing, since that's what real data
 proved is actually needed).
 
+## Final cleanup checkpoint: log verbosity, contamination sweep, trace_run.py, log artifacts (2026-07-19)
+
+### 1. Diagnostic checkpoint logging demoted to DEBUG, not deleted
+The 40 real BEFORE/AFTER checkpoint log lines added for the hang
+investigation (`connection_pool.py`, `sunday/memory_store_config.py`,
+`observability.py`, `discovery/embeddings.py`, `discovery/
+semantic_dedup.py`, `discovery/taste_vectors.py`, `discovery/
+seen_items.py`) are now `logger.debug`, not `logger.info` -- still there,
+just off by default, so the exact tool that found the real hang stays
+available if a similar issue ever recurs.
+
+REAL EVIDENCE: captured a real run's log at default (INFO) level before
+and after, under real production conditions (`HF_HUB_OFFLINE=1`, matching
+what the actual GitHub Actions step sets): **91 lines before -> 15 lines
+after**, and the 15 remaining lines are third-party library noise
+(`sentence_transformers`'s own 2 internal lines, tqdm progress bars) plus
+exactly one real, meaningful line (`taste_vectors: no topic vectors yet,
+pre-filter skipped for this run`) -- zero checkpoint noise survives.
+Real gap found and flagged, not silently fixed: `discovery/nodes/
+scrape_blogs.py` has **zero `logger` calls at all** -- "per-source fetch
+counts" only exist as structured `NodeCost` data today, not an actual
+INFO log line, despite that being a stated expectation. Full suite: 156
+passed, 1 skipped, zero regressions.
+
+### 2. Contamination sweep -- real, substantial finding
+Searched every `weekly_intel` namespace that carries a `run_id` concept
+for non-UUID-shaped run_ids (`classification_log`, `prefilter_drops`,
+`feedback_events`, `digest_item_map`, `node_summary` -- `approval_log`
+and `run_history` came back clean). Full inventory reported before
+deleting anything, then deleted only confirmed test entries:
+
+| Namespace | Before | Deleted | After |
+|---|---|---|---|
+| `classification_log` | 31 | 25 | 6 |
+| `prefilter_drops` | 177 | **177** | **0** |
+| `feedback_events` | 5 | 4 | 1 |
+| `digest_item_map` | 3 | 1 | 2 |
+| `node_summary` | 21 | 10 | 11 |
+
+Real, notable finding: **`prefilter_drops` had zero real production
+entries** -- the entire namespace was test/stress-test data from
+tonight's earlier verification work (`scale-stress-test-*`, `batch-
+verify-dedup`, `singleton-check`, `log-verbosity-check-run`). Also swept
+2 lingering `example.com` entries from `seen_items` (a namespace with no
+`run_id` field at all, so out of scope for the UUID-based sweep, but
+caught by URL pattern the same way earlier tonight's cleanup worked) --
+420 -> 418.
+
+### 3. `scripts/trace_run.py` -- built and verified against a real run
+Given a `run_id`, queries `run_history`, `node_summary` (printed in real
+graph execution order, not insertion order), `classification_log`,
+`approval_log`, and `prefilter_drops`, and prints one unified report --
+the actual fix for "manually check multiple Postgres tables to debug a
+run." Run for real against `63b04873` (the run that crashed on
+`cost_log.csv`): one call surfaced the crash point, every node's real
+counts/costs/durations in order, the one real `project_proposal` named
+specifically, and its real `approval_log` outcome (`rejected`) --
+cross-referenced automatically, not manually.
+
+### 4. `actions/upload-artifact` -- implemented, NOT YET independently verified
+Real research finding that changed the recommendation: unlike
+`actions/cache`'s save step (a POST step, confirmed skipped entirely on
+a timeout-cancellation -- this project's own earlier finding), a plain
+`if: always()` step gets a real ~5-minute cancellation grace period
+during which GitHub Actions attempts to run it before force-terminating
+the job -- sourced via WebSearch (community discussions on this exact
+behavior), not assumed. This means an upload-artifact step SHOULD still
+capture a partial log from a run that times out, the exact scenario this
+exists for -- unlike the cache/save case.
+
+Implemented in both `daily.yml`/`sunday.yml`: the main pipeline step's
+output is now tee'd to a log file (GH Actions bash steps run with
+`pipefail` on by default, so a real failure still fails the step despite
+the pipe), followed by an `actions/upload-artifact@v4` step with `if:
+always()` and `retention-days: 14`.
+
+**Explicitly not marked verified yet** -- this is a real, sourced,
+reasoned expectation, not this project's own direct observation. Pooja
+will trigger a real Sunday run to confirm the artifact actually appears
+with real captured content, ideally including a run that genuinely times
+out (not just a clean completion), before this is considered closed.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`

@@ -78,15 +78,15 @@ def filter_unseen(items: list[dict]) -> tuple[list[dict], list[str]]:
         return [], []
     store = get_store()
 
-    logger.info("seen_items: BEFORE _expire_stale_entries()")
+    logger.debug("seen_items: BEFORE _expire_stale_entries()")
     t0 = time.perf_counter()
     expired_count = _expire_stale_entries(store)
-    logger.info(f"seen_items: AFTER _expire_stale_entries() ({time.perf_counter() - t0:.3f}s, {expired_count} expired)")
+    logger.debug(f"seen_items: AFTER _expire_stale_entries() ({time.perf_counter() - t0:.3f}s, {expired_count} expired)")
 
-    logger.info(f"seen_items: BEFORE store.batch() (GetOp, {len(items)} item(s))")
+    logger.debug(f"seen_items: BEFORE store.batch() (GetOp, {len(items)} item(s))")
     t0 = time.perf_counter()
     results = store.batch([GetOp(_NAMESPACE, item["url"]) for item in items])
-    logger.info(f"seen_items: AFTER store.batch() (GetOp) ({time.perf_counter() - t0:.3f}s)")
+    logger.debug(f"seen_items: AFTER store.batch() (GetOp) ({time.perf_counter() - t0:.3f}s)")
     unseen: list[dict] = []
     seen_urls: list[str] = []
     for item, result in zip(items, results):
@@ -108,8 +108,8 @@ def mark_seen(urls: list[str]) -> None:
         return
     store = get_store()
     seen_at = datetime.now(timezone.utc).isoformat()
-    logger.info(f"seen_items: BEFORE store.batch() (PutOp, {len(urls)} url(s))")
+    logger.debug(f"seen_items: BEFORE store.batch() (PutOp, {len(urls)} url(s))")
     t0 = time.perf_counter()
     store.batch([PutOp(_NAMESPACE, url, {"seen": True, "seen_at": seen_at}) for url in urls])
-    logger.info(f"seen_items: AFTER store.batch() (PutOp) ({time.perf_counter() - t0:.3f}s)")
+    logger.debug(f"seen_items: AFTER store.batch() (PutOp) ({time.perf_counter() - t0:.3f}s)")
     logger.info(f"seen_items: marked {len(urls)} url(s) as seen")

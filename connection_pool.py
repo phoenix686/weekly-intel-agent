@@ -32,16 +32,16 @@ def _configure_connection(conn) -> None:
     have no bound of its own. Runs once per newly-opened connection
     (psycopg_pool calls this from _add_connection() every time a new
     connection is created, not just at pool construction)."""
-    logger.info(f"connection_pool: BEFORE configure_connection (SET statement_timeout='{_STATEMENT_TIMEOUT_SECONDS}s')")
+    logger.debug(f"connection_pool: BEFORE configure_connection (SET statement_timeout='{_STATEMENT_TIMEOUT_SECONDS}s')")
     t0 = time.perf_counter()
     conn.execute(f"SET statement_timeout = '{_STATEMENT_TIMEOUT_SECONDS}s'")
-    logger.info(f"connection_pool: AFTER configure_connection ({time.perf_counter() - t0:.3f}s)")
+    logger.debug(f"connection_pool: AFTER configure_connection ({time.perf_counter() - t0:.3f}s)")
 
 
 def get_connection_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
-        logger.info("connection_pool: BEFORE constructing ConnectionPool (first call this process)")
+        logger.debug("connection_pool: BEFORE constructing ConnectionPool (first call this process)")
         t0 = time.perf_counter()
         _pool = ConnectionPool(
             conninfo=os.environ["DB_URI"],
@@ -53,5 +53,5 @@ def get_connection_pool() -> ConnectionPool:
             },
             configure=_configure_connection,
         )
-        logger.info(f"connection_pool: AFTER constructing ConnectionPool ({time.perf_counter() - t0:.3f}s)")
+        logger.debug(f"connection_pool: AFTER constructing ConnectionPool ({time.perf_counter() - t0:.3f}s)")
     return _pool

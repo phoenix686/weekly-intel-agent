@@ -115,6 +115,35 @@ jobs:
         # saving, not a silent fallback: model CONSTRUCTION time (isolated
         # from one-time Python import overhead) dropped from 6.58s to
         # 0.92s (86% reduction), exit code 0.
-        run: python scripts/run_sunday.py
+        #
+        # Output tee'd to a file (2026-07-19) so it can be uploaded as a
+        # real downloadable artifact below -- GH Actions' bash steps
+        # already run with pipefail on by default, so a real pipeline
+        # failure still fails this step even though the output is piped
+        # through tee, not just captured in the live/in-browser log.
+        run: python scripts/run_sunday.py 2>&1 | tee sunday_run.log
         env:
           HF_HUB_OFFLINE: "1"
+
+      - name: Upload Sunday run log
+        # if: always() -- not just on success -- since a real timeout-
+        # cancelled run is exactly the case this exists for. Real, sourced
+        # finding (2026-07-19): unlike actions/cache's save step (a POST
+        # step, confirmed skipped entirely on a timeout-cancellation --
+        # see the cache-restructuring fix above), a plain if: always()
+        # step gets a real ~5-minute cancellation grace period during
+        # which GitHub Actions attempts to run it before force-terminating
+        # the job, so this SHOULD still capture a partial log from a run
+        # that times out, not just a clean completion or a normal
+        # exception failure. NOT YET independently confirmed against a
+        # real triggered run of this exact workflow (community-sourced
+        # finding, not this project's own direct observation yet) --
+        # don't treat this as verified until a real run (ideally one that
+        # actually times out) confirms the artifact appears with real
+        # captured content.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunday-run-log-${{ github.run_id }}
+          path: sunday_run.log
+          retention-days: 14

@@ -126,10 +126,10 @@ def recompute_topic_vectors(profile_text: str) -> list[NodeCost]:
 
 def _load_topic_vectors() -> list[dict]:
     store = get_store()
-    logger.info("taste_vectors: BEFORE store.search() (_load_topic_vectors)")
+    logger.debug("taste_vectors: BEFORE store.search() (_load_topic_vectors)")
     t0 = time.perf_counter()
     result = [item_obj.value for item_obj in store.search(_NAMESPACE, limit=len(TOPIC_TAGS) + 5)]
-    logger.info(f"taste_vectors: AFTER store.search() (_load_topic_vectors) ({time.perf_counter() - t0:.3f}s, {len(result)} entries)")
+    logger.debug(f"taste_vectors: AFTER store.search() (_load_topic_vectors) ({time.perf_counter() - t0:.3f}s, {len(result)} entries)")
     return result
 
 
@@ -171,11 +171,11 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
     # batch-wide failure now degrades every item at once rather than
     # per-item -- acceptable for a local model, where a failure here
     # realistically means the model itself is broken.
-    logger.info(f"taste_vectors: BEFORE embed_texts() ({len(items)} item(s))")
+    logger.debug(f"taste_vectors: BEFORE embed_texts() ({len(items)} item(s))")
     t0 = time.perf_counter()
     try:
         all_vectors, all_tokens = embed_texts([f"{item['title']}\n\n{item['text']}" for item in items])
-        logger.info(f"taste_vectors: AFTER embed_texts() ({time.perf_counter() - t0:.3f}s)")
+        logger.debug(f"taste_vectors: AFTER embed_texts() ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
         logger.warning(f"taste_vectors: batch embed failed, all {len(items)} item(s) passed through unfiltered: {e}")
         return list(items), [
@@ -213,9 +213,9 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
     # One batched call covering every drop, instead of one store.put()
     # per drop -- same fix as filter_unseen/mark_seen/semantic_dedup.py.
     if drop_records:
-        logger.info(f"taste_vectors: BEFORE store.batch() (drop_records, {len(drop_records)} record(s))")
+        logger.debug(f"taste_vectors: BEFORE store.batch() (drop_records, {len(drop_records)} record(s))")
         t0 = time.perf_counter()
         store.batch([PutOp(_DROPS_NAMESPACE, str(uuid.uuid4()), record) for record in drop_records])
-        logger.info(f"taste_vectors: AFTER store.batch() (drop_records) ({time.perf_counter() - t0:.3f}s)")
+        logger.debug(f"taste_vectors: AFTER store.batch() (drop_records) ({time.perf_counter() - t0:.3f}s)")
 
     return survivors, costs

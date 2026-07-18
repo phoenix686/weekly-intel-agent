@@ -74,6 +74,24 @@ jobs:
         # see sunday.yml for the full reasoning and real local verification
         # (model construction time 6.58s -> 0.92s, 86% reduction, no
         # silent fallback).
-        run: python scripts/run_daily.py
+        #
+        # Output tee'd to a file (2026-07-19) so it can be uploaded as a
+        # real downloadable artifact below -- see sunday.yml for the full
+        # reasoning (pipefail is on by default for GH Actions bash steps,
+        # so a real failure still fails this step despite the pipe).
+        run: python scripts/run_daily.py 2>&1 | tee daily_run.log
         env:
           HF_HUB_OFFLINE: "1"
+
+      - name: Upload daily run log
+        # if: always() -- see sunday.yml for the full reasoning (a real
+        # ~5-minute cancellation grace period should let this still
+        # capture a partial log from a timed-out run, unlike
+        # actions/cache's save POST-step) -- NOT YET independently
+        # confirmed against a real triggered run of this workflow.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-run-log-${{ github.run_id }}
+          path: daily_run.log
+          retention-days: 14
