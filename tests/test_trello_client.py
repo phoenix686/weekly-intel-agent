@@ -1,0 +1,94 @@
+"""
+fetch_board_cards (sunday/trello_client.py) -- zero unit test coverage
+existed before this file. Covers the last_activity field added for the
+Sunday plan LLM prioritization checkpoint, sub-phase 2 (staleness), plus
+the pre-existing list-filtering and checklist-flattening behavior it
+must not break. _trello_get mocked so this stays fully offline -- no
+real Trello API call.
+"""
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from unittest.mock import patch
+
+from sunday.trello_client import fetch_board_cards
+
+
+def _list(list_id, name):
+    return {"id": list_id, "name": name}
+
+
+def _card(card_id, name, desc="", short_url="", date_last_activity=None, checklists=None):
+    return {
+        "id": card_id,
+        "name": name,
+        "desc": desc,
+        "shortUrl": short_url,
+        "dateLastActivity": date_last_activity,
+        "checklists": checklists or [],
+    }
+
+
+def test_card_includes_last_activity_field():
+    lists_response = [_list("list1", "Dump")]
+    cards_response = [_card("card1", "A card", date_last_activity="2026-05-31T12:17:18.243Z")]
+
+    with patch("sunday.trello_client._trello_get", side_effect=[lists_response, cards_response]):
+        cards = fetch_board_cards(board_id="board1")
+
+    assert len(cards) == 1
+    assert cards[0]["last_activity"] == "2026-05-31T12:17:18.243Z"
+
+
+def test_card_missing_date_last_activity_maps_to_none():
+    """Trello always sends dateLastActivity in practice (live-verified), but
+    fetch_board_cards should not crash if a card response ever omits it."""
+    lists_response = [_list("list1", "Dump")]
+    card_without_field = {"id": "card1", "name": "A card", "desc": "", "shortUrl": "", "checklists": []}
+
+    with patch("sunday.trello_client._trello_get", side_effect=[lists_response, [card_without_field]]):
+        cards = fetch_board_cards(board_id="board1")
+
+    assert cards[0]["last_activity"] is None
+
+
+def test_only_relevant_lists_fetched():
+    lists_response = [_list("list1", "Dump"), _list("list2", "Done"), _list("list3", "In Progress")]
+    dump_cards = [_card("card1", "Dump card", date_last_activity="2026-01-01T00:00:00.000Z")]
+    in_progress_cards = [_card("card2", "In progress card", date_last_activity="2026-01-02T00:00:00.000Z")]
+
+    with patch("sunday.trello_client._trello_get", side_effect=[lists_response, dump_cards, in_progress_cards]):
+        cards = fetch_board_cards(board_id="board1")
+
+    assert {c["card_id"] for c in cards} == {"card1", "card2"}
+    assert {c["list_name"] for c in cards} == {"Dump", "In Progress"}
+
+
+def test_checklist_items_flattened_alongside_last_activity():
+    lists_response = [_list("list1", "Dump")]
+    checklists = [{"checkItems": [{"name": "Step 1"}, {"name": "Step 2"}]}]
+    cards_response = [_card("card1", "A card", date_last_activity="2026-05-31T12:17:18.243Z", checklists=checklists)]
+
+    with patch("sunday.trello_client._trello_get", side_effect=[lists_response, cards_response]):
+        cards = fetch_board_cards(board_id="board1")
+
+    assert cards[0]["checklist_items"] == ["Step 1", "Step 2"]
+    assert cards[0]["last_activity"] == "2026-05-31T12:17:18.243Z"
+
+
+def test_full_card_shape():
+    lists_response = [_list("list1", "Dump")]
+    cards_response = [_card(
+        "card1", "A card", desc="body text", short_url="https://trello.com/c/abc",
+        date_last_activity="2026-05-31T12:17:18.243Z",
+    )]
+
+    with patch("sunday.trello_client._trello_get", side_effect=[lists_response, cards_response]):
+        cards = fetch_board_cards(board_id="board1")
+
+    assert cards[0] == {
+        "card_id": "card1", "name": "A card", "desc": "body text",
+        "list_id": "list1", "list_name": "Dump", "url": "https://trello.com/c/abc",
+        "checklist_items": [], "last_activity": "2026-05-31T12:17:18.243Z",
+    }

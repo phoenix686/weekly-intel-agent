@@ -173,7 +173,9 @@ class SundayGraphState(TypedDict):
 
     run_id: str
     scored_items: list[ScoredItem]
-    trello_cards: list[dict]        # raw card data from read_trello
+    trello_cards: list[dict]        # raw card data from read_trello: card_id, name,
+                                    #   desc, list_id, list_name, url, checklist_items,
+                                    #   last_activity (Trello dateLastActivity, ISO string)
     correlated_items: list[dict]    # scored_items + matched_card_id: str | None
     classified_items: list[dict]    # + classification: "plan_item" | "project_proposal"
                                     #   + proposal_type: "extend" | "new" | None

@@ -55,8 +55,14 @@ def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
     """Fetch all open cards from all open lists on the Brain board.
 
     Returns plain dicts: card_id, name, desc, list_id, list_name, url,
-    checklist_items. Including list_name lets correlate_trello distinguish
-    the Dump inbox from active project lists without needing hardcoded list IDs.
+    checklist_items, last_activity. Including list_name lets correlate_trello
+    distinguish the Dump inbox from active project lists without needing
+    hardcoded list IDs. last_activity is Trello's own dateLastActivity
+    (ISO 8601 string, e.g. "2026-05-31T12:17:18.243Z") -- already present in
+    Trello's default card response, no extra API param needed; live-verified
+    2026-07-18 against the real board. Exposed for downstream staleness/
+    cross-week movement use (Sunday plan LLM prioritization checkpoint,
+    sub-phase 2) -- not read by correlate_trello today.
     """
     all_lists = _trello_get(f"/boards/{board_id}/lists", {"filter": "open"})
     relevant = {lst["id"]: lst["name"] for lst in all_lists if lst["name"] in RELEVANT_LIST_NAMES}
@@ -79,6 +85,7 @@ def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
                 "list_name": list_name,
                 "url": card.get("shortUrl", ""),
                 "checklist_items": checklist_items,
+                "last_activity": card.get("dateLastActivity"),
             })
 
     logger.info(f"fetch_board_cards: fetched {len(result)} cards")

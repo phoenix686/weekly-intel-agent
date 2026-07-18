@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 1 (Courses digest section) -- see bottom section
+Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 2 (Trello card staleness) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -257,6 +257,17 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 
 ### `sunday/trello_client.py`
 - **What it does:** Pure-stdlib HTTP wrapper for Trello REST API.
+  `fetch_board_cards()` only fetches the `Dump` and `In Progress` lists
+  (`RELEVANT_LIST_NAMES`) -- the real board has 6 lists total (live-checked
+  2026-07-18: `Dump`, `In Progress`, `qs to ask`, `Future Ideas`, `so i dont
+  lose track`, `Done`); the other 4, including the real `Done` list, are
+  not fetched by design as of sub-phase 2 -- deferred to sub-phase 4 (cross-
+  week movement/completion detection), where the note about needing it was
+  actually attached. Each card dict now also carries `last_activity`
+  (Trello's own `dateLastActivity`, ISO 8601 string) -- added Sunday-plan-
+  LLM-prioritization checkpoint, sub-phase 2. `dateLastActivity` is already
+  present in Trello's default card response (live-verified against the
+  real board 2026-07-18); no `fields` API param change was needed.
 - **Key exports:** `fetch_board_cards`, `get_dump_list_id`, `create_trello_card`,
   `update_trello_card`
 - **Depended on by:** `sunday/nodes/read_trello.py`, `sunday/approval_actions.py`
@@ -1984,11 +1995,11 @@ actual code, not assumed from the spec's prior draft).
   next run actually resumes the graph and writes the correct Trello outcome.
   Human-only per `feature_list.json` — Claude Code must not and did not mark
   this passing.
-- **Sub-phases 2-5 of the Sunday plan LLM prioritization checkpoint** (see
-  below) — full Trello staleness/card list, `plan_history` namespace,
-  cross-week movement detection, and the new bounded LLM prioritization
-  node are all NOT started. Only sub-phase 1 (Courses digest section) is
-  built so far.
+- **Sub-phases 3-5 of the Sunday plan LLM prioritization checkpoint** (see
+  below) — `plan_history` namespace, cross-week movement detection (including
+  fetching Trello's real `Done` list), and the new bounded LLM prioritization
+  node are all NOT started. Sub-phases 1 (Courses digest section) and 2
+  (Trello card staleness) are built so far.
 
 ## Sunday plan LLM prioritization checkpoint (2026-07-18)
 
@@ -1999,10 +2010,10 @@ approval-gate discipline (`CLAUDE.md` Section 1) — this is NOT a one-pass
 build. Full scope, for context (later sub-phases not yet started):
 
 1. **Courses get their own digest section** (reversal of the earlier
-   implicit fold into Reading & Learning) — **DONE, this entry.**
+   implicit fold into Reading & Learning) — **DONE.**
 2. `read_trello` exposes the full card list with per-card staleness
    (last-activity date), not just what `correlate_trello`'s match-checking
-   needs today — **not started.**
+   needs today — **DONE, this entry.**
 3. New store namespace `("weekly_intel", "plan_history")` — each Sunday run
    records which Trello card IDs got surfaced as plan items that week, tied
    to `run_id` — **not started.**
@@ -2106,3 +2117,59 @@ sub-phase); no priority-order rendering (item 7); no change to
 LLM node (items 2-5). `daily/nodes/assemble_digest.py` (the daily digest,
 separate from the Sunday plan) was not touched — this checkpoint is
 Sunday-plan-only per the request.
+
+### Sub-phase 2: Trello card staleness — what was built
+
+Another real ambiguity surfaced before writing code: "expose the FULL card
+list with staleness" could mean either (a) add a `last_activity` field to
+the cards `read_trello` already fetches (`Dump` + `In Progress`), or (b)
+also start fetching the board's other lists, including a `Done`-equivalent
+one, since only 2 of the board's real lists are fetched today. The original
+request's note about the missing `Done`-list fetch was attached to item 4
+(cross-week movement/completion detection) with the reasoning "completion
+detection is impossible without it" — completion detection is item 4's job,
+not this one's. Asked Pooja; she confirmed staleness-only for this
+sub-phase, deferring the `Done`-list fetch to sub-phase 4.
+
+Live-checked the real board (`BRAIN_BOARD_ID`) as part of this
+investigation, not guessed: it has 6 lists total — `Dump`, `In Progress`,
+`qs to ask`, `Future Ideas`, `so i dont lose track`, `Done`. Only the first
+two are fetched by `fetch_board_cards()`, unchanged by this sub-phase. Also
+confirmed live that Trello's default card response already includes
+`dateLastActivity` — no `fields` API parameter change was needed to expose
+it, just reading the key that was already there and being discarded.
+
+**Files changed:**
+- `sunday/trello_client.py` — `fetch_board_cards()` now includes
+  `"last_activity": card.get("dateLastActivity")` in every returned card
+  dict. List-fetch scope (`RELEVANT_LIST_NAMES`) unchanged.
+- `state.py` — `SundayGraphState.trello_cards`' comment expanded to
+  document the full current card dict shape, including `last_activity`.
+- `tests/test_trello_client.py` — **new file** (`fetch_board_cards()` had
+  zero unit coverage before this). 5 tests: `last_activity` populated from
+  a mocked Trello response; graceful `None` if a card response ever omits
+  `dateLastActivity` (defensive, since the real API always sends it);
+  list-filtering behavior preserved (only `Dump`/`In Progress` cards
+  returned even when other lists, including `Done`, are present in the
+  lists response); checklist-flattening behavior preserved alongside the
+  new field; full exact-shape assertion on one real-shaped card dict.
+  `_trello_get` mocked throughout — no real HTTP call in the test suite.
+
+**Real evidence:**
+- Full test suite: `167 passed, 1 skipped` (up from 162 — 5 new tests, 0
+  broken).
+- **Live run against the real Trello board** (`sunday.nodes.read_trello.
+  read_trello()`, real `TRELLO_API_KEY`/`TRELLO_TOKEN`, no mocking):
+  fetched 34 real cards from `Dump` + `In Progress`. All 34 carry a real,
+  non-null `last_activity` value (e.g. `"2026-05-31T12:17:18.243Z"`) — 0
+  cards missing the field. Confirms the field works end-to-end through the
+  actual node, not just against a mocked response.
+
+**Explicitly NOT done in this sub-phase:** no expansion of which Trello
+lists get fetched (the real `Done` list is confirmed to exist and is
+intentionally still not fetched — deferred to sub-phase 4); no staleness
+*interpretation* logic (e.g. "stale after N days") — this sub-phase only
+exposes the raw timestamp, any threshold/judgment is item 5's (the new LLM
+node)'s job; `correlate_trello` was not modified and does not read
+`last_activity` — it still only uses `card_id`/`list_name`/`name`/
+`checklist_items`, confirmed unchanged by the full test suite passing.
