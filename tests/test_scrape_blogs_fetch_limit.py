@@ -66,13 +66,16 @@ def test_real_blog_sources_yaml_daily_entries_all_have_fetch_limit_15():
 
 
 def test_real_blog_sources_yaml_sunday_only_entries_all_have_fetch_limit_6():
-    """Hacker News (Show HN) is the one deliberate exception (2026-07-18,
-    fetch_limit=8 per its own weekly-cadence-but-higher-volume reasoning in
-    blog_sources.yaml) -- every other sunday-bucket entry still expects 6."""
+    """Two deliberate exceptions to the sunday-bucket default of 6
+    (2026-07-18): Hacker News (Show HN) at 8 (higher real volume than the
+    newsletter sources) and the combined AgentMail Newsletters entry at 20
+    (one shared inbox covering 4 weekly publications, not one feed each --
+    see blog_sources.yaml's dated comment)."""
     from discovery.blog_sources_config import load_blog_sources
     entries = load_blog_sources()
     sunday_entries = [e for e in entries if e["bucket"] == "sunday"]
-    assert len(sunday_entries) == 9, f"expected 9 sunday-bucket entries, got {len(sunday_entries)}"
+    assert len(sunday_entries) == 6, f"expected 6 sunday-bucket entries, got {len(sunday_entries)}"
+    expected_limits = {"Hacker News (Show HN)": 8, "AgentMail Newsletters (JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze)": 20}
     for entry in sunday_entries:
-        expected = 8 if entry["name"] == "Hacker News (Show HN)" else 6
+        expected = expected_limits.get(entry["name"], 6)
         assert entry.get("fetch_limit") == expected, f"{entry['name']!r} expected fetch_limit={expected}, got {entry.get('fetch_limit')!r}"

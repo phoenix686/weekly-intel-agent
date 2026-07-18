@@ -1680,6 +1680,69 @@ transiently failed on the first full-suite run from rate-limiting after
 repeated manual fetches during this investigation -- passed cleanly in
 isolation and on re-run, not a real code issue).
 
+## AgentMail integration for the 4 blocked Substack sources (2026-07-18)
+
+Built, per explicit instruction, to route around the GitHub-Actions-IP
+403 block confirmed earlier (JamWithAI, The Nuanced Perspective, AI with
+Aish, The Neural Maze) -- not by fetching RSS anymore, but by reading
+the newsletters AS EMAIL via a dedicated AgentMail inbox Pooja subscribes
+herself, same as subscribing any real email address.
+
+New module `discovery/parsers/agentmail_newsletters.py`. Real AgentMail
+API shape (`agentmail>=0.5.8`, added to `requirements.txt`, verified
+against the installed package's actual method signatures via direct
+`inspect.signature()`, not assumed from docs):
+- `client.inboxes.messages.list(inbox_id, labels=["unread"], limit=N)` ->
+  metadata only, no body.
+- `client.inboxes.messages.get(inbox_id, message_id)` -> full `Message`
+  (`.html`/`.text`/`.extracted_html`/`.extracted_text`).
+- `client.inboxes.messages.update(inbox_id, message_id,
+  add_labels=["read"], remove_labels=["unread"])` -- AgentMail has no
+  dedicated mark-read endpoint; labels ARE the read/unread state, same
+  conceptual pattern as `discovery/seen_items.py`'s `mark_seen`, but the
+  "seen" state lives in AgentMail's own store, not ours.
+
+URL extraction: scans every href in the email HTML for the real,
+documented Substack post pattern `https://{subdomain}.substack.com/p/
+{slug}`, matched against the 4 known target subdomains -- more robust
+than targeting a specific "Read on Substack" button's exact position/CSS
+class, which is real template structure this project hasn't observed
+directly yet.
+
+Wired into `discovery/parsers/scrape_blogs.py`'s `fetch_one_source()`
+dispatch: an `agentmail_inbox_id` entry routes here instead of
+`feed_url`/`scrape_url`. `blog_sources.yaml`'s 4 individual feed_url
+entries for these sources replaced with ONE combined "AgentMail
+Newsletters" entry (`fetch_limit=20` -- one shared inbox covering 4
+weekly publications, not one feed each), with the comment block updated
+to explicitly flag that this entry uses a different fetch mechanism than
+every other entry in the file, so a future session doesn't mistake it
+for a feed_url/scrape_url fetch.
+
+**HONEST STATUS -- explicitly NOT the full real-evidence bar yet.**
+Verified against a realistic, manually-constructed HTML fixture modeled
+on the real, documented Substack `/p/` URL convention (`tests/
+test_agentmail_newsletters.py`, 8 new tests, all passing): URL
+extraction correctly finds the real post link among several
+tracking/unsubscribe hrefs, correctly returns nothing for an unrelated
+email, HTML-to-text stripping works, and the full `fetch_agentmail_
+newsletters()` flow correctly parses a message into a RawItem-shaped row
+and marks it read -- one bad message never blocks the others, an
+inbox-level failure (bad key, network error) never raises. This is
+**not** the same as real evidence of an actual received email -- no
+AgentMail inbox exists yet.
+
+**Stopped here, per explicit instruction and CLAUDE.md's standing
+constraint on adding secrets: AGENTMAIL_API_KEY needed.** Once Pooja adds
+it and creates a real inbox (subscribing it to the 4 newsletters
+herself), `blog_sources.yaml`'s `agentmail_inbox_id: "TODO-fill-in-once-
+a-real-inbox-exists"` placeholder needs the real inbox ID, and only then
+can the actual required evidence (one real received newsletter parsed
+into a real RawItem with a real, clickable destination URL) be produced.
+Full test suite: 155 passed, 2 skipped (Anthropic's scrape_url entry and
+the new AgentMail entry, neither exercised by the live-HTTP-fetch test
+the same way feed_url entries are), zero regressions.
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`

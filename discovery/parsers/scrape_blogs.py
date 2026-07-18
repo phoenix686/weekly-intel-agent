@@ -10,7 +10,10 @@ Dispatches per entry: `feed_url` entries go through
 discovery/parsers/rss_common.py's fetch_rss_feed() (RSS/Atom);
 `scrape_url` entries (currently only Anthropic's dev blog, which has no
 RSS feed) go through discovery/parsers/anthropic_blog.py's
-fetch_anthropic_engineering().
+fetch_anthropic_engineering(); `agentmail_inbox_id` entries (the 4
+Substack sources unreachable from GitHub Actions -- see blog_sources.yaml)
+go through discovery/parsers/agentmail_newsletters.py's
+fetch_agentmail_newsletters().
 
 No langgraph imports, no I/O side effects beyond HTTP fetches.
 Row-level failures are collected in ParseResult.errors.
@@ -22,6 +25,7 @@ from dataclasses import dataclass, field
 
 from discovery.parsers.rss_common import fetch_rss_feed
 from discovery.parsers.anthropic_blog import fetch_anthropic_engineering
+from discovery.parsers.agentmail_newsletters import fetch_agentmail_newsletters
 from discovery.blog_sources_config import entries_for_context
 
 # Heuristic only (LangChain's feed has no <category> distinguishing case
@@ -77,6 +81,12 @@ def fetch_one_source(entry: dict) -> SourceResult:
     many items are fetched from that source -- falls back to
     _DEFAULT_FETCH_LIMIT when the entry doesn't set one."""
     fetch_limit = entry.get("fetch_limit", _DEFAULT_FETCH_LIMIT)
+
+    if "agentmail_inbox_id" in entry:
+        result = fetch_agentmail_newsletters(entry["agentmail_inbox_id"], limit=fetch_limit)
+        rows = [row for row in result.rows if row["title"]]
+        error = result.errors[0][1] if result.errors else None
+        return SourceResult(name=entry["name"], rows=rows, error=error)
 
     if "feed_url" in entry:
         max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]

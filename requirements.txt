@@ -6,6 +6,7 @@ langmem>=0.0.15
 psycopg[binary]>=3.1.0
 psycopg-pool>=3.1.0
 python-dotenv>=1.2.2
+agentmail>=0.5.8
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.13.0+cpu
 sentence-transformers>=5.6.0
