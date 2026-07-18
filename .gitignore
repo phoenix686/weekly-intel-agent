@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 data/
+discovery/config/agentmail_sources.yaml
 
 .claude/
 .pre-commit-config.yaml

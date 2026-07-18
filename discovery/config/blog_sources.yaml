@@ -38,32 +38,33 @@
 # deeplearning.ai / The Batch intentionally excluded -- no public RSS feed,
 # confirmed independently twice.
 #
-# JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze (all
-# Substack-hosted): confirmed unreachable specifically from GitHub Actions
-# runners -- real production node_summary entries (2026-07-17) showed all
-# four failing with HTTP 403 Forbidden on every run, while the other 8
-# sources' items still came through fine and the node completed normally
-# (a gracefully-handled failure, not a pipeline bug). Re-tested all four
-# from a non-Actions machine and every one succeeded -- the 403 did not
-# reproduce there (most likely Substack rate-limiting/blocking GitHub's
-# shared runner IP ranges; a browser-realistic User-Agent, tried in
-# discovery/parsers/rss_common.py, made no difference).
+# JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze, Decoding
+# AI Magazine, and Ahead of AI used to be RSS entries here. JamWithAI/The
+# Nuanced Perspective/AI with Aish/The Neural Maze (all Substack-hosted)
+# were confirmed unreachable specifically from GitHub Actions runners --
+# real production node_summary entries (2026-07-17) showed all four
+# failing with HTTP 403 Forbidden on every run (most likely Substack
+# rate-limiting/blocking GitHub's shared runner IP ranges -- re-tested
+# from a non-Actions machine and every one succeeded, so the block itself
+# never reproduced here; a browser-realistic User-Agent, tried in
+# discovery/parsers/rss_common.py, made no difference either).
 #
 # FIXED 2026-07-18 by routing around the block entirely, not by fetching
-# their RSS feeds anymore: these 4 are now sourced via
-# discovery/parsers/agentmail_newsletters.py, which reads the newsletters
-# AS EMAIL (subscribed to a dedicated AgentMail inbox) via AgentMail's
-# API, instead of fetching each publication's RSS feed directly over
-# HTTP. A future session should NOT mistake the single combined
-# "AgentMail Newsletters" entry below for the same feed_url/scrape_url
-# fetch mechanism every other entry in this file uses -- it dispatches
-# through a completely different code path (discovery/parsers/
-# scrape_blogs.py's fetch_one_source() routes any entry with an
-# `agentmail_inbox_id` key to fetch_agentmail_newsletters() instead of
-# fetch_rss_feed()). Requires AGENTMAIL_API_KEY (real evidence of an
-# actual received/parsed newsletter is still outstanding until that
-# secret is added -- see feature_list.json's
-# agentmail-newsletter-integration entry).
+# RSS anymore: all 6 of the above (plus 4 more that never had an RSS
+# entry at all -- The AI Merge/Alex Razvant, DiamantAI, The Batch, and
+# "AI Engineering"/Sumanth P) are now read AS EMAIL via a single shared
+# AgentMail inbox instead. This is NOT a blog_sources.yaml entry --
+# unlike every other source in this file, it's a completely separate
+# fetch path (discovery/parsers/scrape_blogs.py's
+# fetch_agentmail_sources(), called directly by discovery/nodes/
+# scrape_blogs.py alongside, not through, this file's per-entry loop).
+# The real inbox ID and the real sender-address-to-source-name mapping
+# for all 10 senders live in discovery/config/agentmail_sources.yaml --
+# gitignored (personal subscription data, same category as .env), with
+# a tracked agentmail_sources.yaml.example documenting the expected shape.
+# A future session should not go looking for these 6 sources' feed_url
+# entries in this file -- they're gone from here on purpose, not missing
+# by accident.
 
 - name: "TLDR AI"
   feed_url: "https://tldr.tech/api/rss/ai"
@@ -85,25 +86,10 @@
   bucket: sunday
   fetch_limit: 6
 
-- name: "Decoding AI Magazine"
-  feed_url: "https://www.decodingai.com/feed"
-  bucket: sunday
-  fetch_limit: 6
-
-- name: "AgentMail Newsletters (JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze)"
-  agentmail_inbox_id: "TODO-fill-in-once-a-real-inbox-exists"  # see discovery/parsers/agentmail_newsletters.py
-  bucket: sunday
-  fetch_limit: 20  # one shared inbox for 4 weekly newsletters -- generous buffer, not per-publication
-
 - name: "MarkTechPost"
   feed_url: "https://www.marktechpost.com/feed/"
   bucket: daily
   fetch_limit: 15
-
-- name: "Ahead of AI"
-  feed_url: "https://magazine.sebastianraschka.com/feed"
-  bucket: sunday
-  fetch_limit: 6
 
 - name: "The New Stack (AI)"
   feed_url: "https://thenewstack.io/ai/feed/"

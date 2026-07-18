@@ -1,0 +1,17 @@
+# Example/placeholder version of discovery/config/agentmail_sources.yaml
+# (gitignored -- see .gitignore) -- same pattern as .env.example. Copy
+# this file to agentmail_sources.yaml and fill in the real inbox_id and
+# real sender addresses (confirm each by checking who a real welcome/
+# subscription email actually came from via a live
+# client.inboxes.messages.list() call, not by guessing the address).
+inbox_id: "your-inbox-name@agentmail.to"
+fetch_limit: 20  # per run, across every sender sharing this one inbox
+
+sources:
+  - name: "Example Newsletter One"
+    sender: "sender-one@example.substack.com"
+    bucket: sunday
+
+  - name: "Example Newsletter Two"
+    sender: "sender-two@example.substack.com"
+    bucket: sunday

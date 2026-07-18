@@ -10,10 +10,16 @@ Dispatches per entry: `feed_url` entries go through
 discovery/parsers/rss_common.py's fetch_rss_feed() (RSS/Atom);
 `scrape_url` entries (currently only Anthropic's dev blog, which has no
 RSS feed) go through discovery/parsers/anthropic_blog.py's
-fetch_anthropic_engineering(); `agentmail_inbox_id` entries (the 4
-Substack sources unreachable from GitHub Actions -- see blog_sources.yaml)
-go through discovery/parsers/agentmail_newsletters.py's
-fetch_agentmail_newsletters().
+fetch_anthropic_engineering().
+
+AgentMail-sourced newsletters (discovery/config/agentmail_sources.yaml,
+gitignored -- real sender-address-to-source-name mapping for a shared
+inbox) are NOT a blog_sources.yaml entry at all -- one shared inbox
+covers up to 10 real senders at once, which doesn't fit this file's
+one-entry-per-fetch model. fetch_agentmail_sources() below is a
+separate, parallel path discovery/nodes/scrape_blogs.py calls directly,
+producing its own per-real-sender SourceResults from one shared
+messages.list() call.
 
 No langgraph imports, no I/O side effects beyond HTTP fetches.
 Row-level failures are collected in ParseResult.errors.
@@ -27,6 +33,7 @@ from discovery.parsers.rss_common import fetch_rss_feed
 from discovery.parsers.anthropic_blog import fetch_anthropic_engineering
 from discovery.parsers.agentmail_newsletters import fetch_agentmail_newsletters
 from discovery.blog_sources_config import entries_for_context
+from discovery.agentmail_sources_config import load_agentmail_config
 
 # Heuristic only (LangChain's feed has no <category> distinguishing case
 # studies from technical posts) -- title/text keyword match. Not perfect;
@@ -82,12 +89,6 @@ def fetch_one_source(entry: dict) -> SourceResult:
     _DEFAULT_FETCH_LIMIT when the entry doesn't set one."""
     fetch_limit = entry.get("fetch_limit", _DEFAULT_FETCH_LIMIT)
 
-    if "agentmail_inbox_id" in entry:
-        result = fetch_agentmail_newsletters(entry["agentmail_inbox_id"], limit=fetch_limit)
-        rows = [row for row in result.rows if row["title"]]
-        error = result.errors[0][1] if result.errors else None
-        return SourceResult(name=entry["name"], rows=rows, error=error)
-
     if "feed_url" in entry:
         max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]
         result = fetch_rss_feed(
@@ -105,6 +106,55 @@ def fetch_one_source(entry: dict) -> SourceResult:
     rows = [row for row in result.rows if row["title"]]
     error = result.errors[0][1] if result.errors else None
     return SourceResult(name=entry["name"], rows=rows, error=error)
+
+
+_AGENTMAIL_DEFAULT_FETCH_LIMIT = 20
+
+
+def fetch_agentmail_sources(source_context: str) -> list[SourceResult]:
+    """One shared client.inboxes.messages.list() call covering every
+    AgentMail-sourced sender at once, then split into one SourceResult
+    PER REAL SENDER (not one generic "AgentMail Newsletters" bucket) --
+    source attribution is critical with this many distinct publications
+    sharing one inbox. Sunday-only, matching every AgentMail source's
+    bucket in discovery/config/agentmail_sources.yaml today.
+
+    Gracefully degrades to a single informative SourceResult (zero rows,
+    a clear error) if the gitignored real config doesn't exist on this
+    machine yet -- never crashes the rest of the pipeline over a missing
+    optional file, same reliability contract as every other source."""
+    if source_context != "sunday":
+        return []
+
+    try:
+        config = load_agentmail_config()
+    except FileNotFoundError as e:
+        return [SourceResult(name="AgentMail Newsletters", rows=[], error=str(e))]
+
+    inbox_id = config["inbox_id"]
+    sources = config.get("sources", [])
+    sender_to_name = {s["sender"]: s["name"] for s in sources}
+    fetch_limit = config.get("fetch_limit", _AGENTMAIL_DEFAULT_FETCH_LIMIT)
+
+    result = fetch_agentmail_newsletters(inbox_id, sender_to_name, limit=fetch_limit)
+
+    rows_by_name: dict[str, list[dict]] = {s["name"]: [] for s in sources}
+    for row in result.rows:
+        rows_by_name.setdefault(row["author_name"], []).append(row)
+
+    errors_by_name: dict[str, list[str]] = {}
+    for name, message in result.errors:
+        errors_by_name.setdefault(name, []).append(message)
+
+    all_names = set(rows_by_name) | set(errors_by_name)
+    return [
+        SourceResult(
+            name=name,
+            rows=[row for row in rows_by_name.get(name, []) if row["title"]],
+            error="; ".join(errors_by_name[name]) if name in errors_by_name else None,
+        )
+        for name in sorted(all_names)
+    ]
 
 
 def fetch_blog_entries_per_source(source_context: str) -> list[SourceResult]:

@@ -1,6 +1,6 @@
 import time
 
-from discovery.parsers.scrape_blogs import fetch_one_source
+from discovery.parsers.scrape_blogs import fetch_one_source, fetch_agentmail_sources
 from discovery.blog_sources_config import entries_for_context
 from state import DiscoverySubgraphState, RawItem, NodeCost
 from observability import record_node_summary
@@ -55,6 +55,27 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
         costs.append(cost)
         items.extend(_row_to_item(row) for row in source_result.rows)
 
+    # AgentMail-sourced newsletters (discovery/config/agentmail_sources.yaml,
+    # gitignored) aren't blog_sources.yaml entries -- one shared inbox
+    # covers up to 10 real senders via a single fetch, split into one
+    # SourceResult per real sender for the same per-source NodeCost.error
+    # visibility every other source gets.
+    agentmail_t0 = time.perf_counter()
+    agentmail_results = fetch_agentmail_sources(state["source_context"])
+    agentmail_elapsed_ms = round((time.perf_counter() - agentmail_t0) * 1000, 4)
+    for source_result in agentmail_results:
+        cost = NodeCost(
+            node_name="scrape_blogs",
+            input_tokens=0, output_tokens=0,
+            latency_ms=agentmail_elapsed_ms,
+            cost_usd=0.0,
+        )
+        if source_result.error is not None:
+            cost["error"] = f"{source_result.name}: {source_result.error}"
+            errors.append(cost["error"])
+        costs.append(cost)
+        items.extend(_row_to_item(row) for row in source_result.rows)
+
     # items_in/items_out here mean "active sources attempted" / "raw items
     # fetched" -- a different unit pair than cluster_dedupe's (items in,
     # items out of the same kind), but the same generic node_summary shape,
@@ -62,7 +83,7 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
     record_node_summary(
         run_id=state["run_id"],
         node_name="scrape_blogs",
-        items_in=len(entries),
+        items_in=len(entries) + len(agentmail_results),
         items_out=len(items),
         duration_seconds=round(time.perf_counter() - node_t0, 3),
         error_summary="; ".join(errors) if errors else None,

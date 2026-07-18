@@ -1680,7 +1680,13 @@ transiently failed on the first full-suite run from rate-limiting after
 repeated manual fetches during this investigation -- passed cleanly in
 isolation and on re-run, not a real code issue).
 
-## AgentMail integration for the 4 blocked Substack sources (2026-07-18)
+## AgentMail integration for the 4 blocked Substack sources (2026-07-18) -- SUPERSEDED
+
+**Superseded the same day by the full 10-source consolidation below** --
+this section is kept as the real historical record of the first pass
+(placeholder inbox_id, hardcoded 4-subdomain HTML parsing that turned out
+to be wrong), not the current design. See "AgentMail full consolidation"
+further down for what's actually running.
 
 Built, per explicit instruction, to route around the GitHub-Actions-IP
 403 block confirmed earlier (JamWithAI, The Nuanced Perspective, AI with
@@ -1742,6 +1748,111 @@ into a real RawItem with a real, clickable destination URL) be produced.
 Full test suite: 155 passed, 2 skipped (Anthropic's scrape_url entry and
 the new AgentMail entry, neither exercised by the live-HTTP-fetch test
 the same way feed_url entries are), zero regressions.
+
+## AgentMail full consolidation: 10 sources, real HTTP redirect resolution, gitignored config (2026-07-18)
+
+Replaces the section above entirely -- AGENTMAIL_API_KEY and a real
+inbox now exist (`<REDACTED_AGENTMAIL_ADDRESS>`), so this pass builds
+against real data throughout, not a placeholder.
+
+### 1. Real, critical finding that invalidated the original design
+The original `_extract_article_url()` parsed raw HTML for a
+`{subdomain}.substack.com/p/{slug}` pattern directly. Inspecting a REAL
+received welcome email (Ahead of AI, Substack) before trusting that
+design: **every single href in a real Substack email is an opaque
+click-tracking redirect** (`https://email.mg-d0.substack.com/c/
+{encoded-token}`) -- the real destination is never in the raw HTML at
+all. Confirmed the same is true for beehiiv ("AI Engineering" 's real
+welcome email: `https://link.mail.beehiiv.com/ss/c/{token}`). Verified
+the fix directly: resolving one of these tracking links via a real HTTP
+request (following redirects) returned a real, different URL
+(`https://magazine.sebastianraschka.com/subscribe`) -- proving
+resolution is both necessary and sufficient. Rewrote
+`_extract_article_url()` to resolve each candidate href via a real HTTP
+call (`_resolve_redirect()`, capped at 15 links per message, stops at
+first match) and check the RESOLVED url for the shared Substack/beehiiv
+`/p/{slug}` convention -- not restricted to a hardcoded subdomain list
+anymore, since resolution reveals the real destination domain directly
+regardless of which ESP sent the email. This was caught by inspecting
+real data BEFORE shipping, not discovered by a later failure.
+
+### 2. Sender-address-to-source-name mapping kept out of git entirely
+New `discovery/config/agentmail_sources.yaml` (gitignored -- added to
+`.gitignore`, same category as `.env`/`data/`): real `inbox_id` plus all
+10 senders' real addresses, confirmed via a live `client.inboxes.list()`
++ `client.inboxes.messages.list()` query against the actual subscribed
+inbox, not guessed. Tracked `agentmail_sources.yaml.example` documents
+the same shape with placeholders. New loader
+`discovery/agentmail_sources_config.py` (mirrors `blog_sources_config.py`'s
+pattern) -- raises a clear `FileNotFoundError` if the real file doesn't
+exist on a machine (e.g. a fresh clone), which
+`fetch_agentmail_sources()` catches and turns into one informative,
+non-fatal `SourceResult` rather than crashing the pipeline.
+
+Confirmed via `git log --all -p` before building anything: no real
+sender address or inbox ID was ever committed anywhere -- only the
+placeholder string `"TODO-fill-in-once-a-real-inbox-exists"` from the
+prior (now-superseded) pass. Clean setup, not a cleanup, as expected.
+
+### 3. blog_sources.yaml: 6 sources removed, 6 confirmed untouched
+JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze (already
+gone as of the prior pass), plus Decoding AI Magazine and Ahead of AI
+(newly removed this pass) -- all 6 now read via AgentMail instead, not
+alongside RSS. Confirmed via a real parsed `load_blog_sources()` call
+that the remaining 7 entries are exactly TLDR AI, LangChain Blog, Latent
+Space, Anthropic Engineering Blog, MarkTechPost, The New Stack (AI), and
+Hacker News (Show HN) (added the same day, prior turn) -- untouched.
+AgentMail is no longer represented in `blog_sources.yaml` as an entry at
+all (the placeholder `agentmail_inbox_id` entry from the prior pass is
+gone) -- one shared inbox covering 10 senders doesn't fit that file's
+one-entry-per-fetch model, so `discovery/parsers/scrape_blogs.py`'s new
+`fetch_agentmail_sources()` is a separate path `discovery/nodes/
+scrape_blogs.py` calls directly, alongside (not through) the
+`blog_sources.yaml`-driven loop.
+
+### 4. Read/unread window -- confirmed already correct, no fix needed
+`messages.list(inbox_id, labels=["unread"])` was already the mechanism
+in the prior pass and still is -- the unread label IS the time boundary;
+`add_labels=["read"]` after successful processing means each Sunday run
+naturally only sees what's new since the last one, no separate
+date-range filter exists or was added.
+
+### 5. Source attribution -- one SourceResult per real sender, not one generic bucket
+`fetch_agentmail_sources()` makes ONE shared `messages.list()` call, then
+groups the results by each row's real `author_name` (matched against the
+sender address via `_match_sender_name()`) into one `SourceResult` per
+real publication -- same per-source `NodeCost.error` visibility every
+other source gets. An unrecognized sender (anything not in
+`agentmail_sources.yaml`) groups under a stable sentinel name
+(`"AgentMail Newsletters (unrecognized sender)"`), not silently dropped
+or confused with a real source.
+
+### REAL EVIDENCE -- run directly against the live inbox, not simulated
+`fetch_agentmail_sources("sunday")` executed for real (2026-07-18) against
+the actual subscribed inbox:
+
+| Source | Result |
+|---|---|
+| Decoding AI Magazine | **1 real row** -- `https://www.decodingai.com/p/ai-engineering-roadmaps`, confirmed live (HTTP 200), message confirmed marked `read` afterward |
+| JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze, Ahead of AI, The AI Merge (Alex Razvant), DiamantAI, AI Engineering (Sumanth P) | 0 rows, correctly reported "no resolvable article URL found" -- all 8 are genuine welcome/subscription-confirmation emails with no real post link (confirmed by manually resolving every href in two of them), correctly left `unread` for retry once a real issue arrives |
+| The Batch | 0 rows, no error -- no message has arrived from this sender yet |
+| (unrecognized) | Pooja's own real test email correctly caught and grouped separately, not mistaken for a configured source |
+
+**Honest status**: this is real, live, end-to-end proof the entire
+mechanism works (list -> get -> resolve redirects -> extract real URL ->
+attribute to the correct real sender -> build a RawItem -> mark read),
+not a synthetic fixture. It is NOT yet "one real parsed RawItem per
+distinct sender (10 total)" -- 9 of 10 senders have so far only sent a
+welcome email, not a real newsletter issue; The AI Merge's real display
+name is "Alex Razvant @ The AI Merge", not "The AI Edge" as first
+described, corrected to match the real sender. This will close out
+naturally as each publication sends its next real weekly issue --
+requires real-world time, not something this session can force.
+
+Full test suite after the full rewrite: 156 passed, 1 skipped, zero
+regressions. `tests/test_agentmail_newsletters.py` fully rewritten (mocks
+`_resolve_redirect`, not raw HTML parsing, since that's what real data
+proved is actually needed).
 
 ## Store-namespace registry
 
