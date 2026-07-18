@@ -184,6 +184,13 @@ class SundayGraphState(TypedDict):
     correlated_items: list[dict]    # scored_items + matched_card_id: str | None
     classified_items: list[dict]    # + classification: "plan_item" | "project_proposal"
                                     #   + proposal_type: "extend" | "new" | None
+    prioritized_project_work: list[dict]  # populated by prioritize_plan_items (after
+                                    #   classify_item, before assemble_plan): bounded
+                                    #   (<= MAX_PROJECT_WORK_ITEMS), priority-ordered
+                                    #   selection -- {matched_card_id, source: "new_item"|
+                                    #   "stale_nudge", item_url, priority_reasoning,
+                                    #   movement_note}. Not yet rendered by assemble_plan
+                                    #   (that's the final sub-phase of this checkpoint).
     plan_text: str                  # populated by assemble_plan
     plan_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
                                      # assemble_plan, persisted by send_telegram_plan keyed by
@@ -203,6 +210,7 @@ def make_sunday_initial_state(run_id: str) -> SundayGraphState:
         card_movements=[],
         correlated_items=[],
         classified_items=[],
+        prioritized_project_work=[],
         plan_text="",
         plan_item_map={},
         pending_approvals=[],

@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 4 (cross-week movement detection) -- see bottom section
+Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 5 (new bounded LLM prioritization node) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -110,6 +110,9 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
     (populated by `proposal_worker` per fan-out branch: `{proposal_id, thread_id, message_id}`).
     Also `card_movements: list[dict]` (sub-phase 4, populated by `read_trello`) —
     real cross-week Trello movement per card, see `sunday/card_movement.py`'s entry.
+    Also `prioritized_project_work: list[dict]` (sub-phase 5, populated by
+    `prioritize_plan_items`) — bounded, priority-ordered Existing Project Work
+    selection, not yet consumed by `assemble_plan`.
     `approval_results` removed — proposals now resolve async, outside the Sunday run.
 - **Key exports:** all TypedDicts + `make_sunday_initial_state()`, `make_daily_initial_state()`
 - **Depended on by:** every node file and both graph files
@@ -301,6 +304,38 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **What it does:** LangGraph node — classifies items as `plan_item` or `project_proposal`.
 - **Key exports:** `classify_item(state) -> dict`
 
+### `sunday/nodes/prioritize_plan_items.py`  _(new, sub-phase 5)_
+- **What it does:** LangGraph node, runs after `classify_item` and before
+  `assemble_plan` (parallel to `route_to_approvals`/`proposal_worker` in the
+  same fan-out `Send`). One real Haiku call combining this week's matched
+  items (`classification=="plan_item"`, no `course` tag, real
+  `matched_card_id`), the full real Trello board state (`state["trello_cards"]`
+  -- every open Dump/In Progress card, including ones with no new content
+  this week), and `state["card_movements"]` (sub-phase 4's real cross-week
+  signal). Persona in the prompt: Pooja is an AI/ML engineer doing this as a
+  side effort alongside a full-time job to reclaim time it doesn't give her
+  -- the job is to identify what's genuinely worth her limited weekly hours,
+  not list everything, weighing stale/idle cards honestly against new
+  content, and explicitly acknowledging (never silently repeating or
+  dropping) cards the movement signal marks `"unchanged"`. The prompt
+  instructs the model not to surface `"completed"`/`"archived"` cards.
+  `MAX_PROJECT_WORK_ITEMS = 5` is enforced twice: in the prompt (target
+  3-5, fewer/zero is correct if nothing's worth it) AND as a hard
+  post-response cap regardless of what the model returns.
+  `_validate_selection()` drops any entry pointing at a `matched_card_id`
+  or `item_url` the model invented (checked against the real
+  `trello_cards`/matched-items sets), same defensive-validation pattern as
+  `classify_item.py`'s `_validate_classification()`. JSON-parse-failure
+  fallback (after one retry, same pattern as `correlate_trello`/
+  `classify_item`): falls back to this week's matched items, unprioritized,
+  capped at the same bound -- preserves at least the new-content candidates
+  rather than surfacing nothing.
+  Output (`prioritized_project_work`) is NOT yet consumed by `assemble_plan`
+  -- that's the final sub-phase of this checkpoint ("assemble_plan
+  rendering": bounding + priority-order rendering, items 6-7).
+- **Key exports:** `prioritize_plan_items(state) -> dict`, `MAX_PROJECT_WORK_ITEMS`
+- **Depended on by:** `sunday/graph.py`
+
 ### `sunday/nodes/assemble_plan.py`
 - **What it does:** `format_plan()` + `assemble_plan` node wrapper. Produces weekly plan
   text with three sections in order: **Reading & Learning** (no `course` tag, no
@@ -359,9 +394,13 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **What it does:** Posts `state["plan_text"]` to Telegram.
 - **Key exports:** `send_telegram_plan(state) -> dict`
 
-### `sunday/graph.py`  _(updated Parts 1-7)_
+### `sunday/graph.py`  _(updated Parts 1-7; sub-phase 5)_
 - **What it does:** Builds and compiles the Sunday parent graph. `write_outputs` node
-  removed — `proposal_worker` edges directly to `update_profile`.
+  removed — `proposal_worker` edges directly to `update_profile`. Sub-phase 5:
+  `_fan_out_after_classify` now sends to `"prioritize_plan_items"` instead of
+  directly to `"assemble_plan"`; a new edge `prioritize_plan_items -> assemble_plan`
+  keeps the rest of the topology (including the parallel `route_to_approvals`/
+  `proposal_worker` branch) unchanged.
 - **Key exports:** `build_sunday_graph() -> CompiledStateGraph`
 - **Depended on by:** `scripts/run_sunday.py`
 
@@ -433,7 +472,14 @@ graph TD
     score --> __end__
 ```
 
-**Sunday parent graph** (Parts 1-7 — `write_outputs` removed, `proposal_worker` → `update_profile` directly):
+**Sunday parent graph** (Parts 1-7 — `write_outputs` removed, `proposal_worker` → `update_profile` directly;
+sub-phase 5 inserts `prioritize_plan_items` into the fan-out, between `classify_item` and `assemble_plan`).
+Re-verified against the real compiled graph 2026-07-18 (`build_sunday_graph().get_graph().draw_mermaid()`):
+`draw_mermaid()` cannot resolve the `Send()`-based dynamic fan-out from `classify_item` at all (confirmed
+live -- the raw generated output only shows `classify_item --> __end__` as a placeholder for that edge, same
+real limitation the pre-sub-phase-5 version of this diagram already had to annotate manually). Every other
+node/edge below matches the real generated output verbatim; only the two `Send(...)`-labeled edges are manual
+annotations of what the real (unresolvable-by-the-drawer) code actually does:
 
 ```mermaid
 graph TD
@@ -441,8 +487,9 @@ graph TD
     discovery_subgraph --> read_trello
     read_trello --> correlate_trello
     correlate_trello --> classify_item
-    classify_item -->|"Send(assemble_plan)"| assemble_plan
+    classify_item -->|"Send(prioritize_plan_items)"| prioritize_plan_items
     classify_item -->|"Send(proposal_worker) × N"| proposal_worker
+    prioritize_plan_items --> assemble_plan
     assemble_plan --> send_telegram_plan
     send_telegram_plan --> update_profile
     proposal_worker -->|"child graph: send msg + interrupt()\neach on own thread"| proposal_worker
@@ -2057,11 +2104,13 @@ actual code, not assumed from the spec's prior draft).
   next run actually resumes the graph and writes the correct Trello outcome.
   Human-only per `feature_list.json` — Claude Code must not and did not mark
   this passing.
-- **Sub-phase 5 of the Sunday plan LLM prioritization checkpoint** (see
-  below) — the new bounded LLM prioritization node (item 5), the bounding
-  itself (item 6), and priority-order rendering (item 7) are all NOT
-  started. Sub-phases 1-4 (Courses section, Trello staleness, `plan_history`
-  namespace, cross-week movement detection) are built so far.
+- **Final sub-phase of the Sunday plan LLM prioritization checkpoint**
+  ("assemble_plan rendering": items 6-7) — `assemble_plan` still renders
+  Existing Project Work from `classified_items` directly, in source order,
+  unbounded (every matched item, not the LLM-curated 3-5). It does NOT yet
+  read `prioritized_project_work` at all. Sub-phases 1-5 (Courses section,
+  Trello staleness, `plan_history` namespace, cross-week movement
+  detection, the new bounded LLM prioritization node) are built so far.
 
 ## Sunday plan LLM prioritization checkpoint (2026-07-18)
 
@@ -2094,13 +2143,15 @@ build. Full scope, for context (later sub-phases not yet started):
    identifying what's genuinely worth her limited weekly hours, not listing
    everything relevant, including surfacing stale/idle Trello cards weighed
    honestly against new discoveries, and acknowledging (not silently
-   repeating or dropping) cards unchanged since last week — **not
-   started.**
+   repeating or dropping) cards unchanged since last week — **DONE, this
+   entry.**
 6. Bounding: Reading & Learning and Courses stay unbounded. Only the
    Trello-derived plan-item selection is bounded (target 3-5 items,
-   adjustable with real evidence) — **not started** (no bounding exists
-   anywhere in `assemble_plan.py` yet, including for the new Courses
-   section, per this sub-phase's scope).
+   adjustable with real evidence) — **bounding logic exists** (item 5's
+   `prioritize_plan_items` hard-caps at `MAX_PROJECT_WORK_ITEMS = 5`), but
+   `assemble_plan.py` itself doesn't consume it yet, so the plan Pooja
+   actually sees is still unbounded today — real completion is the final
+   sub-phase.
 7. `assemble_plan` renders item 5's curated output in priority order, not
    source order — **not started** (Courses/Reading & Learning still render
    in the order items arrive in `classified_items` today).
@@ -2413,3 +2464,78 @@ spec's own "ground truth from Trello's actual state, not a self-reported
 flag"); `card_movements` is not yet consumed by anything — `assemble_plan`
 doesn't render it, no LLM node reads it yet (that's item 5); no new graph
 node added.
+
+### Sub-phase 5: the new bounded LLM prioritization node — what was built
+
+**Restructured the remaining checkpoint plan to match Pooja's original
+5-part breakdown** ("Courses section / Trello staleness+plan_history /
+cross-week movement detection / the new LLM node / assemble_plan
+rendering"), rather than continuing the finer-grained numbering used for
+sub-phases 2-4. This sub-phase covers item 5 only (the new node itself,
+producing a bounded/prioritized selection in state); the checkpoint's
+final sub-phase covers items 6-7 together (`assemble_plan` actually
+consuming and rendering that selection) — matching the breakdown's last
+bullet, "assemble_plan rendering," as one unit.
+
+**New node, real Anthropic call:** `sunday/nodes/prioritize_plan_items.py`
+(`prioritize_plan_items(state) -> dict`) -- see its file entry above for
+the full prompt design, bounding, and validation details. Wired into
+`sunday/graph.py`'s fan-out after `classify_item`, parallel to
+`route_to_approvals`/`proposal_worker`, feeding into `assemble_plan` via a
+new edge. Model: `claude-haiku-4-5`, matching every other LLM node in this
+codebase (`score_node`, `correlate_trello`, `classify_item`) for cost-tier
+consistency -- not upgraded to a stronger model despite the more nuanced
+judgment call this node makes, since that's a real cost/quality tradeoff
+decision, not something to change unilaterally. Worth revisiting if the
+selection quality turns out to need it once this is used for real.
+
+**Files changed:**
+- `sunday/nodes/prioritize_plan_items.py` — **new file** (see its own
+  entry above).
+- `state.py` — `SundayGraphState` gained `prioritized_project_work:
+  list[dict]` (default `[]`).
+- `sunday/graph.py` — `_fan_out_after_classify` now sends to
+  `"prioritize_plan_items"` instead of directly to `"assemble_plan"`; new
+  node registration; new edge `prioritize_plan_items -> assemble_plan`.
+  Sunday parent graph diagram (above) regenerated and re-verified against
+  the real compiled graph.
+- `tests/test_prioritize_plan_items.py` — **new file.** 9 tests: a
+  selected card appears in the output; a `stale_nudge` entry with no
+  matched item works; hard cap at `MAX_PROJECT_WORK_ITEMS` even if the
+  model returns more; a hallucinated `matched_card_id` is dropped; a
+  hallucinated `item_url` on a `new_item` entry is dropped; model-returned
+  order is preserved (no re-sorting); the movement block reaches the real
+  prompt text; JSON-parse-failure fallback returns unprioritized matched
+  items capped at the bound; course-tagged items never reach the prompt as
+  candidates.
+
+**Real evidence:**
+- Full test suite: `201 passed, 1 skipped` (up from 192 — 9 new tests, 0
+  broken). `build_sunday_graph()` compiling successfully (exercised by
+  `tests/test_ingest_bookmarks_gating.py`'s real graph-build test) confirms
+  the new node/edge wiring is structurally valid, not just unit-tested in
+  isolation.
+- **Live run against a real Anthropic API call, the real Trello board, and
+  a real stale card**: fetched all 28 real board cards; identified the two
+  real cards with the OLDEST `last_activity` among `In Progress` cards
+  (43+ days idle, live-confirmed, not fabricated); ran `prioritize_plan_items()`
+  with the full real `trello_cards`, one fabricated "new content this
+  week" item matched to the real freshest card, and a `card_movements`
+  entry marking a different real card `"unchanged"`. Real result: 3
+  entries (within the 3-5 target, not padded) — the fresh matched item
+  ranked #1 with reasoning citing it as "your hottest signal this week,"
+  and the two genuinely stale (43+ days) `In Progress` cards surfaced at
+  #2/#3 with real reasoning citing their actual idle duration and asking
+  for "a decision" on them — real evidence of "surfacing Trello cards that
+  have gone stale/idle, weighed honestly against new discoveries," not a
+  scripted/expected outcome. The `"unchanged"` card was correctly NOT
+  forced into the selection (the prompt only requires acknowledgment IF
+  included, not mandatory inclusion) — real cost: `$0.001134`, 2474 input
+  / 412 output tokens.
+
+**Explicitly NOT done in this sub-phase:** `assemble_plan.py` does not
+read `prioritized_project_work` at all yet — the plan Pooja actually
+receives via Telegram is unaffected by this sub-phase; still unbounded,
+still source-order, still built purely from `classified_items` +
+`matched_card_id` the same way it was before sub-phase 5. That wiring
+(items 6-7) is the checkpoint's final sub-phase.
