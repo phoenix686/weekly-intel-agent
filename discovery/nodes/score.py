@@ -29,11 +29,27 @@ Drop content that is:
 - Tool announcements with no explanation of what the tool does
 - Community events, meetups, conference announcements
 - Design tools, lifestyle, or anything unrelated to AI engineering
+
+Tagging guidance for Hacker News items specifically -- identifiable by a
+"Show HN:" title prefix (hnrss.org/show's URL field is the submitter's
+own external link, e.g. a GitHub repo or personal site, not a
+news.ycombinator.com URL -- the title prefix is the reliable signal):
+only assign the new-tool-launch tag when the item is a genuine new tool,
+framework, API, or project launch specifically related to AI or agents.
+Do not assign
+new-tool-launch for general discussion threads, opinion posts, meta
+commentary, or Show HN submissions unrelated to AI/agents (e.g. a new
+CSS framework, a personal blog engine, an unrelated web app) -- score and
+tag those normally from the rest of this profile instead, without
+new-tool-launch. This is a tagging distinction, not a keep/drop rule on
+its own: an off-topic Show HN post should still be dropped as noise per
+the usual criteria above, same as any other source.
 """
 
 ALLOWED_TAGS = {
     "agentic-engineering", "memory-systems", "llm-tooling",
-    "evals", "learning-resource", "distributed-systems", "noise",
+    "evals", "learning-resource", "distributed-systems",
+    "new-tool-launch", "noise",
 }
 
 DROPPED_TAG_LOG = "data/dropped_tags.log"
@@ -66,7 +82,7 @@ def _score_batch(batch: list, offset: int, run_id: str = "unknown") -> tuple[lis
 
 Assign 1-3 tags from EXACTLY this list — no other tags are permitted:
 agentic-engineering, memory-systems, llm-tooling, evals, learning-resource,
-distributed-systems, noise
+distributed-systems, new-tool-launch, noise
 
 Score each bookmark below. Return a JSON array with one object per item,
 in the same order. Each object must have:

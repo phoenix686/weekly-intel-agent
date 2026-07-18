@@ -114,3 +114,20 @@
   feed_url: "https://thenewstack.io/ai/feed/"
   bucket: daily
   fetch_limit: 15
+
+- name: "Hacker News (Show HN)"
+  feed_url: "https://hnrss.org/show"
+  bucket: sunday
+  fetch_limit: 8
+  # Re-added 2026-07-18. Deliberately NO keyword query filter on the fetch
+  # itself (hnrss.org supports one, e.g. hnrss.org/show?q=agent, but using
+  # it would reintroduce the exact keyword-matching brittleness this
+  # project moved away from -- semantic scoring, not keyword matching, is
+  # how every other source works). Pulls every Show HN submission broadly;
+  # discovery/nodes/score.py's TASTE_PROFILE has an explicit Hacker-News-
+  # specific tagging instruction (identify via the "Show HN:" title prefix
+  # -- hnrss.org's own url field is the submitter's external link, not a
+  # news.ycombinator.com URL) so new-tool-launch only gets assigned to
+  # genuine AI/agent tool launches, not general discussion or unrelated
+  # Show HN posts, the same way MarkTechPost's higher volume is handled by
+  # scoring, not by narrowing the fetch.

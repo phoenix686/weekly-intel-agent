@@ -1624,6 +1624,62 @@ including the Sunday-exclusion logic (daily-bucket sources are already
 covered by Sunday's own run that day) still intact. Both YAML files
 validated via `yaml.safe_load`.
 
+## Hacker News (Show HN) re-added + new-tool-launch tag (2026-07-18)
+
+Re-added via `hnrss.org/show`, sunday bucket, `fetch_limit=8` (the one
+deliberate exception to the sunday-bucket default of 6, since Show HN's
+volume is higher than the newsletter sources). Deliberately no keyword
+query filter on the fetch itself (hnrss.org supports one, e.g. `?q=agent`)
+-- using it would reintroduce the exact keyword-matching brittleness this
+project moved away from; every other source relies on semantic scoring,
+not a narrowed fetch, to find the signal in a noisy stream (MarkTechPost's
+higher daily volume is handled the same way).
+
+Added a new real tag, `new-tool-launch`, to `score.py`'s `ALLOWED_TAGS` --
+flagged to Pooja first (via AskUserQuestion) since it wasn't in the
+existing tag set and adding it is a real schema change (flows into
+`taste_vectors.py`'s `TOPIC_TAGS` derivation and `_TAG_TO_BULLET` mapping
+automatically), not a one-line prompt tweak. Decided: add it as a real
+tag, mapped to a real bullet ("New AI tool, framework, API, or agent
+project launches") rather than left unmapped like `learning-resource` --
+unlike that tag, this one represents a genuine, coherent interest area
+the taste pre-filter can anchor to.
+
+`TASTE_PROFILE` gained an HN-specific tagging instruction: only assign
+`new-tool-launch` for genuine AI/agent tool, framework, API, or project
+launches, identified via a "Show HN:" title prefix -- NOT a
+news.ycombinator.com URL as first drafted. REAL finding from a live fetch
+that caught this before it shipped wrong: `hnrss.org/show`'s own `url`
+field is the submitter's external link (GitHub repo, personal site, etc),
+never HN's own domain -- the title prefix is the only reliable signal
+that survives into the scoring prompt. Fixed before any real evidence was
+gathered against the wrong assumption.
+
+REAL EVIDENCE: live fetch of `hnrss.org/show` (zero errors, 8 real rows).
+Ran those 8 real items through a real `score_node` call (Claude Haiku,
+`mark_seen`/`record_node_summary` mocked out so the test fetch doesn't
+pollute the live store) --
+- "Show HN: Google Search Console MCP" -> kept, tagged
+  `['agentic-engineering', 'new-tool-launch']` -- correct, genuine agent
+  tooling launch.
+- 5 unrelated Show HN posts (a desktop-icon customizer, an IKEA
+  complexity visualization, a domain-name finder, an orbit-transfer
+  simulator, a React Native puzzle game) -> all dropped as `noise`, none
+  tagged `new-tool-launch`.
+- 2 borderline AI-adjacent items (a model-routing benchmark, a
+  distributed-systems scenario-testing post) -> kept under other real
+  tags (`evals`, `distributed-systems`) but deliberately NOT tagged
+  `new-tool-launch` -- confirms the model is applying the tag
+  selectively, not indiscriminately to every HN launch that's vaguely
+  AI-adjacent.
+
+`tests/test_scrape_blogs_fetch_limit.py`'s sunday-bucket fetch_limit test
+updated (9 entries now, HN is the one fetch_limit=8 exception). Full test
+suite: 151 passed, 1 skipped, zero regressions (one live-fetch test
+transiently failed on the first full-suite run from rate-limiting after
+repeated manual fetches during this investigation -- passed cleanly in
+isolation and on re-run, not a real code issue).
+
 ## Store-namespace registry
 
 Every real `weekly_intel` store namespace, per `batch2-dedup-taste-spec.md`

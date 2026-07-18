@@ -75,6 +75,7 @@ _TAG_TO_BULLET = {
     "llm-tooling": "LLM tooling, APIs, SDKs, prompt engineering, context engineering",
     "evals": "Evals, observability, tracing, LangSmith",
     "distributed-systems": "Distributed systems and infrastructure applicable to AI agents",
+    "new-tool-launch": "New AI tool, framework, API, or agent project launches",
     "learning-resource": None,
 }
 
