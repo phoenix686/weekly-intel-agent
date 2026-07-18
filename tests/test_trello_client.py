@@ -1,18 +1,20 @@
 """
-fetch_board_cards (sunday/trello_client.py) -- zero unit test coverage
-existed before this file. Covers the last_activity field added for the
-Sunday plan LLM prioritization checkpoint, sub-phase 2 (staleness), plus
-the pre-existing list-filtering and checklist-flattening behavior it
-must not break. _trello_get mocked so this stays fully offline -- no
-real Trello API call.
+sunday/trello_client.py -- zero unit test coverage existed before the
+sub-phase 2 version of this file. Covers the last_activity field
+(sub-phase 2, staleness), fetch_list_id_to_name_map and
+fetch_card_current_state (sub-phase 4, cross-week movement detection),
+plus the pre-existing list-filtering and checklist-flattening behavior
+these must not break. _trello_get mocked so this stays fully offline --
+no real Trello API call.
 """
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import urllib.error
 from unittest.mock import patch
 
-from sunday.trello_client import fetch_board_cards
+from sunday.trello_client import fetch_board_cards, fetch_list_id_to_name_map, fetch_card_current_state
 
 
 def _list(list_id, name):
@@ -92,3 +94,55 @@ def test_full_card_shape():
         "list_id": "list1", "list_name": "Dump", "url": "https://trello.com/c/abc",
         "checklist_items": [], "last_activity": "2026-05-31T12:17:18.243Z",
     }
+
+
+# ── fetch_list_id_to_name_map (sub-phase 4) ─────────────────────────────────
+
+def test_list_id_to_name_map_includes_lists_outside_relevant_list_names():
+    """Unlike fetch_board_cards, this includes every open list -- Done,
+    and any other non-Dump/In-Progress list a card might have moved to."""
+    lists_response = [
+        _list("list1", "Dump"), _list("list2", "In Progress"),
+        _list("list3", "Done"), _list("list4", "Future Ideas"),
+    ]
+    with patch("sunday.trello_client._trello_get", return_value=lists_response) as mock_get:
+        result = fetch_list_id_to_name_map(board_id="board1")
+
+    assert result == {"list1": "Dump", "list2": "In Progress", "list3": "Done", "list4": "Future Ideas"}
+    mock_get.assert_called_once_with("/boards/board1/lists", {"filter": "open"})
+
+
+# ── fetch_card_current_state (sub-phase 4) ──────────────────────────────────
+
+def test_card_current_state_returns_real_fields():
+    card_response = {"id": "card1", "name": "A card", "idList": "list2", "closed": False}
+    with patch("sunday.trello_client._trello_get", return_value=card_response):
+        result = fetch_card_current_state("card1")
+
+    assert result == {"card_id": "card1", "name": "A card", "list_id": "list2", "closed": False}
+
+
+def test_card_current_state_reflects_closed_flag():
+    card_response = {"id": "card1", "name": "A card", "idList": "list3", "closed": True}
+    with patch("sunday.trello_client._trello_get", return_value=card_response):
+        result = fetch_card_current_state("card1")
+
+    assert result["closed"] is True
+
+
+def test_card_current_state_returns_none_on_404():
+    error = urllib.error.HTTPError(url="x", code=404, msg="Not Found", hdrs=None, fp=None)
+    with patch("sunday.trello_client._trello_get", side_effect=error):
+        result = fetch_card_current_state("ghost-card")
+
+    assert result is None
+
+
+def test_card_current_state_reraises_non_404_errors():
+    error = urllib.error.HTTPError(url="x", code=500, msg="Server Error", hdrs=None, fp=None)
+    with patch("sunday.trello_client._trello_get", side_effect=error):
+        try:
+            fetch_card_current_state("card1")
+            assert False, "expected HTTPError to propagate"
+        except urllib.error.HTTPError as e:
+            assert e.code == 500

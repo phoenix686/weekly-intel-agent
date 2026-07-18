@@ -266,7 +266,7 @@ def _sunday_state(classified_items, trello_cards=None, run_id=RUN_ID):
     }
 
 
-def test_assemble_plan_records_only_project_work_card_ids():
+def test_assemble_plan_records_only_project_work_cards():
     items = [
         _plan_item(matched_card_id=None, title="Article A"),
         _plan_item(matched_card_id="card1", title="Project B"),
@@ -276,10 +276,10 @@ def test_assemble_plan_records_only_project_work_card_ids():
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
         assemble_plan(_sunday_state(items, [_card("card1")]))
 
-    mock_record.assert_called_once_with(RUN_ID, ["card1"])
+    mock_record.assert_called_once_with(RUN_ID, [{"card_id": "card1", "list_name": "In Progress"}])
 
 
-def test_assemble_plan_excludes_course_tagged_card_ids_even_when_matched():
+def test_assemble_plan_excludes_course_tagged_cards_even_when_matched():
     """A course-tagged item that happens to have a matched_card_id renders
     in the Courses section, not Existing Project Work (sub-phase 1) -- its
     card should not be recorded in plan_history either, same rule."""
@@ -299,7 +299,7 @@ def test_assemble_plan_excludes_proposals_from_plan_history():
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
         assemble_plan(_sunday_state(items, [_card("card1")]))
 
-    mock_record.assert_called_once_with(RUN_ID, ["card1"])
+    mock_record.assert_called_once_with(RUN_ID, [{"card_id": "card1", "list_name": "In Progress"}])
 
 
 def test_assemble_plan_records_empty_list_when_no_project_work():
@@ -310,6 +310,19 @@ def test_assemble_plan_records_empty_list_when_no_project_work():
         assemble_plan(_sunday_state(items))
 
     mock_record.assert_called_once_with(RUN_ID, [])
+
+
+def test_assemble_plan_falls_back_to_unknown_list_name_if_card_not_in_trello_cards():
+    """Defensive: matched_card_id should always resolve against
+    state["trello_cards"], but if it somehow doesn't, record a real
+    placeholder instead of crashing or silently dropping the card."""
+    items = [_plan_item(matched_card_id="ghost-card", title="Project B")]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
+        assemble_plan(_sunday_state(items, trello_cards=[]))
+
+    mock_record.assert_called_once_with(RUN_ID, [{"card_id": "ghost-card", "list_name": "Unknown"}])
 
 
 def test_assemble_plan_still_writes_current_weekly_plan():

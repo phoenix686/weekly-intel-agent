@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 3 (plan_history namespace) -- see bottom section
+Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 4 (cross-week movement detection) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -108,6 +108,8 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
     `DailyGraphState`, `make_daily_initial_state()`
   - `SundayGraphState` — contains `pending_resumes: Annotated[list[dict], operator.add]`
     (populated by `proposal_worker` per fan-out branch: `{proposal_id, thread_id, message_id}`).
+    Also `card_movements: list[dict]` (sub-phase 4, populated by `read_trello`) —
+    real cross-week Trello movement per card, see `sunday/card_movement.py`'s entry.
     `approval_results` removed — proposals now resolve async, outside the Sunday run.
 - **Key exports:** all TypedDicts + `make_sunday_initial_state()`, `make_daily_initial_state()`
 - **Depended on by:** every node file and both graph files
@@ -261,19 +263,34 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   (`RELEVANT_LIST_NAMES`) -- the real board has 6 lists total (live-checked
   2026-07-18: `Dump`, `In Progress`, `qs to ask`, `Future Ideas`, `so i dont
   lose track`, `Done`); the other 4, including the real `Done` list, are
-  not fetched by design as of sub-phase 2 -- deferred to sub-phase 4 (cross-
-  week movement/completion detection), where the note about needing it was
-  actually attached. Each card dict now also carries `last_activity`
-  (Trello's own `dateLastActivity`, ISO 8601 string) -- added Sunday-plan-
-  LLM-prioritization checkpoint, sub-phase 2. `dateLastActivity` is already
-  present in Trello's default card response (live-verified against the
-  real board 2026-07-18); no `fields` API param change was needed.
-- **Key exports:** `fetch_board_cards`, `get_dump_list_id`, `create_trello_card`,
+  intentionally still not part of correlate_trello's matching pool (a
+  Done-list card should never be offered as a match target for new
+  content). Each card dict also carries `last_activity` (Trello's own
+  `dateLastActivity`, ISO 8601 string) -- added sub-phase 2. `dateLastActivity`
+  is already present in Trello's default card response (live-verified);
+  no `fields` API param change was needed for that one.
+  `fetch_list_id_to_name_map()` and `fetch_card_current_state()` -- **new,
+  sub-phase 4** -- give cross-week movement detection what
+  `fetch_board_cards()` deliberately doesn't: `fetch_list_id_to_name_map()`
+  returns EVERY open list's `{id: name}`, including `Done` (`DONE_LIST_NAME`
+  constant, live-confirmed); `fetch_card_current_state(card_id)` is a direct
+  `GET /1/cards/{id}` for one card's real current `idList`/`closed` state
+  regardless of which list it's in now, returning `None` only on a real
+  404 (permanent deletion) -- other HTTP errors propagate rather than
+  being misread as "card gone."
+- **Key exports:** `fetch_board_cards`, `fetch_list_id_to_name_map`,
+  `fetch_card_current_state`, `get_dump_list_id`, `create_trello_card`,
   `update_trello_card`
 - **Depended on by:** `sunday/nodes/read_trello.py`, `sunday/approval_actions.py`
 
 ### `sunday/nodes/read_trello.py`
 - **What it does:** LangGraph node — calls `fetch_board_cards()`, returns `trello_cards`.
+  Also calls `detect_card_movement(state["run_id"])` (sub-phase 4) and returns
+  its result as the new `card_movements` state field -- real cross-week
+  movement since the most recent prior Sunday plan, computed before the plan
+  itself is generated (item 4's requirement: "before generating each new
+  plan"). `[]` when there's no prior `plan_history` entry to compare
+  against yet (e.g. the very first real Sunday run under this checkpoint).
 - **Key exports:** `read_trello(state) -> dict`
 
 ### `sunday/nodes/correlate_trello.py`
@@ -292,23 +309,51 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   reversing the earlier implicit fold into Reading & Learning), **Existing Project
   Work** (no `course` tag, has `matched_card_id`). Numbering is continuous across
   all three sections. The node wrapper also calls `record_plan_history()` (sub-phase
-  3) with the run's `run_id` and the deduped `matched_card_id`s of exactly the items
-  that rendered in Existing Project Work (course-tagged items excluded even if
-  matched) -- same predicate as the Existing Project Work section itself, kept in
-  sync deliberately.
+  3, schema revised sub-phase 4) with the run's `run_id` and
+  `[{"card_id", "list_name"}, ...]` for exactly the items that rendered in Existing
+  Project Work (course-tagged items excluded even if matched) -- same predicate as
+  the Existing Project Work section itself, kept in sync deliberately. `list_name`
+  is resolved from `state["trello_cards"]` by `matched_card_id`, falling back to
+  `"Unknown"` defensively if a matched card is somehow absent from `trello_cards`.
 - **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`
 
-### `sunday/plan_history.py`  _(new, sub-phase 3)_
-- **What it does:** `record_plan_history(run_id, card_ids)` writes one entry per
+### `sunday/plan_history.py`  _(new sub-phase 3, schema revised + reader added sub-phase 4)_
+- **What it does:** `record_plan_history(run_id, cards)` writes one entry per
   Sunday run to `("weekly_intel", "plan_history")`, keyed by `run_id`, recording
-  which real Trello card IDs got surfaced as Existing Project Work plan items that
-  week (deduped, sorted). Entries accumulate across weeks (never overwritten) --
-  sub-phase 4's cross-week movement detection needs the most recent PRIOR entry,
-  not just the latest. Not wrapped in try/except -- unlike `observability.py`'s
-  pure-observability writes, this is real domain data sub-phase 4 depends on, same
-  distinction `discovery/seen_items.py`'s `mark_seen()` already makes.
-- **Key exports:** `record_plan_history(run_id, card_ids) -> None`
-- **Depended on by:** `sunday/nodes/assemble_plan.py`
+  which real Trello cards got surfaced as Existing Project Work plan items that
+  week. **Schema revised in sub-phase 4:** each entry is now `{"run_id", "cards":
+  [{"card_id", "list_name"}, ...], "generated_at"}` -- originally (sub-phase 3)
+  `cards` was a bare `card_ids: list[str]`, but movement detection needs to know
+  which list a card was in when it was LAST surfaced to tell whether it's since
+  changed lists, which a bare ID can't support. No real production data existed
+  under the old shape (only ever a smoke-test entry, deleted after verification),
+  so this was a clean change, not a migration. Entries accumulate across weeks
+  (never overwritten). `get_most_recent_prior_entry(current_run_id)` -- **new,
+  sub-phase 4** -- returns the entry with the latest `generated_at`, excluding
+  `current_run_id` defensively; `None` if no entry exists yet. Writes not wrapped
+  in try/except -- unlike `observability.py`'s pure-observability writes, this is
+  real domain data movement detection depends on, same distinction
+  `discovery/seen_items.py`'s `mark_seen()` already makes.
+- **Key exports:** `record_plan_history(run_id, cards) -> None`,
+  `get_most_recent_prior_entry(current_run_id) -> dict | None`
+- **Depended on by:** `sunday/nodes/assemble_plan.py` (writes), `sunday/card_movement.py` (reads)
+
+### `sunday/card_movement.py`  _(new, sub-phase 4)_
+- **What it does:** `detect_card_movement(run_id)` -- real cross-week Trello card
+  movement, ground truth from Trello's actual API state, not a self-reported flag.
+  Looks up the most recent prior `plan_history` entry; for each card in it, fetches
+  the card's REAL current state (`fetch_card_current_state`) and classifies it:
+  `"archived"` (Trello `closed=True` right now, checked first -- takes priority
+  over list_name since a card can be archived while `idList` still points at its
+  old list), `"not_found"` (real 404, permanent deletion, rare), `"completed"`
+  (current list is the Done-equivalent list), `"moved"` (different non-Done list
+  than last surfaced), `"unchanged"` (same list as last surfaced). Returns `[]`
+  if there's no prior entry to compare against yet -- permissive, same "nothing to
+  compare" default as `taste_vectors.py`'s `taste_prefilter`. No LLM call --
+  purely a deterministic comparison against real API state; the LLM node that
+  will consume this signal is sub-phase 5, not this one.
+- **Key exports:** `detect_card_movement(run_id) -> list[dict]`
+- **Depended on by:** `sunday/nodes/read_trello.py`
 
 ### `sunday/nodes/send_telegram_plan.py`
 - **What it does:** Posts `state["plan_text"]` to Telegram.
@@ -1999,7 +2044,7 @@ actual code, not assumed from the spec's prior draft).
 | `approval_log` | `{item_id, outcome: "approved"\|"rejected", run_id}` | `sunday/approval_actions.py` (`handle_approval`, `handle_rejection`) | future eval work (`classify_item` eval, not yet built) |
 | `node_summary` | `{run_id, node_name, items_in, items_out, dropped, cost_usd, duration_seconds, langsmith_url, error_summary}` | `observability.py` (`record_node_summary`, called from `cluster_dedupe_node`, `scrape_blogs`, `score_node`, `correlate_trello`, `classify_item`) | manual query -- durable per-node aggregate + LangSmith pointer, no automated reader yet |
 | `run_history` | `{run_id, path, started_at, finished_at, status: "in_progress"\|"success"\|"failed"\|"paused", total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `observability.py` (`record_run_started` writes the initial `in_progress` marker; `record_run_history` overwrites the same key with the final outcome -- called from `run_daily.py`/`run_sunday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet. A record stuck at `status="in_progress"` with no overwrite means the run never finished (crashed harder than a Python exception could catch) |
-| `plan_history` | `{run_id, card_ids: list[str], generated_at}` (one entry per Sunday run, keyed by `run_id`, never overwritten) | `sunday/plan_history.py` (`record_plan_history`, called from `sunday/nodes/assemble_plan.py`) | not yet read -- sub-phase 4 (cross-week movement detection) will query the most recent prior entry |
+| `plan_history` | `{run_id, cards: [{card_id, list_name}, ...], generated_at}` (one entry per Sunday run, keyed by `run_id`, never overwritten; schema revised sub-phase 4 -- was bare `card_ids: list[str]` in sub-phase 3) | `sunday/plan_history.py` (`record_plan_history`, called from `sunday/nodes/assemble_plan.py`) | `sunday/plan_history.py` (`get_most_recent_prior_entry`, called from `sunday/card_movement.py`, called from `sunday/nodes/read_trello.py`) |
 
 ## What does NOT exist yet
 
@@ -2012,11 +2057,11 @@ actual code, not assumed from the spec's prior draft).
   next run actually resumes the graph and writes the correct Trello outcome.
   Human-only per `feature_list.json` — Claude Code must not and did not mark
   this passing.
-- **Sub-phases 4-5 of the Sunday plan LLM prioritization checkpoint** (see
-  below) — cross-week movement detection (including fetching Trello's real
-  `Done` list) and the new bounded LLM prioritization node are NOT started.
-  Sub-phases 1 (Courses digest section), 2 (Trello card staleness), and 3
-  (`plan_history` namespace) are built so far.
+- **Sub-phase 5 of the Sunday plan LLM prioritization checkpoint** (see
+  below) — the new bounded LLM prioritization node (item 5), the bounding
+  itself (item 6), and priority-order rendering (item 7) are all NOT
+  started. Sub-phases 1-4 (Courses section, Trello staleness, `plan_history`
+  namespace, cross-week movement detection) are built so far.
 
 ## Sunday plan LLM prioritization checkpoint (2026-07-18)
 
@@ -2033,13 +2078,13 @@ build. Full scope, for context (later sub-phases not yet started):
    needs today — **DONE.**
 3. New store namespace `("weekly_intel", "plan_history")` — each Sunday run
    records which Trello card IDs got surfaced as plan items that week, tied
-   to `run_id` — **DONE, this entry.**
+   to `run_id` — **DONE.**
 4. Cross-week movement detection: before generating each new plan,
    re-fetch current Trello state for every card in the most recent prior
    `plan_history` entry, and determine real movement (list change, archive,
    move to a Done-equivalent list) from Trello's actual state. Requires
    fixing `read_trello` to fetch a Done-equivalent list at all, which it
-   currently never does — **not started.**
+   currently never does — **DONE, this entry.**
 5. New node/step, after `classify_item` and before `assemble_plan`: one
    real Anthropic API call combining this week's scored/classified items,
    real Trello board state, and the completion signal from item 4, to
@@ -2262,3 +2307,109 @@ verifying.
 anywhere (no "most recent prior entry" query exists yet — that's sub-phase
 4's job); no cross-week comparison logic; no change to what
 `correlate_trello` or `classify_item` do with card data.
+
+### Sub-phase 4: cross-week movement detection — what was built
+
+**A necessary schema revision surfaced immediately:** sub-phase 3's
+`plan_history` entries only stored bare `card_ids`. Detecting "did the card
+change lists" requires knowing which list the card was in when it was LAST
+surfaced — a bare ID can't support that comparison. Revised the schema
+(see `plan_history.py`'s and the store-namespace registry's entries above)
+to `{"card_id", "list_name"}` pairs instead. No real production data
+existed under the old shape (the only entry ever written was sub-phase 3's
+own smoke test, already deleted), so this was a clean change, not a
+migration — flagged here rather than silently changed, since it revises
+already-shipped/committed work.
+
+**Design decision on WHERE the Done list gets fetched:** rather than
+adding `"Done"` to `RELEVANT_LIST_NAMES` (which would put Done-list cards
+into `correlate_trello`'s matching pool — wrong, since matching new content
+against an already-completed project makes no sense), added a separate
+`fetch_list_id_to_name_map()` that returns every open list's `{id: name}`
+including Done, used only to resolve a card's current list name for
+movement comparison. `fetch_board_cards()` itself is untouched.
+
+**Design decision on HOW a card's current state is checked:** rather than
+re-fetching entire lists (which still wouldn't surface archived/closed
+cards, since Trello's `filter=open` list-cards endpoint excludes them
+entirely), added `fetch_card_current_state(card_id)` — a direct per-card
+`GET /1/cards/{id}`, live-verified to return `idList`/`closed`/`name` by
+default. This handles every case (moved list, moved to Done, archived,
+permanently deleted) with one call per card, and is real ground truth
+regardless of which list a card is in now — not dependent on it still
+being in one of the two lists `fetch_board_cards()` fetches.
+
+**Where the new logic lives:** no new graph node was added — item 5 (not
+yet built) is the checkpoint's one explicitly-specified new node. Movement
+detection runs inside the existing `read_trello` node (the earliest point
+in the Sunday graph with Trello access, and it already runs once per
+Sunday invocation, satisfying item 4's "before generating each new plan").
+
+**Files changed:**
+- `sunday/trello_client.py` — added `DONE_LIST_NAME = "Done"` constant
+  (live-confirmed against the real board), `fetch_list_id_to_name_map()`,
+  `fetch_card_current_state()`.
+- `sunday/plan_history.py` — `record_plan_history()`'s signature changed
+  from `card_ids: list[str]` to `cards: list[dict]` (`{"card_id",
+  "list_name"}`); dedup now keeps the first occurrence's `list_name`. New
+  `get_most_recent_prior_entry(current_run_id)` reader.
+- `sunday/card_movement.py` — **new file.** `detect_card_movement(run_id)`:
+  looks up the most recent prior `plan_history` entry, fetches each card's
+  real current state, classifies as `archived` / `not_found` / `completed`
+  / `moved` / `unchanged` (see the file's own entry above for the exact
+  precedence rules). Returns `[]` with no prior entry to compare against.
+- `sunday/nodes/read_trello.py` — now also calls `detect_card_movement()`
+  and returns `card_movements` in its output dict.
+- `state.py` — `SundayGraphState` gained `card_movements: list[dict]`
+  (default `[]` in `make_sunday_initial_state()`).
+- `sunday/nodes/assemble_plan.py` — `surfaced_cards` now built as
+  `[{"card_id", "list_name"}, ...]` (looked up from `state["trello_cards"]`
+  by `matched_card_id`, `"Unknown"` fallback if absent) instead of bare
+  IDs, matching `record_plan_history()`'s revised signature.
+- `tests/test_trello_client.py` — 6 new tests for
+  `fetch_list_id_to_name_map` and `fetch_card_current_state` (real fields
+  returned, `closed` reflected, `None` on a real 404, non-404 errors
+  re-raised rather than swallowed).
+- `tests/test_card_movement.py` — **new file.** 7 tests covering every
+  status classification, the no-prior-entry permissive default, and
+  multiple cards classified independently in one call.
+- `tests/test_plan_history.py` — rewritten for the new `cards` schema; 4
+  tests for `record_plan_history` (now asserting `{"card_id","list_name"}`
+  shape) plus 3 new tests for `get_most_recent_prior_entry` (empty store,
+  picks the latest by `generated_at`, excludes `current_run_id`).
+- `tests/test_assemble_plan.py` — the 5 sub-phase-3 node-wrapper tests
+  updated for the new `cards` shape, plus one new defensive test (a
+  `matched_card_id` not found in `trello_cards` records `"Unknown"`
+  instead of crashing).
+
+**Real evidence:**
+- Full test suite: `192 passed, 1 skipped` (up from 175 — 17 new tests, 0
+  broken).
+- **Live simulated two-week round trip against the real Supabase store and
+  real Trello API** (no mocking): fetched a real card from the real board
+  (`6a1c26cf93b6df1996f39da3`, list `Dump`); wrote a fake "week 1"
+  `plan_history` entry recording that real card at its real list; called
+  `get_most_recent_prior_entry()` from a different "week 2" run_id and
+  confirmed it found the week-1 entry; called `detect_card_movement()` and
+  confirmed the real card was correctly classified `"unchanged"` (nothing
+  on the real board changed between the two calls) — exactly the "two
+  consecutive runs... showing a card correctly identified as unchanged"
+  evidence this sub-phase's spec asked for. Both fake entries deleted
+  afterward; confirmed gone via a follow-up `store.get()`.
+- **Live full-node run**: `read_trello()` against the real board (28
+  current cards) with no prior `plan_history` entry in the store (none
+  exists from a real Sunday run yet) correctly returned `card_movements:
+  []` — the permissive first-run path, not a crash.
+- The `moved`/`completed`/`archived` classification paths are covered by
+  real unit tests (`test_card_movement.py`) rather than a second live
+  round trip — verifying those live would require actually moving/
+  archiving a real card on Pooja's real Trello board, which weeks in
+  advance of item 5 actually consuming this signal, and without her asking
+  for it, was judged out of scope for a smoke test to do unilaterally.
+
+**Explicitly NOT done in this sub-phase:** no LLM call anywhere in this
+sub-phase's code (movement classification is deterministic, per the
+spec's own "ground truth from Trello's actual state, not a self-reported
+flag"); `card_movements` is not yet consumed by anything — `assemble_plan`
+doesn't render it, no LLM node reads it yet (that's item 5); no new graph
+node added.

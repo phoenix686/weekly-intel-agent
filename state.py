@@ -176,6 +176,11 @@ class SundayGraphState(TypedDict):
     trello_cards: list[dict]        # raw card data from read_trello: card_id, name,
                                     #   desc, list_id, list_name, url, checklist_items,
                                     #   last_activity (Trello dateLastActivity, ISO string)
+    card_movements: list[dict]      # populated by read_trello (sunday/card_movement.py):
+                                    #   {card_id, previous_list_name, current_list_name,
+                                    #   status: "archived"|"not_found"|"completed"|"moved"|"unchanged"}
+                                    #   -- real movement since the most recent prior plan_history
+                                    #   entry; [] if there's no prior entry to compare against
     correlated_items: list[dict]    # scored_items + matched_card_id: str | None
     classified_items: list[dict]    # + classification: "plan_item" | "project_proposal"
                                     #   + proposal_type: "extend" | "new" | None
@@ -195,6 +200,7 @@ def make_sunday_initial_state(run_id: str) -> SundayGraphState:
         run_id=run_id,
         scored_items=[],
         trello_cards=[],
+        card_movements=[],
         correlated_items=[],
         classified_items=[],
         plan_text="",

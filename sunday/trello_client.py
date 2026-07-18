@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -10,6 +11,7 @@ BRAIN_BOARD_ID = "<REDACTED_TRELLO_BOARD_ID>"
 TRELLO_API_BASE = "https://api.trello.com/1"
 RELEVANT_LIST_NAMES = {"Dump", "In Progress"}
 DUMP_LIST_NAME = "Dump"
+DONE_LIST_NAME = "Done"  # live-confirmed 2026-07-18 against the real board
 
 
 def _auth_params() -> dict:
@@ -90,6 +92,37 @@ def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
 
     logger.info(f"fetch_board_cards: fetched {len(result)} cards")
     return result
+
+
+def fetch_list_id_to_name_map(board_id: str = BRAIN_BOARD_ID) -> dict[str, str]:
+    """Return {list_id: list_name} for EVERY open list on the board, not just
+    RELEVANT_LIST_NAMES -- includes "Done" and any other list a card might
+    have moved to since it was last surfaced. Used by cross-week movement
+    detection (Sunday plan LLM prioritization checkpoint, sub-phase 4) to
+    resolve a card's current idList to a human-readable name; fetch_board_cards()
+    itself deliberately still only fetches Dump/In Progress cards -- Done-list
+    cards should never enter correlate_trello's matching pool."""
+    all_lists = _trello_get(f"/boards/{board_id}/lists", {"filter": "open"})
+    return {lst["id"]: lst["name"] for lst in all_lists}
+
+
+def fetch_card_current_state(card_id: str) -> dict | None:
+    """Real current state of one card by ID, regardless of which list it's
+    in now (including Done) or whether it's been archived -- ground truth
+    for cross-week movement detection (sub-phase 4), not a re-fetch of an
+    entire list. Returns None only if the card was permanently deleted
+    (real Trello 404, distinct from closed=True/"archived", which Trello
+    represents as a live card with closed=True, not a 404). Any other HTTP
+    error propagates -- a real API failure should not be silently read as
+    "card deleted"."""
+    try:
+        card = _trello_get(f"/cards/{card_id}", {"fields": "name,idList,closed"})
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            logger.info(f"fetch_card_current_state: card {card_id} not found (404) -- treated as permanently deleted")
+            return None
+        raise
+    return {"card_id": card["id"], "name": card["name"], "list_id": card["idList"], "closed": card["closed"]}
 
 
 def get_dump_list_id(board_id: str = BRAIN_BOARD_ID) -> str:

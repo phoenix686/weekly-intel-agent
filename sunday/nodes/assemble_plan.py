@@ -17,14 +17,18 @@ def assemble_plan(state: SundayGraphState) -> dict:
         state["trello_cards"],
     )
 
-    surfaced_card_ids = [
-        i["matched_card_id"]
+    card_by_id_for_history = {c["card_id"]: c for c in state["trello_cards"]}
+    surfaced_cards = [
+        {
+            "card_id": i["matched_card_id"],
+            "list_name": card_by_id_for_history.get(i["matched_card_id"], {}).get("list_name", "Unknown"),
+        }
         for i in state["classified_items"]
         if i["classification"] == "plan_item"
         and "course" not in i.get("tags", [])
         and i.get("matched_card_id") is not None
     ]
-    record_plan_history(state["run_id"], surfaced_card_ids)
+    record_plan_history(state["run_id"], surfaced_cards)
 
     get_store().put(
         ("companion",),
