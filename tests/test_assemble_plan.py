@@ -28,8 +28,16 @@ def _proposal(title="New project idea"):
     }
 
 
-def _card(card_id="card1", name="My Trello Card"):
-    return {"card_id": card_id, "name": name, "list_name": "In Progress"}
+def _card(card_id="card1", name="My Trello Card", url="https://trello.com/c/abc"):
+    return {"card_id": card_id, "name": name, "list_name": "In Progress", "url": url}
+
+
+def _priority_entry(matched_card_id="card1", source="new_item", item_url="https://example.com",
+                     priority_reasoning="Priority reasoning.", movement_note=None):
+    return {
+        "matched_card_id": matched_card_id, "source": source, "item_url": item_url,
+        "priority_reasoning": priority_reasoning, "movement_note": movement_note,
+    }
 
 
 # ── Zero-items fallbacks ──────────────────────────────────────────────────────
@@ -52,6 +60,15 @@ def test_zero_plan_items_zero_proposals_no_proposal_clause():
     assert "proposals" not in text
 
 
+def test_stale_nudge_only_week_does_not_trigger_empty_fallback():
+    """A week with zero new matched content but a real stale-card nudge is
+    NOT an empty plan -- Existing Project Work can be the only section."""
+    priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None)]
+    text, item_map = format_plan([], 0, RUN_ID, [_card("card1")], priority)
+    assert "Nothing on the plan" not in text
+    assert "**Existing Project Work**" in text
+
+
 # ── Section routing ───────────────────────────────────────────────────────────
 
 def test_proposals_excluded_from_output():
@@ -70,8 +87,12 @@ def test_unmatched_item_in_reading_section_only():
 
 
 def test_matched_item_in_project_section_only():
+    """A matched_card_id item only renders in Existing Project Work if
+    prioritize_plan_items actually selected it (final sub-phase) -- not
+    automatically, the way it worked before bounding existed."""
     items = [_plan_item(matched_card_id="card1", title="Continue this")]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[0]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
     assert "**Existing Project Work**" in text
     assert "Continue this" in text
     assert "**Reading & Learning**" not in text
@@ -82,10 +103,21 @@ def test_both_sections_present_when_both_types_exist():
         _plan_item(matched_card_id=None, title="Article A"),
         _plan_item(matched_card_id="card1", title="Project B"),
     ]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
     assert "**Reading & Learning**" in text
     assert "**Existing Project Work**" in text
     assert text.index("Article A") < text.index("Project B")
+
+
+def test_matched_item_not_selected_by_prioritization_does_not_render():
+    """Bounding: a real matched_card_id item that prioritize_plan_items
+    didn't select doesn't appear anywhere in the rendered plan -- not in
+    Existing Project Work, and not silently moved to Reading & Learning
+    either."""
+    items = [_plan_item(matched_card_id="card1", title="Not selected")]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], prioritized_project_work=[])
+    assert "Not selected" not in text
 
 
 # ── Courses section ─────────────────────────────────────────────────────────────
@@ -107,7 +139,9 @@ def test_courses_section_omitted_when_no_course_items():
 def test_course_tagged_item_goes_to_courses_even_when_matched_to_a_card():
     """A course tag takes priority over matched_card_id -- courses are a
     format-based section, not routed by Trello correlation like project
-    work is."""
+    work is. No prioritized_project_work entry needed since this item
+    never becomes a project-work candidate at all (excluded upstream in
+    prioritize_plan_items)."""
     items = [_plan_item(matched_card_id="card1", title="Agents Course", tags=["course"])]
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
     assert "**Courses**" in text
@@ -121,11 +155,65 @@ def test_all_three_sections_present_and_ordered():
         _plan_item(matched_card_id=None, title="Course B", tags=["course"]),
         _plan_item(matched_card_id="card1", title="Project C"),
     ]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[2]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
     assert "**Reading & Learning**" in text
     assert "**Courses**" in text
     assert "**Existing Project Work**" in text
     assert text.index("Article A") < text.index("Course B") < text.index("Project C")
+
+
+# ── Existing Project Work: stale_nudge + priority order (final sub-phase) ──────
+
+def test_stale_nudge_entry_renders_from_trello_card_not_scored_item():
+    """A stale_nudge entry has no underlying classified item -- it renders
+    from the real Trello card's own name/url."""
+    priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None,
+                                 priority_reasoning="Idle for weeks.")]
+    text, item_map = format_plan([], 0, RUN_ID, [_card("card1", "My Stale Card", "https://trello.com/c/stale")], priority)
+    assert "**Existing Project Work**" in text
+    assert "My Stale Card" in text
+    assert 'continues card: "My Stale Card"' in text
+    assert item_map[1]["url"] == "https://trello.com/c/stale"
+
+
+def test_movement_note_appended_to_reasoning():
+    priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None,
+                                 priority_reasoning="Still relevant.", movement_note="unchanged since last week")]
+    text, item_map = format_plan([], 0, RUN_ID, [_card("card1")], priority)
+    assert "Still relevant. — unchanged since last week" in text
+
+
+def test_no_movement_note_leaves_reasoning_unmodified():
+    priority = [_priority_entry(matched_card_id="card1", priority_reasoning="Just this.", movement_note=None)]
+    text, item_map = format_plan([], 0, RUN_ID, [_card("card1")], priority)
+    assert "Just this._" in text  # closing italic immediately after, no trailing " — "
+
+
+def test_project_section_renders_in_prioritized_order_not_source_order():
+    """The whole point of item 7: rendering order comes from
+    prioritize_plan_items' priority order, not classified_items' order."""
+    items = [
+        _plan_item(matched_card_id="card1", title="Item A", url="https://a.com"),
+        _plan_item(matched_card_id="card2", title="Item B", url="https://b.com"),
+    ]
+    priority = [
+        _priority_entry(matched_card_id="card2", item_url="https://b.com"),
+        _priority_entry(matched_card_id="card1", item_url="https://a.com"),
+    ]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1"), _card("card2")], priority)
+    assert text.index("Item B") < text.index("Item A")
+    assert item_map[1]["title"] == "Item B"
+    assert item_map[2]["title"] == "Item A"
+
+
+def test_new_item_entry_with_unresolvable_url_falls_back_to_card():
+    """Defensive: a new_item entry whose item_url doesn't match any
+    classified item (shouldn't happen given prioritize_plan_items'
+    validation, but format_plan must not crash) renders from the card."""
+    priority = [_priority_entry(matched_card_id="card1", source="new_item", item_url="https://ghost.com")]
+    text, item_map = format_plan([], 0, RUN_ID, [_card("card1", "Fallback Card")], priority)
+    assert "Fallback Card" in text
 
 
 # ── Numbering ─────────────────────────────────────────────────────────────────
@@ -135,7 +223,8 @@ def test_items_numbered_sequentially_across_sections():
         _plan_item(matched_card_id=None, title="Article A"),
         _plan_item(matched_card_id="card1", title="Project B"),
     ]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
     assert "1. [Article A]" in text
     assert "2. [Project B]" in text
 
@@ -146,7 +235,8 @@ def test_items_numbered_sequentially_across_all_three_sections():
         _plan_item(matched_card_id=None, title="Course B", tags=["course"]),
         _plan_item(matched_card_id="card1", title="Project C"),
     ]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[2]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
     assert "1. [Article A]" in text
     assert "2. [Course B]" in text
     assert "3. [Project C]" in text
@@ -155,18 +245,21 @@ def test_items_numbered_sequentially_across_all_three_sections():
 # ── Card name resolution ──────────────────────────────────────────────────────
 
 def test_card_name_appended_for_matched_item():
-    items = [_plan_item(matched_card_id="card1", reasoning="Builds on prior work.")]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1", "Weekly Intel Agent")])
+    items = [_plan_item(matched_card_id="card1")]
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[0]["url"],
+                                 priority_reasoning="Builds on prior work.")]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1", "Weekly Intel Agent")], priority)
     assert 'continues card: "Weekly Intel Agent"' in text
 
 
 def test_unknown_card_id_falls_back_to_id_string():
     items = [_plan_item(matched_card_id="ghost-id")]
-    text, item_map = format_plan(items, 0, RUN_ID, [])
+    priority = [_priority_entry(matched_card_id="ghost-id", item_url=items[0]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [], priority)
     assert 'continues card: "ghost-id"' in text
 
 
-# ── Formatting ────────────────────────────────────────────────────────────────
+# ── Formatting (Reading & Learning section -- unaffected by this sub-phase) ────
 
 def test_underscore_escaping_in_reasoning():
     items = [_plan_item(reasoning="Uses score_node and run_id.")]
@@ -197,6 +290,18 @@ def test_footer_plan_count_and_run_id():
     assert "run: abc12345" in text
 
 
+def test_footer_reflects_bounded_project_work_not_unbounded_matched_count():
+    """The footer count must reflect what's actually rendered -- a matched
+    item that prioritize_plan_items excluded should not inflate the count."""
+    items = [
+        _plan_item(matched_card_id="card1", title="Selected"),
+        _plan_item(matched_card_id="card2", title="Not selected"),
+    ]
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[0]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1"), _card("card2")], priority)
+    assert "1 plan items" in text
+
+
 def test_footer_omits_proposal_clause_when_zero():
     text, item_map = format_plan([_plan_item()], 0, RUN_ID, [])
     assert "proposals" not in text
@@ -219,8 +324,7 @@ def test_missing_title_falls_back_to_text():
     assert "Full body text used as fallback title." in text
 
 
-# ── item_map (untested before this fix -- these tests never exercised the
-# second half of the tuple return, even before it broke) ──────────────────────
+# ── item_map ─────────────────────────────────────────────────────────────────
 
 def test_item_map_keyed_by_display_number_with_correct_fields():
     items = [_plan_item(title="Article A", url="https://a.example.com", text="article body")]
@@ -236,7 +340,8 @@ def test_item_map_numbering_continues_across_both_sections():
         _plan_item(matched_card_id=None, title="Article A"),
         _plan_item(matched_card_id="card1", title="Project B"),
     ]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
     assert set(item_map.keys()) == {1, 2}
     assert item_map[1]["title"] == "Article A"
     assert item_map[2]["title"] == "Project B"
@@ -248,7 +353,8 @@ def test_item_map_numbering_continues_across_all_three_sections():
         _plan_item(matched_card_id=None, title="Course B", tags=["course"]),
         _plan_item(matched_card_id="card1", title="Project C"),
     ]
-    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[2]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
     assert set(item_map.keys()) == {1, 2, 3}
     assert item_map[1]["title"] == "Article A"
     assert item_map[2]["title"] == "Course B"
@@ -256,71 +362,53 @@ def test_item_map_numbering_continues_across_all_three_sections():
 
 
 # ── assemble_plan() node wrapper: plan_history recording ───────────────────────
-# (Sunday plan LLM prioritization checkpoint, sub-phase 3 -- get_store() and
-# record_plan_history() both mocked so this stays fully offline.)
+# (Sub-phase 3, revised final sub-phase: plan_history now reflects
+# prioritized_project_work -- what was ACTUALLY surfaced -- not the raw
+# matched-item set. get_store() and record_plan_history() both mocked so
+# this stays fully offline.)
 
-def _sunday_state(classified_items, trello_cards=None, run_id=RUN_ID):
+def _sunday_state(classified_items, trello_cards=None, prioritized_project_work=None, run_id=RUN_ID):
     return {
         "run_id": run_id, "classified_items": classified_items,
-        "trello_cards": trello_cards or [], "pending_approvals": [],
+        "trello_cards": trello_cards or [], "prioritized_project_work": prioritized_project_work or [],
+        "pending_approvals": [],
     }
 
 
-def test_assemble_plan_records_only_project_work_cards():
+def test_assemble_plan_records_cards_from_prioritized_project_work():
     items = [
         _plan_item(matched_card_id=None, title="Article A"),
         _plan_item(matched_card_id="card1", title="Project B"),
     ]
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_sunday_state(items, [_card("card1")]))
+        assemble_plan(_sunday_state(items, [_card("card1")], priority))
 
     mock_record.assert_called_once_with(RUN_ID, [{"card_id": "card1", "list_name": "In Progress"}])
 
 
-def test_assemble_plan_excludes_course_tagged_cards_even_when_matched():
-    """A course-tagged item that happens to have a matched_card_id renders
-    in the Courses section, not Existing Project Work (sub-phase 1) -- its
-    card should not be recorded in plan_history either, same rule."""
-    items = [_plan_item(matched_card_id="card1", title="Agents Course", tags=["course"])]
+def test_assemble_plan_records_empty_when_prioritized_project_work_is_empty():
+    """Even if classified_items has a real matched item, if
+    prioritize_plan_items didn't select it, plan_history must NOT record
+    it -- 'surfaced' now means 'actually rendered', not 'happened to
+    match something this week'."""
+    items = [_plan_item(matched_card_id="card1", title="Project B")]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_sunday_state(items, [_card("card1")]))
-
-    mock_record.assert_called_once_with(RUN_ID, [])
-
-
-def test_assemble_plan_excludes_proposals_from_plan_history():
-    items = [_plan_item(matched_card_id="card1", title="Project B"), _proposal()]
-    fake_store = MagicMock()
-    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_sunday_state(items, [_card("card1")]))
-
-    mock_record.assert_called_once_with(RUN_ID, [{"card_id": "card1", "list_name": "In Progress"}])
-
-
-def test_assemble_plan_records_empty_list_when_no_project_work():
-    items = [_plan_item(matched_card_id=None, title="Article A")]
-    fake_store = MagicMock()
-    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_sunday_state(items))
+        assemble_plan(_sunday_state(items, [_card("card1")], prioritized_project_work=[]))
 
     mock_record.assert_called_once_with(RUN_ID, [])
 
 
 def test_assemble_plan_falls_back_to_unknown_list_name_if_card_not_in_trello_cards():
-    """Defensive: matched_card_id should always resolve against
-    state["trello_cards"], but if it somehow doesn't, record a real
-    placeholder instead of crashing or silently dropping the card."""
-    items = [_plan_item(matched_card_id="ghost-card", title="Project B")]
+    priority = [_priority_entry(matched_card_id="ghost-card", item_url="https://example.com")]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_sunday_state(items, trello_cards=[]))
+        assemble_plan(_sunday_state([], trello_cards=[], prioritized_project_work=priority))
 
     mock_record.assert_called_once_with(RUN_ID, [{"card_id": "ghost-card", "list_name": "Unknown"}])
 
@@ -337,3 +425,17 @@ def test_assemble_plan_still_writes_current_weekly_plan():
     assert namespace == ("companion",)
     assert key == "current_weekly_plan"
     assert value["run_id"] == RUN_ID
+
+
+def test_assemble_plan_passes_prioritized_project_work_through_to_format_plan():
+    """End-to-end through the node wrapper: a stale_nudge entry with no
+    matched classified item still renders Existing Project Work."""
+    priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None,
+                                 priority_reasoning="Idle for weeks.")]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.record_plan_history"):
+        result = assemble_plan(_sunday_state([], [_card("card1", "My Card")], priority))
+
+    assert "**Existing Project Work**" in result["plan_text"]
+    assert "My Card" in result["plan_text"]

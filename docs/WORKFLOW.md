@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Sunday plan LLM prioritization checkpoint, sub-phase 5 (new bounded LLM prioritization node) -- see bottom section
+Last updated: Sunday plan LLM prioritization checkpoint COMPLETE (final sub-phase: assemble_plan rendering) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -337,19 +337,29 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **Depended on by:** `sunday/graph.py`
 
 ### `sunday/nodes/assemble_plan.py`
-- **What it does:** `format_plan()` + `assemble_plan` node wrapper. Produces weekly plan
-  text with three sections in order: **Reading & Learning** (no `course` tag, no
-  `matched_card_id`), **Courses** (any plan item tagged `course`, regardless of
-  `matched_card_id` -- added Sunday-plan-LLM-prioritization checkpoint, sub-phase 1,
-  reversing the earlier implicit fold into Reading & Learning), **Existing Project
-  Work** (no `course` tag, has `matched_card_id`). Numbering is continuous across
-  all three sections. The node wrapper also calls `record_plan_history()` (sub-phase
-  3, schema revised sub-phase 4) with the run's `run_id` and
-  `[{"card_id", "list_name"}, ...]` for exactly the items that rendered in Existing
-  Project Work (course-tagged items excluded even if matched) -- same predicate as
-  the Existing Project Work section itself, kept in sync deliberately. `list_name`
-  is resolved from `state["trello_cards"]` by `matched_card_id`, falling back to
-  `"Unknown"` defensively if a matched card is somehow absent from `trello_cards`.
+- **What it does:** `format_plan()` + `assemble_plan` node wrapper. Produces weekly
+  plan text with three sections in order: **Reading & Learning** (no `course` tag,
+  no `matched_card_id`; unbounded), **Courses** (any plan item tagged `course`,
+  regardless of `matched_card_id` -- sub-phase 1, reversing the earlier implicit
+  fold into Reading & Learning; unbounded), **Existing Project Work** (**final
+  sub-phase, rewritten**: rendered ENTIRELY from `state["prioritized_project_work"]`
+  -- `prioritize_plan_items`'s bounded, priority-ordered selection -- via the new
+  `_build_project_entries()` helper, NOT re-derived from `classified_items`'
+  `matched_card_id` anymore. A `new_item` entry's title/url/tags/text come from the
+  matching `classified_items` entry (looked up by `item_url`); a `stale_nudge` entry
+  (no underlying scored content) renders from the Trello card itself (`name`/`url`).
+  `priority_reasoning` is the displayed reasoning (replacing the old per-item scoring
+  `reasoning`), with `movement_note` appended (`" — {note}"`) when present. Rendering
+  order is exactly `prioritized_project_work`'s order -- that IS the priority order
+  (item 7). A matched item `prioritize_plan_items` didn't select simply doesn't
+  render anywhere (the bounding, item 6) -- not silently moved to Reading &
+  Learning). Footer's plan-item count now reflects what's actually rendered
+  (`len(reading) + len(courses) + len(project_entries)`), not the raw unbounded
+  `plan_items` count. The node wrapper's `record_plan_history()` call (sub-phase 3,
+  schema revised sub-phase 4) now also builds `surfaced_cards` from
+  `state["prioritized_project_work"]` directly, not from `classified_items` --
+  "surfaced" means "Pooja actually saw it in the plan," which only
+  `prioritized_project_work` can answer correctly now that bounding exists.
 - **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`
 
 ### `sunday/plan_history.py`  _(new sub-phase 3, schema revised + reader added sub-phase 4)_
@@ -2104,13 +2114,10 @@ actual code, not assumed from the spec's prior draft).
   next run actually resumes the graph and writes the correct Trello outcome.
   Human-only per `feature_list.json` — Claude Code must not and did not mark
   this passing.
-- **Final sub-phase of the Sunday plan LLM prioritization checkpoint**
-  ("assemble_plan rendering": items 6-7) — `assemble_plan` still renders
-  Existing Project Work from `classified_items` directly, in source order,
-  unbounded (every matched item, not the LLM-curated 3-5). It does NOT yet
-  read `prioritized_project_work` at all. Sub-phases 1-5 (Courses section,
-  Trello staleness, `plan_history` namespace, cross-week movement
-  detection, the new bounded LLM prioritization node) are built so far.
+- **None.** The Sunday plan LLM prioritization checkpoint (all 7 items /
+  5 sub-phases) is complete as of 2026-07-19. See the checkpoint's full
+  write-up below for what was built and what real evidence backs each
+  piece.
 
 ## Sunday plan LLM prioritization checkpoint (2026-07-18)
 
@@ -2147,14 +2154,15 @@ build. Full scope, for context (later sub-phases not yet started):
    entry.**
 6. Bounding: Reading & Learning and Courses stay unbounded. Only the
    Trello-derived plan-item selection is bounded (target 3-5 items,
-   adjustable with real evidence) — **bounding logic exists** (item 5's
-   `prioritize_plan_items` hard-caps at `MAX_PROJECT_WORK_ITEMS = 5`), but
-   `assemble_plan.py` itself doesn't consume it yet, so the plan Pooja
-   actually sees is still unbounded today — real completion is the final
-   sub-phase.
+   adjustable with real evidence) — **DONE.** `prioritize_plan_items` hard-caps
+   at `MAX_PROJECT_WORK_ITEMS = 5`, and `assemble_plan` now renders Existing
+   Project Work exclusively from that bounded selection — Reading & Learning
+   and Courses remain unbounded, unchanged.
 7. `assemble_plan` renders item 5's curated output in priority order, not
-   source order — **not started** (Courses/Reading & Learning still render
-   in the order items arrive in `classified_items` today).
+   source order — **DONE, this entry.** Rendering order is exactly
+   `prioritized_project_work`'s order; Reading & Learning/Courses still
+   render in `classified_items` arrival order (unaffected, per item 6 --
+   only the Trello-derived selection needed priority-order rendering).
 
 Ownership: the new LLM call (item 5) is a direct Anthropic API call,
 covered by the standing full-delegation override (`CLAUDE.md` Section 8) —
@@ -2539,3 +2547,102 @@ receives via Telegram is unaffected by this sub-phase; still unbounded,
 still source-order, still built purely from `classified_items` +
 `matched_card_id` the same way it was before sub-phase 5. That wiring
 (items 6-7) is the checkpoint's final sub-phase.
+
+### Final sub-phase: `assemble_plan` rendering (items 6-7, bounding + priority order) — what was built
+
+This completes the Sunday plan LLM prioritization checkpoint. See the
+`sunday/nodes/assemble_plan.py` file entry above for the rewritten
+`_build_project_entries()`/`format_plan()` behavior in full.
+
+**A required knock-on fix, not scope creep:** `assemble_plan()`'s
+`record_plan_history()` call (built sub-phase 3, schema revised sub-phase
+4) previously derived `surfaced_cards` from `classified_items`' raw
+`matched_card_id` filter — the same set the OLD unbounded Existing
+Project Work section rendered. Now that the section is bounded, that
+computation would silently drift out of sync with what's actually
+rendered (recording cards that don't appear in the plan at all). Updated
+it to build `surfaced_cards` from `state["prioritized_project_work"]`
+directly, so "surfaced" continues to mean "Pooja actually saw this in the
+plan" — the exact meaning cross-week movement detection (sub-phase 4)
+already depends on.
+
+**Two now-obsolete node-wrapper tests removed, not force-fit:**
+`test_assemble_plan_excludes_course_tagged_cards_even_when_matched` and
+the plan-history half of proposal-exclusion testing no longer describe
+real behavior at the `assemble_plan` layer — course-tag and proposal
+exclusion happen upstream in `prioritize_plan_items` now (already covered
+by `test_course_tagged_items_excluded_from_candidates` in
+`tests/test_prioritize_plan_items.py`), since `assemble_plan` just mirrors
+whatever `state["prioritized_project_work"]` says. Testing the same rule
+twice at two layers that no longer both enforce it would just be
+misleading, so these were deleted rather than rewritten to pass.
+
+**Files changed:**
+- `sunday/nodes/assemble_plan.py` — new `_build_project_entries()` helper
+  (see file entry above); `format_plan()` gained a 5th parameter
+  `prioritized_project_work: list[dict] | None = None` (optional/keyword-
+  compatible, so every pre-existing call site that doesn't care about
+  project-work rendering — Reading & Learning/Courses/formatting/footer
+  tests — kept working unchanged); the empty-plan fallback check now
+  covers `reading`/`courses`/`project_entries` all being empty, not just
+  `plan_items`; footer's plan-item count now reflects what's actually
+  rendered, not raw `plan_items`. `assemble_plan()` node wrapper passes
+  `state["prioritized_project_work"]` through and rebuilds `surfaced_cards`
+  from it (see above).
+- `tests/test_assemble_plan.py` — substantially rewritten: every test that
+  exercises the Existing Project Work section now passes a matching
+  `prioritized_project_work` entry (a real matched item no longer
+  auto-renders there). Added: `stale_nudge`-entry rendering (from the
+  Trello card, not a scored item); `movement_note` appended to reasoning;
+  priority-order rendering proven directly (reversed `prioritized_project_work`
+  order renders reversed, independent of `classified_items`' order); a
+  matched-but-unselected item renders nowhere (the bounding); footer count
+  reflects the bounded render, not the raw matched count; a `stale_nudge`-
+  only week (zero `classified_items`) does not trigger the empty-plan
+  fallback; a `new_item` entry with an unresolvable `item_url` falls back
+  to the card instead of crashing. Reading & Learning/Courses/formatting/
+  footer/item_map tests that don't touch project work are unchanged.
+
+**Real evidence:**
+- Full test suite: `207 passed, 1 skipped` (net +1 test overall after 2
+  removals and rewrites; the module's own count grew from 33 to 38 tests).
+  One unrelated flake seen mid-run (`test_blog_sources_yaml.py`'s live
+  Hacker News RSS fetch) — confirmed transient, passed clean on immediate
+  re-run, same known flake seen in sub-phase 3.
+- **Live end-to-end run against the real Trello board, a real
+  `prioritize_plan_items()` Anthropic call, AND the real `format_plan()`
+  renderer** (no store writes this time -- `format_plan()` called
+  directly, deliberately avoiding another `current_weekly_plan`
+  clobber): real board state, one fabricated "new content this week" item
+  matched to the freshest real card, real `prioritize_plan_items()` call
+  selected 4 entries, fed directly into `format_plan()`. Real rendered
+  output: the `new_item` entry at #1 with its own title/url/reasoning; 3
+  real `stale_nudge` entries at #2-4 rendering from their real Trello
+  cards (`https://trello.com/c/...` URLs, real card names, e.g. `"create
+  claude notes"`, `"jami with ai blog"`), each with real reasoning citing
+  actual idle duration (43-73 real days) and a movement-style note
+  appended after `" — "` exactly as designed; footer correctly read `"4
+  plan items"` (the bounded count, not the full board). Confirms every
+  piece — `new_item` rendering, `stale_nudge` rendering from a card,
+  `movement_note` concatenation, priority-order rendering, and bounded
+  footer counting — works end-to-end against real data, not just mocks.
+- **Honest observation from the same live run, not a bug:** `card_movements`
+  was passed as `[]` in this particular test (deliberately simplified, no
+  sub-phase 4 data wired up for this specific live check) — yet the model
+  still populated `movement_note` for the `stale_nudge` entries with
+  plausible-sounding staleness text ("Unchanged since last check; no
+  movement in 43 days..."), inferred from `last_activity` rather than from
+  any real cross-week signal, since none was provided. In a real Sunday
+  run this can't happen — `read_trello` always populates `card_movements`
+  before this node runs — but it's a real prompt-robustness observation
+  worth Pooja knowing: the model will happily narrate "movement" from
+  staleness alone if the real movement block is empty, rather than leaving
+  `movement_note` null. Not fixed here (out of scope for this smoke test to
+  patch unilaterally); flagged for awareness.
+
+**Checkpoint complete.** All 7 items across 5 sub-phases (Courses section;
+Trello card staleness; `plan_history` namespace; cross-week movement
+detection, including the real `Done`-list discovery; the new bounded LLM
+prioritization node; assemble_plan rendering) are built, tested, and
+backed by real live evidence against the actual Trello board, the actual
+Supabase store, and real Anthropic API calls.
