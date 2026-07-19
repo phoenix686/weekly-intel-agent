@@ -22,28 +22,22 @@ jobs:
     # staying alive. This is a safety net against a genuine hang, not a
     # wait for Telegram replies.
     #
-    # Raised from 20 -> 45 (2026-07-16): the original 20 predates
-    # Checkpoint 5's local CPU-based embedding workload (semantic dedup +
-    # taste pre-filter) entirely -- it was sized for the interrupt/resume
-    # design, not for this. A real run hit exactly 20:17 and got killed
-    # mid-progress, not from a real error. Real local investigation found
-    # two distinct costs this timeout now needs to absorb: (1) the
-    # per-item embed_text() loop in dedupe_semantic/taste_prefilter was
-    # fixed to batch via embed_texts() instead (measured ~3.4x faster,
-    # 150 items: 3.05s -> 0.89s) -- real but small, a few seconds; (2) far
-    # more significant, SentenceTransformer's model-load step makes a
-    # chain of ~10-15 real network round-trips to huggingface.co checking
-    # file revisions EVEN WHEN the model is already cached (measured
-    # ~15s locally on a fast connection) -- on GitHub Actions' network
-    # this could run considerably slower, and this is a one-time-per-run
-    # cost regardless of item count. 45 is a starting-point buffer for
-    # both, not a precisely-derived number -- adjust with a real
-    # completed run's actual duration once one exists.
+    # 45-minute buffer, raised from an original 20 on 2026-07-16 for the
+    # local sentence-transformers embedding workload's real costs at the
+    # time (per-item embed loop batching, and SentenceTransformer's
+    # model-load network round-trips to huggingface.co). The NVIDIA NIM
+    # swap (2026-07-19) removes that specific cost entirely -- embeddings
+    # are now real API calls (live-measured: a 50-item batch in ~1.4s),
+    # not a local model load -- but 45 is left as-is rather than lowered
+    # on a guess: no real post-swap Sunday run has completed yet to
+    # measure the new real duration against. Revisit with real evidence
+    # once one has.
     timeout-minutes: 45
     env:
       PYTHONPATH: "."
       DB_URI: ${{ secrets.DB_URI }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
@@ -65,13 +59,10 @@ jobs:
       # completion, so the save is silently skipped (confirmed via GitHub's
       # own community discussions on this exact behavior -- 2026-07-17,
       # after a real Sunday run timeout gave the cold-cache cost no chance
-      # to ever get paid off). Every attempt was re-paying the full
-      # pip-install + HuggingFace-model-download cost from scratch. Fixed by
-      # using the explicit restore/save sub-actions instead, with save
-      # placed right after the cache is actually populated (pip install +
-      # a cheap model warm-up), well before the long, timeout-risking main
-      # step -- so a later timeout can no longer prevent the cache from
-      # ever being saved.
+      # to ever get paid off). Explicit restore/save sub-actions instead,
+      # with save placed right after the cache is actually populated (pip
+      # install), well before the long, timeout-risking main step -- so a
+      # later timeout can no longer prevent the cache from ever being saved.
       - name: Restore pip cache
         uses: actions/cache/restore@v4
         with:
@@ -80,17 +71,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Restore HuggingFace model weights cache (all-MiniLM-L6-v2)
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/huggingface
-          key: ${{ runner.os }}-hf-all-MiniLM-L6-v2
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Warm up local embedding model (populates the HuggingFace cache before the long-running step)
-        run: python -c "from discovery.embeddings import _get_model; _get_model()"
 
       - name: Save pip cache
         uses: actions/cache/save@v4
@@ -98,32 +80,13 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
 
-      - name: Save HuggingFace model weights cache
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/huggingface
-          key: ${{ runner.os }}-hf-all-MiniLM-L6-v2
-
       - name: Run Sunday pipeline
-        # HF_HUB_OFFLINE=1 only on this step, not the warm-up step above --
-        # the warm-up step needs real network access to populate the cache
-        # on a genuinely cold run; this step can now safely skip all
-        # huggingface.co network calls since the warm-up step (and the
-        # cache restore before it) already guarantee the model is present
-        # locally. Verified locally (two genuinely separate subprocesses,
-        # matching how Actions steps actually work) that this is a real
-        # saving, not a silent fallback: model CONSTRUCTION time (isolated
-        # from one-time Python import overhead) dropped from 6.58s to
-        # 0.92s (86% reduction), exit code 0.
-        #
         # Output tee'd to a file (2026-07-19) so it can be uploaded as a
         # real downloadable artifact below -- GH Actions' bash steps
         # already run with pipefail on by default, so a real pipeline
         # failure still fails this step even though the output is piped
         # through tee, not just captured in the live/in-browser log.
         run: python scripts/run_sunday.py 2>&1 | tee sunday_run.log
-        env:
-          HF_HUB_OFFLINE: "1"
 
       - name: Upload Sunday run log
         # if: always() -- not just on success -- since a real timeout-

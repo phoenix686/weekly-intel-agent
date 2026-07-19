@@ -63,7 +63,7 @@ Persistence (checkpoints, human-in-the-loop interrupts, and all durable state â€
 | **[LangGraph](https://github.com/langchain-ai/langgraph)** | The whole pipeline â€” `StateGraph`, conditional/dynamic (`Send`) fan-out, a `PostgresSaver` checkpointer, and `interrupt()` for the human-in-the-loop Trello-proposal approval |
 | **[Anthropic Claude](https://www.anthropic.com/) (Haiku)** | Scoring content against the taste profile, Trello correlation, plan-item classification, and the bounded weekly prioritization call |
 | **[Supabase](https://supabase.com/) Postgres** | Checkpointer backend + `BaseStore` for every durable namespace (taste profile history, seen-item dedup, plan history, run/node observability, feedback) |
-| **[sentence-transformers](https://www.sbert.net/)** (`all-MiniLM-L6-v2`, local, CPU) | Embeddings for cross-source/cross-run semantic dedup and a taste-similarity pre-filter, run entirely offline before any paid LLM call |
+| **[NVIDIA NIM](https://build.nvidia.com/)** (`nemotron-3-embed-1b`) | Embeddings for cross-source/cross-run semantic dedup and a taste-similarity pre-filter, run before any paid Anthropic call |
 | **Telegram Bot API** | Digest/plan delivery, and the approval channel for new project proposals |
 | **Trello REST API** | Real project-board correlation, staleness, and cross-week movement tracking (no third-party SDK â€” a thin stdlib `urllib` client) |
 | **[AgentMail](https://agentmail.to/)** | Reads a handful of Substack newsletters over email, for sources GitHub Actions runners can't reach directly via RSS |
@@ -83,6 +83,7 @@ Persistence (checkpoints, human-in-the-loop interrupts, and all durable state â€
    | `PYTHONPATH=.` | So `from state import ...` resolves from any subdirectory |
    | `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` | Tracing (optional but recommended) |
    | `ANTHROPIC_API_KEY` | Every LLM call in the pipeline |
+   | `NVIDIA_API_KEY` | Embeddings (`nemotron-3-embed-1b` via NVIDIA NIM) for dedup + taste pre-filter |
    | `TWILLOT_JSON_PATH` | Bookmark bootstrap source (one-time/manual use, gated off scheduled runs) |
    | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Digest/plan delivery and approval replies |
    | `TRELLO_API_KEY`, `TRELLO_TOKEN`, `TRELLO_BOARD_ID` | Trello board read/write |

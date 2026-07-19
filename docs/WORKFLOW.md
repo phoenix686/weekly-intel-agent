@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Sunday plan LLM prioritization checkpoint COMPLETE (final sub-phase: assemble_plan rendering) -- see bottom section
+Last updated: Embedding provider swap to NVIDIA NIM (nemotron-3-embed-1b) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -783,18 +783,38 @@ configured key -- unresolved 429/API_KEY_INVALID errors from the very
 first request) -> local `sentence-transformers` (final decision, no
 external account/key/billing tier of any kind).
 
-### `discovery/embeddings.py`
-- Local `sentence-transformers` (`all-MiniLM-L6-v2`) embedding wrapper,
-  shared by dedup, taste pre-filter, and topic-vector recompute. No API
-  key, no account, no billing tier -- the entire category of problem that
-  cost hours with Gemini doesn't exist for a local model.
-  `COST_PER_TOKEN_USD = 0.0` (local compute, not billed).
-  `total_tokens` is real, summed from the model's own `attention_mask`
-  (not padded batch width). 384-dimension vectors -- confirmed no
-  downstream code hardcodes a dimension. `torch` pinned to the CPU-only
-  build in `requirements.txt` (`torch==2.13.0+cpu` via
-  `--extra-index-url`) -- GitHub Actions runners have no GPU, and a bare
-  version pin risks pip resolving the default (much larger) CUDA build.
+### `discovery/embeddings.py`  _(provider swapped 2026-07-19 -- see "Embedding provider" changelog entries below)_
+- **NVIDIA NIM** (`nvidia/nemotron-3-embed-1b`, hosted, via
+  `build.nvidia.com`'s OpenAI-compatible `/v1/embeddings` endpoint), shared
+  by dedup, taste pre-filter, and topic-vector recompute -- same interface
+  as the prior local provider (`embed_text`, `embed_texts`,
+  `cosine_similarity`, `COST_PER_TOKEN_USD`), confirmed isolated swap (no
+  changes needed in `semantic_dedup.py`/`taste_vectors.py`).
+  `EMBEDDING_DIM = 2048` -- different from the prior local model's 384.
+  `INPUT_TYPE = "passage"`, used for every call: NVIDIA's model is
+  measurably asymmetric (live-tested, `query` vs `passage` on identical
+  text: cosine ~0.85, not ~1.0), so a single consistent `input_type` was
+  chosen to preserve the old model's "everything in one comparable space"
+  symmetric behavior -- NVIDIA's own documented guidance on the
+  query/passage split for this specific model could not be fetched live
+  (two attempts timed out); flagged as worth revisiting if match quality
+  suggests otherwise, `taste_vectors.py`'s topic-vs-item comparison being
+  the more likely candidate (topic description ~ query, item ~ passage is
+  the closer fit to typical retrieval framing).
+  `COST_PER_TOKEN_USD` is **UNVERIFIED** -- both live pricing-page fetches
+  timed out and the real API response carries no cost/credit header at
+  all; left at `0.0` as a placeholder, not a confirmed free rate the way
+  local compute was. Per-item token counts are real for a single-text
+  call (the API's aggregate usage.total_tokens IS that one text's count)
+  and approximated by character-length share of the batch for a
+  multi-text call, since the API only returns one aggregate count per
+  batch request, not real per-item counts. Auth via `NVIDIA_API_KEY`
+  (`Bearer` header), same `_api_key()`-raises-`KeyError`-if-missing
+  pattern as `trello_client.py`'s `_auth_params()`. `cosine_similarity()`
+  gained a dimension-mismatch guard (returns `0.0`, logs a warning)
+  instead of letting `zip()` silently truncate to the shorter vector's
+  length -- exists specifically because of this swap's dimension change,
+  but is provider-agnostic protection going forward.
 
 ### `discovery/semantic_dedup.py`
 - Cross-source/cross-run dedup: embeds title+text, cosine >=0.90 against a
@@ -848,7 +868,7 @@ external account/key/billing tier of any kind).
   (`sys.stdout.reconfigure(encoding="utf-8")`) blocking the script from
   completing at all.
 
-### Embedding provider -- final resolution
+### Embedding provider -- final resolution AT THE TIME (2026-07-17) -- SUPERSEDED 2026-07-19, see "Embedding provider: NVIDIA NIM swap" near the end of this file
 - Landed on local `sentence-transformers` (`all-MiniLM-L6-v2`) after
   Voyage AI and Gemini were both tried and abandoned this checkpoint
   (Gemini specifically: real key, real project, correct format, still an
@@ -2092,8 +2112,8 @@ actual code, not assumed from the spec's prior draft).
 | `digest_item_map` | `{run_id, items: {number: {url,title,tags,reasoning}}}` | `daily/nodes/send_telegram_digest.py`, `sunday/nodes/send_telegram_plan.py` | `telegram/feedback_router.py` |
 | `feedback_events` | `{item_id, feedback_text, replied_at, run_id, tags, title, content_summary, sentiment}` | `sunday/approval_actions.py` (`handle_feedback`) | `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) |
 | `seen_items` | `{seen: true, seen_at}` (rolling 35-day expiry, 2026-07-18) | `discovery/seen_items.py` (`mark_seen`) | `discovery/seen_items.py` (`filter_unseen`, also runs `_expire_stale_entries`) |
-| `recent_item_embeddings` | `{item_id, url, embedding_vector, fetched_at, scored_at}` | `discovery/semantic_dedup.py` | `discovery/semantic_dedup.py` |
-| `taste_topic_vectors` | `{tag, embedding_vector, updated_at}` | `discovery/taste_vectors.py` (`recompute_topic_vectors`) | `discovery/taste_vectors.py` (`taste_prefilter`) |
+| `recent_item_embeddings` | `{item_id, url, embedding_vector, fetched_at, scored_at}` -- `embedding_vector` is 2048-dim as of the 2026-07-19 NVIDIA swap (was 384-dim; the namespace was cleared, not migrated, at swap time -- see "Embedding provider: NVIDIA NIM swap" below) | `discovery/semantic_dedup.py` | `discovery/semantic_dedup.py` |
+| `taste_topic_vectors` | `{tag, embedding_vector, updated_at}` -- same 2026-07-19 dimension change/clear, then immediately re-populated with real 2048-dim vectors from the real `data/taste_profile.yaml` content (not left empty) | `discovery/taste_vectors.py` (`recompute_topic_vectors`) | `discovery/taste_vectors.py` (`taste_prefilter`) |
 | `prefilter_drops` | `{item_id, filter_type: "dedup"\|"taste", similarity_score, compared_against_item_id, compared_against_tag, run_id}` | `discovery/semantic_dedup.py`, `discovery/taste_vectors.py` | audit log only -- no reader yet |
 | `same_day_adjustments` | `{tag, cumulative_adjustment, item_ids_contributing, week_of}` | `sunday/same_day_nudge.py` | `sunday/nodes/update_profile.py` (cleared weekly; not yet consumed to influence live scoring/pre-filter comparisons -- spec Section 7 scopes this namespace's build to storage/computation/clearing only, no consumer described) |
 | `rejection_events` | **KNOWN-DEAD** -- orphaned, no schema in production use | `scripts/test_update_profile_rejections.py` only (manual test script) | none in production |
@@ -2665,3 +2685,135 @@ detection, including the real `Done`-list discovery; the new bounded LLM
 prioritization node; assemble_plan rendering) are built, tested, and
 backed by real live evidence against the actual Trello board, the actual
 Supabase store, and real Anthropic API calls.
+
+## Embedding provider: NVIDIA NIM swap (2026-07-19)
+
+A status check ("was the nemotron-3-embed-1b swap ever actually
+implemented?") was investigated directly against the codebase, not
+assumed from memory -- confirmed genuinely never implemented (zero
+`nemotron`/`nvidia` references anywhere in `discovery/embeddings.py` or
+`requirements.txt`; the file's own docstring documented the real full
+provider history -- Voyage -> Gemini -> local sentence-transformers --
+with no mention of NVIDIA at all). `NVIDIA_API_KEY` was confirmed present
+in `.env`, but the first live test against it returned `401
+Unauthorized` on every embeddings call while `/v1/models` succeeded fine
+with the same key -- the key's prefix didn't match NVIDIA's documented
+`nvapi-` format, strongly suggesting an invalid/wrong-format key, not a
+code bug (confirmed by testing 4 payload variations and 2 different
+models, all consistently 401). Pooja updated the key; the new one
+(`nvapi-...` prefix) worked immediately.
+
+**Real blast-radius finding, not assumed:** the new model's real output
+dimension is 2048, different from the prior local model's 384.
+`cosine_similarity()`'s `zip(a, b)` silently truncates to the shorter
+vector's length on a mismatch -- comparing an old 384-dim stored vector
+against a new 2048-dim live one would have computed a meaningless
+partial-dimension "similarity" with no error at all, corrupting both
+`semantic_dedup.py`'s cross-run window comparisons and
+`taste_vectors.py`'s topic-vs-item comparisons silently. Fixed two ways:
+a defensive dimension-mismatch guard added to `cosine_similarity()`
+itself (returns `0.0`, logs a warning -- provider-agnostic protection
+going forward, not just a one-time migration fix), AND the two affected
+store namespaces (`recent_item_embeddings`, `taste_topic_vectors`) were
+cleared as part of the swap, per Pooja's explicit confirmation -- both
+are fully derivable/recomputable state, not source-of-truth data.
+`taste_topic_vectors` was then immediately re-populated with real
+2048-dim vectors computed from the actual current `data/taste_profile.yaml`
+content (not left empty) -- `recompute_topic_vectors()`'s real signature
+made this a one-line live re-run, and leaving real, correct vectors in
+place is strictly better than deferring that benefit to the next Sunday
+run. `recent_item_embeddings` was left empty (its own `_load_window()`
+already degrades correctly against an empty window) -- it rebuilds
+itself naturally over the next `_WINDOW_DAYS` (7) of real runs.
+
+**A second real finding, also blast-radius, not assumed:** both
+`daily.yml` and `sunday.yml`'s "Warm up local embedding model" CI step
+literally called `python -c "from discovery.embeddings import _get_model;
+_get_model()"` -- a function that no longer exists after the swap. Left
+as-is, this would have broken the very next scheduled run (a real
+`ImportError`/`AttributeError` on a step with no `if: always()`, failing
+the whole job before the real pipeline step ever ran). Removed that step
+plus the now-pointless HuggingFace model-weights cache restore/save
+steps and the `HF_HUB_OFFLINE=1` env var (no HuggingFace calls happen at
+all anymore) from both workflows. Added `NVIDIA_API_KEY:
+${{ secrets.NVIDIA_API_KEY }}` to both workflows' job-level `env:` block
+-- **this requires Pooja to add `NVIDIA_API_KEY` as a real GitHub Secret
+on the repo before the next scheduled run**, per `CLAUDE.md` Section 8's
+standing exception (Claude Code flags the need, never adds secrets
+itself). Not yet confirmed added. `sunday.yml`'s 45-minute timeout
+comment (previously justified by SentenceTransformer's real network
+round-trip cost, now gone) was corrected to reflect the real current
+state -- left at 45 minutes anyway since no real post-swap Sunday run
+exists yet to measure the new real duration against.
+
+**Also found and fixed in the same pass:** `.env.example` was missing
+`NVIDIA_API_KEY` entirely (same category of gap as `AGENTMAIL_API_KEY`,
+found and fixed during the README overhaul) -- added, with a comment
+about the real key prefix format. `requirements.txt`'s `torch`/
+`sentence-transformers` pins removed (confirmed zero other references to
+either anywhere in the codebase before removing).
+
+**Explicitly unresolved, flagged rather than guessed at:**
+`COST_PER_TOKEN_USD` is **UNVERIFIED** -- two live attempts to fetch
+NVIDIA's real pricing documentation both timed out, and the real API
+response carries no cost/credit/billing header of any kind (checked
+every response header directly). Left at `0.0` as a placeholder, not a
+confirmed free rate the way local compute's `$0.0` was categorically
+true -- `NodeCost.cost_usd` figures downstream of this module will
+under-report real spend if `build.nvidia.com`'s embeddings endpoint turns
+out to be billed. The `input_type="passage"` choice (see
+`discovery/embeddings.py`'s file entry above) was also made without
+being able to confirm NVIDIA's own documented query/passage convention
+for this specific model, for the same reason (fetch timeouts) -- the
+reasoning for the choice made instead is fully documented in the module
+docstring and this entry.
+
+**Files changed:** `discovery/embeddings.py` (full provider rewrite,
+same public interface), `requirements.txt` (removed `torch`/
+`sentence-transformers`), `.env.example` (added `NVIDIA_API_KEY`),
+`.github/workflows/daily.yml` and `sunday.yml` (removed the now-broken
+warm-up step and HF cache steps, added the new secret), `tests/
+test_embeddings.py` (rewritten: dimension-mismatch guard test, and real
+mocked-HTTP tests for `embed_text`/`embed_texts` -- request shape,
+index-based response ordering, single-vs-batch token accounting -- where
+none existed for the embedding calls themselves before, only for
+`cosine_similarity`), `README.md`'s tech-stack table and setup
+instructions (NVIDIA NIM in place of sentence-transformers).
+
+**Real evidence:**
+- Full test suite: `216 passed, 1 skipped` (8 new tests, 0 broken --
+  `semantic_dedup.py`/`taste_vectors.py`'s existing tests all still pass
+  unmodified, confirming the isolated-swap design held).
+- **Live API verification** (real key, real endpoint, no mocking): single
+  embedding call confirmed 2048-dim output; batch call (3 texts, then 50
+  texts matching this project's own `BATCH_SIZE` convention) confirmed
+  real batching in one request (~1.4s for 50), consistent dimensions, and
+  a response `index` field used for ordering rather than assumed array
+  order; `input_type="query"` vs `"passage"` confirmed to produce
+  measurably different vectors for identical text (cosine ~0.85, not
+  ~1.0) -- the real finding behind the `input_type` design decision above.
+- **Live end-to-end pipeline verification** (real `dedupe_semantic()` and
+  `taste_prefilter()`/`recompute_topic_vectors()` calls, not just the raw
+  embedding function): a near-duplicate pair of fabricated items correctly
+  deduped (cosine=0.969 >= 0.90 threshold), a genuinely distinct item
+  correctly survived; real topic vectors recomputed from the real
+  `data/taste_profile.yaml` content, all 6 mapped tags confirmed 2048-dim
+  in the store; a real on-topic test item correctly survived
+  `taste_prefilter()` and a real off-topic one was correctly dropped
+  (cosine=0.286 < 0.30 threshold) -- both consumers working correctly
+  against the new provider with zero code changes to either file.
+- Test data written to the real store during this verification
+  (`recent_item_embeddings`, plus my own fabricated-profile-text version
+  of the topic vectors) was cleaned up afterward -- confirmed via
+  follow-up `store.search()` calls showing 0 stray entries, and the topic
+  vectors namespace was re-populated with the real profile-derived
+  version described above rather than left empty or fake.
+
+**Still open, needs Pooja's action, not Claude Code's:** add
+`NVIDIA_API_KEY` as a real GitHub Secret on the repo (same standing rule
+as every other secret this project has ever needed) before the next
+scheduled `daily.yml`/`sunday.yml` run -- otherwise every embedding call
+in that run will raise `KeyError` and `semantic_dedup`/`taste_prefilter`
+will degrade to their already-built graceful-failure paths (pass
+everything through unfiltered), not a hard pipeline failure, but real
+filtering value lost until the secret is added.

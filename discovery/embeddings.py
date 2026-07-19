@@ -1,113 +1,166 @@
 """
-Local sentence-transformers embedding wrapper (all-MiniLM-L6-v2), per
-batch2-dedup-taste-spec.md Section 3 -- final provider decision. History,
-stated plainly so this doesn't get re-litigated: Voyage AI was the
-original choice (replaced for a better free-tier shape), then
-gemini-embedding-001 (abandoned after a multi-hour live debugging
-session -- confirmed real key, confirmed correct project, confirmed
-correct key format -- the very first real API request still returned an
-unresolved 429/API_KEY_INVALID class of error). Cohere and HuggingFace's
-Inference Providers were both considered next and rejected for the same
-underlying risk category (opaque free-tier caps, real reports of
-accounts hitting unexpected errors on steady low usage) before landing
-here.
+NVIDIA NIM embedding wrapper (nvidia/nemotron-3-embed-1b, hosted via
+build.nvidia.com's OpenAI-compatible /v1/embeddings endpoint). Replaces
+the prior local sentence-transformers provider (all-MiniLM-L6-v2) --
+2026-07-19. History, stated plainly so this doesn't get re-litigated:
+Voyage AI (original) -> gemini-embedding-001 (abandoned, unresolved
+429/API_KEY_INVALID after a multi-hour live debugging session) -> local
+sentence-transformers (final choice at the time, no key/account/billing
+tier) -> this NVIDIA swap.
 
-Local is the deliberate final choice, not a fallback: no API key, no
-account, no billing tier, no credit balance that can silently run out or
-misconfigure -- the entire category of problem that cost hours with
-Gemini does not exist for a local model. Same model this project's
-original reference script used.
+Real, live-verified 2026-07-19 against the actual endpoint (not assumed):
+- Model: nvidia/nemotron-3-embed-1b, confirmed present in the real
+  /v1/models catalog for this account.
+- Output dimension: 2048 -- DIFFERENT from the prior local model's 384.
+  This is a breaking change for anything comparing a vector embedded
+  under the old provider against one embedded under this one (see
+  EMBEDDING_DIM and cosine_similarity's dimension-mismatch guard below).
+  Both weekly_intel store namespaces holding old 384-dim vectors
+  (recent_item_embeddings, taste_topic_vectors) were cleared as part of
+  this swap -- both are fully derivable/recomputable state, not
+  source-of-truth data (recent_item_embeddings rebuilds itself over the
+  next _WINDOW_DAYS of real runs; taste_topic_vectors' consumer,
+  taste_prefilter(), already has a permissive empty-store fallback that
+  lets everything through rather than dropping everything, so an empty
+  store degrades safely rather than corrupting comparisons).
+- Batching: confirmed real, one API call for up to 50 texts (this
+  project's existing BATCH_SIZE convention), ~1.4s, all vectors returned
+  at consistent dimension. The response's per-item "index" field is used
+  to place each vector, not raw array order -- the API's own documented
+  contract, not guaranteed array-order-preserving even though it was
+  observed sequential in testing.
+- input_type: NVIDIA's asymmetric embedding models produce MEASURABLY
+  DIFFERENT vectors for input_type="query" vs "passage" on identical
+  text (live-tested: cosine similarity only ~0.85 between the two for
+  the same string, not ~1.0) -- this is a retrieval-style
+  query/passage-optimized model, not a single-space general embedder
+  like the old local model. This module standardizes on "passage" for
+  EVERY call (both semantic_dedup.py's item-vs-item comparisons and
+  taste_vectors.py's topic-vs-item comparisons), to preserve the same
+  "everything lives in one comparable space" symmetric behavior the old
+  model had. NVIDIA's docs on the query/passage split for THIS specific
+  model could not be fetched live (two attempts at build.nvidia.com
+  timed out) -- if that convention turns out to matter for match
+  quality, taste_vectors.py's topic-vs-item comparison is the more
+  likely candidate to revisit first (topic description ~ query, item ~
+  passage is the closer fit to typical retrieval framing).
+- Pricing: UNVERIFIED. Both live fetch attempts against NVIDIA's
+  pricing docs timed out, and the real API response carries no
+  cost/credit/billing header of any kind (checked all response headers
+  directly). COST_PER_TOKEN_USD is therefore NOT a confirmed rate the
+  way the old local-compute $0.0 was categorically true -- it's a
+  placeholder. NodeCost.cost_usd figures downstream of this module will
+  under-report real spend if build.nvidia.com's embeddings endpoint
+  turns out to be billed. Flagged here and in the swap's own commit/
+  report, not silently assumed free.
+- Per-item token counts: the API returns one AGGREGATE usage.total_tokens
+  per batch call, not real per-item counts the way the old model's
+  attention_mask gave (exactly, per text). For a single-text call the
+  aggregate IS the real per-item count (no approximation needed). For a
+  multi-text batch, per-item counts are approximated by each text's
+  share of total character length across the batch -- an approximation,
+  not measured per-item data, documented here so it's never mistaken for
+  the old exact accounting.
 
 Shared by semantic dedup (discovery/semantic_dedup.py), the
 taste-similarity pre-filter (discovery/taste_vectors.py), and topic-vector
 recompute (discovery/taste_vectors.recompute_topic_vectors, called from
-sunday/nodes/update_profile.py's Sunday consolidated rewrite).
-
-No API key, no secret, no environment variable required.
-
-COST_PER_TOKEN_USD is 0.0: local compute, not a billed API call.
-total_tokens IS real (via the model's own attention_mask, not padded
-length -- confirmed by direct inspection: a 2-text batch with one 5-token
-and one 9-token real input pads input_ids to a shared width of 9, but
-attention_mask.sum(dim=1) correctly recovers [5, 9], not [9, 9]).
-
-Model produces 384-dimension vectors -- different from both Voyage's and
-Gemini's. No downstream code hardcodes a dimension: cosine_similarity
-uses zip() over arbitrary-length lists, store schemas hold
-embedding_vector as an opaque list[float], all tests mock
-embed_text/embed_texts directly -- confirmed isolated swap.
-
-`torch` is sentence-transformers' hard dependency -- requirements.txt
-pins the CPU-only build explicitly (this runs in GitHub Actions, no
-GPU). Model weights (~80-90MB) download on first use per machine/cache --
-see .github/workflows/daily.yml and sunday.yml for the HuggingFace
-cache-directory caching this requires in CI, alongside the pip cache.
+sunday/nodes/update_profile.py's Sunday consolidated rewrite). Interface
+(embed_text, embed_texts, cosine_similarity, COST_PER_TOKEN_USD)
+unchanged from the local-model version -- confirmed isolated swap, same
+as the prior provider transitions this module has already been through.
 
 No langgraph imports.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
-
-from sentence_transformers import SentenceTransformer
+import urllib.error
+import urllib.parse
+import urllib.request
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "all-MiniLM-L6-v2"
-COST_PER_TOKEN_USD = 0.0  # local compute, not a billed API call
+MODEL_NAME = "nvidia/nemotron-3-embed-1b"
+EMBEDDING_DIM = 2048  # live-verified 2026-07-19; see module docstring
+NVIDIA_API_BASE = "https://integrate.api.nvidia.com/v1/embeddings"
+INPUT_TYPE = "passage"  # see module docstring -- standardized for symmetric comparison
 
-_model: SentenceTransformer | None = None
+# UNVERIFIED -- see module docstring. Not a confirmed free rate.
+COST_PER_TOKEN_USD = 0.0
 
 
-def _get_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        logger.debug("embeddings: BEFORE SentenceTransformer(MODEL_NAME) construction (HF_HUB_OFFLINE-gated)")
-        t0 = time.perf_counter()
-        _model = SentenceTransformer(MODEL_NAME)
-        logger.debug(f"embeddings: AFTER SentenceTransformer(MODEL_NAME) construction ({time.perf_counter() - t0:.3f}s)")
-    return _model
+def _api_key() -> str:
+    key = os.environ.get("NVIDIA_API_KEY")
+    if not key:
+        raise KeyError("NVIDIA_API_KEY is not set in the environment")
+    return key
+
+
+def _embeddings_request(texts: list[str]) -> dict:
+    payload = {"input": texts, "model": MODEL_NAME, "input_type": INPUT_TYPE}
+    req = urllib.request.Request(
+        NVIDIA_API_BASE,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {_api_key()}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def embed_texts(texts: list[str]) -> tuple[list[list[float]], list[int]]:
-    """Embeds a batch of texts locally in ONE model.encode() call --
-    callers with multiple texts to embed (discovery/semantic_dedup.py,
+    """Embeds a batch of texts in ONE real API call -- callers with
+    multiple texts to embed (discovery/semantic_dedup.py,
     discovery/taste_vectors.py) should call this once with the full list
-    rather than looping embed_text() per item; batching the real forward
-    pass measured ~3.4x faster than N single-item calls (150-item local
-    benchmark: 3.05s looped vs 0.89s batched).
+    rather than looping embed_text() per item, same batching requirement
+    as every other batched call in this project.
 
-    Returns (vectors, per_item_tokens) -- per_item_tokens[i] is real,
-    from that text's own attention_mask sum (not padded batch width), so
-    NodeCost.input_tokens can still be attributed per item even though
-    the underlying encode() call is one batch, not one call per item.
+    Returns (vectors, per_item_tokens). per_item_tokens is REAL for a
+    single-text call (the API's aggregate usage.total_tokens IS that
+    text's count); for a multi-text batch it's an approximation --
+    total_tokens distributed proportionally by each text's character
+    length, since the API only reports one aggregate count per call, not
+    real per-item counts. See module docstring.
 
-    Raises whatever sentence-transformers/torch raises on failure --
-    callers are responsible for the graceful-degradation handling this
-    project's spec requires (skip the pre-filter for that item, don't
-    drop it), not this function."""
-    model = _get_model()
+    Raises whatever urllib/json raises on failure -- callers are
+    responsible for the graceful-degradation handling this project's
+    spec requires (skip the pre-filter for that item, don't drop it),
+    not this function."""
+    if not texts:
+        return [], []
 
-    logger.debug(f"embeddings: BEFORE model.encode() ({len(texts)} text(s))")
+    logger.debug(f"embeddings: BEFORE NVIDIA embeddings request ({len(texts)} text(s))")
     t0 = time.perf_counter()
-    vectors = model.encode(texts, convert_to_numpy=True).tolist()
-    logger.debug(f"embeddings: AFTER model.encode() ({time.perf_counter() - t0:.3f}s)")
+    body = _embeddings_request(texts)
+    logger.debug(f"embeddings: AFTER NVIDIA embeddings request ({time.perf_counter() - t0:.3f}s)")
 
-    logger.debug(f"embeddings: BEFORE model.preprocess() ({len(texts)} text(s))")
-    t0 = time.perf_counter()
-    encoded = model.preprocess(texts)
-    logger.debug(f"embeddings: AFTER model.preprocess() ({time.perf_counter() - t0:.3f}s)")
+    vectors_by_index = {entry["index"]: entry["embedding"] for entry in body["data"]}
+    vectors = [vectors_by_index[i] for i in range(len(texts))]
 
-    per_item_tokens = encoded["attention_mask"].sum(dim=1).tolist()
+    total_tokens = body["usage"]["total_tokens"]
+    if len(texts) == 1:
+        per_item_tokens = [total_tokens]
+    else:
+        total_chars = sum(len(t) for t in texts) or 1
+        per_item_tokens = [round(total_tokens * len(t) / total_chars) for t in texts]
+
     return vectors, per_item_tokens
 
 
 def embed_text(text: str) -> tuple[list[float], int]:
     """Single-text convenience wrapper over embed_texts. Callers embedding
     MULTIPLE texts should call embed_texts() directly instead of looping
-    this -- see embed_texts' docstring."""
+    this -- see embed_texts' docstring. The returned token count is real
+    (not approximated) for this single-text case."""
     vectors, tokens = embed_texts([text])
     return vectors[0], tokens[0]
 
@@ -115,7 +168,21 @@ def embed_text(text: str) -> tuple[list[float], int]:
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Standard cosine similarity. Returns 0.0 for a zero vector (rather
     than raising ZeroDivisionError) -- a degenerate embedding shouldn't
-    crash a comparison loop."""
+    crash a comparison loop.
+
+    Also returns 0.0 on a dimension mismatch (added with the NVIDIA swap,
+    2026-07-19) -- zip() silently truncates to the shorter vector's
+    length on a length mismatch, which would otherwise compute a
+    meaningless partial-dimension "similarity" with no error at all.
+    Treating a mismatch as "not a match" (same value already used for
+    the degenerate-vector case) is the safe default: it can only ever
+    make an item look LESS similar than it might really be, never more,
+    matching this pre-filter's own stated bias (a false negative here is
+    worse than a false positive, but a silently corrupted score is worse
+    than either)."""
+    if len(a) != len(b):
+        logger.warning(f"cosine_similarity: dimension mismatch ({len(a)} vs {len(b)}) -- treating as no match, not truncating")
+        return 0.0
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = sum(x * x for x in a) ** 0.5
     norm_b = sum(x * x for x in b) ** 0.5

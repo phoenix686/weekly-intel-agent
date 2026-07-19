@@ -19,6 +19,7 @@ jobs:
       PYTHONPATH: "."
       DB_URI: ${{ secrets.DB_URI }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
@@ -45,17 +46,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Restore HuggingFace model weights cache (all-MiniLM-L6-v2)
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/huggingface
-          key: ${{ runner.os }}-hf-all-MiniLM-L6-v2
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Warm up local embedding model (populates the HuggingFace cache before the long-running step)
-        run: python -c "from discovery.embeddings import _get_model; _get_model()"
 
       - name: Save pip cache
         uses: actions/cache/save@v4
@@ -63,25 +55,12 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
 
-      - name: Save HuggingFace model weights cache
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/huggingface
-          key: ${{ runner.os }}-hf-all-MiniLM-L6-v2
-
       - name: Run daily digest
-        # HF_HUB_OFFLINE=1 only on this step, not the warm-up step above --
-        # see sunday.yml for the full reasoning and real local verification
-        # (model construction time 6.58s -> 0.92s, 86% reduction, no
-        # silent fallback).
-        #
         # Output tee'd to a file (2026-07-19) so it can be uploaded as a
         # real downloadable artifact below -- see sunday.yml for the full
         # reasoning (pipefail is on by default for GH Actions bash steps,
         # so a real failure still fails this step despite the pipe).
         run: python scripts/run_daily.py 2>&1 | tee daily_run.log
-        env:
-          HF_HUB_OFFLINE: "1"
 
       - name: Upload daily run log
         # if: always() -- see sunday.yml for the full reasoning (a real
