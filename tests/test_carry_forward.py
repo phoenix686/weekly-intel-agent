@@ -138,6 +138,30 @@ def test_checked_true_item_never_carried():
     assert result == []
 
 
+def test_checked_true_excluded_selectively_alongside_an_eligible_item():
+    """Stronger than the single-item case above: with a checked=true item
+    AND an eligible (unchecked) item in the SAME call, confirms the
+    checked=true one is selectively excluded by the eligibility
+    condition itself -- not just an incidentally empty result."""
+    fake_store = _FakeStore(
+        run_history=[_run_history_entry("run-prior")],
+        digest_item_map=[_digest_entry("run-prior", {
+            1: _reading_item("https://checked.com/1", title="Checked item"),
+            2: _reading_item("https://unchecked.com/1", title="Unchecked item"),
+        })],
+    )
+    with patch.object(carry_forward_mod, "get_store", return_value=fake_store), \
+         _mock_db([{"url": "https://checked.com/1", "checked": True}]):
+        # "https://unchecked.com/1" deliberately has NO row in the mocked
+        # DB result -- both "checked=true" and "no row at all" are
+        # exercised in one call, at the same time.
+        result = get_carry_forward_items("run-current")
+
+    result_urls = {r["url"] for r in result}
+    assert result_urls == {"https://unchecked.com/1"}
+    assert "https://checked.com/1" not in result_urls
+
+
 def test_already_carried_item_not_carried_again():
     fake_store = _FakeStore(
         run_history=[_run_history_entry("run-prior")],
