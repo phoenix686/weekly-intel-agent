@@ -8,7 +8,7 @@ It's built entirely on [LangGraph](https://github.com/langchain-ai/langgraph), r
 
 **Every weekday morning (Mon–Sat):** a *daily* run discovers new content from RSS feeds, newsletters, and Hacker News, scores it against a taste profile using Claude, filters near-duplicates (both within the run and against the last several days), and sends a short Telegram digest.
 
-**Every Sunday evening:** a deeper *Sunday* run does all of the above, plus:
+**Every Sunday late morning:** a deeper *Sunday* run does all of the above, plus:
 - Correlates each kept item against her real Trello board to see if it relates to existing tracked work.
 - Classifies each item as routine reading material vs. a genuinely new project idea — new ideas are sent to Telegram for a real approve/reject decision before anything touches Trello (LangGraph's `interrupt()`, resumed by a separate polling job that checks for her reply).
 - Re-checks the real, current state of every Trello card that was surfaced the previous week — did it move lists, get archived, or ship — as ground truth from Trello's own API, not a self-reported flag.
@@ -99,7 +99,7 @@ Persistence (checkpoints, human-in-the-loop interrupts, and all durable state �
    python scripts/run_poll.py     # checks Telegram once for approval replies and resumes any paused run
    ```
 
-In production this runs unattended via the three workflows in `.github/workflows/`: `daily.yml` (Mon–Sat mornings), `sunday.yml` (Sunday evenings), and `poll.yml` (nightly, to resume any paused approval). All three also support manual `workflow_dispatch` triggers.
+In production this runs unattended via the three workflows in `.github/workflows/`: `daily.yml` (Mon–Sat mornings), `sunday.yml` (Sunday late morning), and `poll.yml` (nightly, to resume any paused approval). All three also support manual `workflow_dispatch` triggers.
 
 ## Tests
 

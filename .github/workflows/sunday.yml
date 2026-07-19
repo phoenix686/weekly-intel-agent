@@ -2,8 +2,8 @@ name: Sunday Pipeline
 
 on:
   schedule:
-    # 13:30 UTC = 19:00 IST, Sunday.
-    - cron: "30 13 * * 0"
+    # 05:30 UTC = 11:00 IST, Sunday.
+    - cron: "30 5 * * 0"
   workflow_dispatch:
 
 concurrency:

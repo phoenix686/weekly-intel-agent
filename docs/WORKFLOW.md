@@ -7,12 +7,15 @@ Last updated: Capped one-time carry-forward for unfinished Reading/Courses items
 - **`.github/workflows/daily.yml`** — `30 2 * * 1-6` (02:30 UTC / 08:00 IST,
   Monday-Saturday; Sunday is skipped since the Sunday workflow's discovery
   subgraph already covers that day). Runs `scripts/run_daily.py`.
-- **`.github/workflows/sunday.yml`** — `30 13 * * 0` (13:30 UTC / 19:00 IST,
-  Sunday only). Runs `scripts/run_sunday.py`.
-- **`.github/workflows/poll.yml`** _(new, Checkpoint 3)_ — `0 3 * * *` (03:00
-  UTC / 08:30 IST, **every day including Sunday** — unlike `daily.yml`, which
+- **`.github/workflows/sunday.yml`** — `30 5 * * 0` (05:30 UTC / 11:00 IST,
+  Sunday only; changed 2026-07-19 from the prior 13:30 UTC / 19:00 IST).
+  Runs `scripts/run_sunday.py`.
+- **`.github/workflows/poll.yml`** _(new, Checkpoint 3)_ — `30 16 * * *` (16:30
+  UTC / 22:00 IST, **every day including Sunday** — unlike `daily.yml`, which
   skips Sunday, this must run all 7 days since resumes/feedback/ad-hoc input
-  can arrive any day). Runs `scripts/run_poll.py`, which calls
+  can arrive any day; this line was stale -- corrected to match the real
+  cron, which had already moved to 22:00 IST per an earlier commit not
+  reflected here until now). Runs `scripts/run_poll.py`, which calls
   `telegram.polling.poll_once()`. Reuses the same secrets as `sunday.yml`
   (Trello + Telegram + Anthropic + `DB_URI`) — no new secrets needed, since a
   resume can trigger `handle_approval`/`handle_rejection`.
