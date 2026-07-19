@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 _DC_CREATOR = "{http://purl.org/dc/elements/1.1/}creator"
 
@@ -40,6 +41,30 @@ _BROWSER_USER_AGENT = (
 _XML_ILLEGAL_CHARS = re.compile(
     "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
 )
+
+
+_PARSE_ERROR_LOG_DIR = Path("logs/parse_errors")
+
+
+def _dump_parse_error_body(source_name: str, raw_bytes: bytes) -> None:
+    """Writes the raw (pre-decode, pre-strip) response body to
+    logs/parse_errors/{source}_{timestamp}.xml on an XML ParseError -- the
+    only way to get byte-level proof of what's actually malformed, since a
+    manual refetch after the fact keeps missing the moment (confirmed
+    twice: 2026-07-19, MarkTechPost's "not well-formed (invalid token):
+    line 1, column 119" reproduced in CI but not on a direct local
+    refetch, same exact error both times). Best-effort -- a failure to
+    write this diagnostic file must never mask or replace the original
+    parse error itself.
+    """
+    _PARSE_ERROR_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", source_name)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    dump_path = _PARSE_ERROR_LOG_DIR / f"{safe_name}_{timestamp}.xml"
+    try:
+        dump_path.write_bytes(raw_bytes)
+    except OSError:
+        pass
 
 
 @dataclass
@@ -115,7 +140,12 @@ def fetch_rss_feed(
         raw_text = _XML_ILLEGAL_CHARS.sub("", raw_bytes.decode(charset, errors="replace"))
         # re-encode to bytes: ET.fromstring rejects a `str` that still carries
         # an <?xml encoding=...?> declaration
-        root = ET.fromstring(raw_text.encode("utf-8"))
+        try:
+            root = ET.fromstring(raw_text.encode("utf-8"))
+        except ET.ParseError:
+            _dump_parse_error_body(source_name, raw_bytes)
+            raise
+
         channel = root.find("channel")
         items = channel.findall("item") if channel is not None else root.findall(".//item")
 

@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from discovery.parsers.rss_common import fetch_rss_feed
@@ -92,6 +93,27 @@ def test_daily_bucket_sources_use_48h_cutoff():
 
     titles = [r["title"] for r in result.rows]
     assert titles == ["Within window"]
+
+
+def test_parse_error_dumps_raw_body_to_logs_parse_errors(tmp_path):
+    """On an XML ParseError, the raw (pre-decode) response body must be
+    written to logs/parse_errors/{source}_{timestamp}.xml -- the only way
+    to get byte-level proof of a malformed feed the next time this fires
+    in CI, since manual refetches after the fact keep missing the moment."""
+    malformed_body = b"<rss><channel><item><title>Bad & unescaped</title></item>"  # never closed, invalid token
+
+    import discovery.parsers.rss_common as rss_common_mod
+    fake_dir = tmp_path / "logs" / "parse_errors"
+    with patch("urllib.request.urlopen", return_value=_mock_response(malformed_body)), \
+         patch.object(rss_common_mod, "_PARSE_ERROR_LOG_DIR", fake_dir):
+        result = fetch_rss_feed("https://example.com/feed", source_name="Bad Source")
+
+    assert len(result.errors) == 1
+    assert result.errors[0][0] == "Bad Source"
+
+    dumped = list(fake_dir.glob("Bad_Source_*.xml"))
+    assert len(dumped) == 1
+    assert dumped[0].read_bytes() == malformed_body
 
 
 def test_sunday_bucket_sources_use_216h_cutoff():
