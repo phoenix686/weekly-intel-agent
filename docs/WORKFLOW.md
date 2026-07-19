@@ -4,9 +4,10 @@ Last updated: Capped one-time carry-forward for unfinished Reading/Courses items
 
 ## Scheduled runs (GitHub Actions)
 
-- **`.github/workflows/daily.yml`** — `30 2 * * 1-6` (02:30 UTC / 08:00 IST,
-  Monday-Saturday; Sunday is skipped since the Sunday workflow's discovery
-  subgraph already covers that day). Runs `scripts/run_daily.py`.
+- **`.github/workflows/daily.yml`** — `30 1 * * 1-6` (01:30 UTC / 07:00 IST,
+  Monday-Saturday; changed 2026-07-19 from the prior 02:30 UTC / 08:00 IST;
+  Sunday is skipped since the Sunday workflow's discovery subgraph already
+  covers that day). Runs `scripts/run_daily.py`.
 - **`.github/workflows/sunday.yml`** — `30 5 * * 0` (05:30 UTC / 11:00 IST,
   Sunday only; changed 2026-07-19 from the prior 13:30 UTC / 19:00 IST).
   Runs `scripts/run_sunday.py`.
