@@ -80,6 +80,21 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
 
+      # discovery/config/agentmail_sources.yaml is gitignored (real inbox_id +
+      # real sender addresses -- see discovery/agentmail_sources_config.py's
+      # module docstring), so it doesn't exist in this fresh checkout.
+      # Reconstructed here from the AGENTMAIL_SOURCES_YAML secret, same
+      # pattern as every other credential in this workflow (secret ->
+      # env/file, never committed). Set as a step-scoped env var rather than
+      # interpolated directly into the run: string, so YAML content
+      # containing quotes/colons/etc. can't break shell parsing. Sunday-only
+      # step -- fetch_agentmail_sources() early-returns for source_context !=
+      # "sunday", so daily.yml/poll.yml have no use for this file.
+      - name: Write AgentMail sources config
+        env:
+          AGENTMAIL_SOURCES_YAML: ${{ secrets.AGENTMAIL_SOURCES_YAML }}
+        run: printf '%s\n' "$AGENTMAIL_SOURCES_YAML" > discovery/config/agentmail_sources.yaml
+
       - name: Run Sunday pipeline
         # Output tee'd to a file (2026-07-19) so it can be uploaded as a
         # real downloadable artifact below -- GH Actions' bash steps
