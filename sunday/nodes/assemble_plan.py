@@ -5,13 +5,24 @@ from datetime import datetime, timezone
 from state import SundayGraphState, NodeCost
 from sunday.memory_store_config import get_store
 from sunday.plan_history import record_plan_history
+from sunday.carry_forward import get_carry_forward_items
 
 logger = logging.getLogger(__name__)
 
 def assemble_plan(state: SundayGraphState) -> dict:
     t0 = time.perf_counter()
+
+    # Carried items are injected here, at the very end of the graph --
+    # never into state["classified_items"] itself, so plan_history/
+    # prioritize_plan_items (both already run by this point anyway) never
+    # see them. Built directly from last week's already-scored data, so
+    # this can never trigger a re-score or get blocked by seen_items --
+    # see sunday/carry_forward.py's module docstring for why.
+    carried_items = get_carry_forward_items(state["run_id"])
+    plan_items_with_carryover = state["classified_items"] + carried_items
+
     text, item_map = format_plan(
-        state["classified_items"],
+        plan_items_with_carryover,
         len(state["pending_approvals"]),
         state["run_id"],
         state["trello_cards"],
@@ -126,7 +137,7 @@ def format_plan(
             item_map[counter] = {
                 "url": item["url"], "title": title,
                 "text": item["text"], "tags": item.get("tags", []),
-                "reasoning": item["reasoning"],
+                "reasoning": item["reasoning"], "section": "reading",
             }
             counter += 1
 
@@ -141,7 +152,7 @@ def format_plan(
             item_map[counter] = {
                 "url": item["url"], "title": title,
                 "text": item["text"], "tags": item.get("tags", []),
-                "reasoning": item["reasoning"],
+                "reasoning": item["reasoning"], "section": "courses",
             }
             counter += 1
 
@@ -155,7 +166,7 @@ def format_plan(
             item_map[counter] = {
                 "url": entry["url"], "title": entry["title"],
                 "text": entry["text"], "tags": entry["tags"],
-                "reasoning": entry["reasoning"],
+                "reasoning": entry["reasoning"], "section": "existing_project_work",
             }
             counter += 1
 

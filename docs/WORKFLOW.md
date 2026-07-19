@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Embedding provider swap to NVIDIA NIM (nemotron-3-embed-1b) -- see bottom section
+Last updated: Capped one-time carry-forward for unfinished Reading/Courses items -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -360,6 +360,18 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   `state["prioritized_project_work"]` directly, not from `classified_items` --
   "surfaced" means "Pooja actually saw it in the plan," which only
   `prioritized_project_work` can answer correctly now that bounding exists.
+  **2026-07-19:** the node wrapper now also calls
+  `sunday/carry_forward.py`'s `get_carry_forward_items(run_id)` and merges
+  the result into a LOCAL copy of `classified_items` (never into
+  `state["classified_items"]` itself, so `plan_history`/
+  `prioritize_plan_items` -- both already run earlier in the graph by this
+  point anyway -- never see carried items) before calling `format_plan()`.
+  Every `item_map` entry (all three sections) now also carries a `section`
+  field (`"reading"`/`"courses"`/`"existing_project_work"`) -- added
+  specifically so `carry_forward.py` can reliably tell a prior week's
+  Reading/Courses items apart from Existing Project Work ones in
+  `digest_item_map`, whose entries were otherwise identically shaped
+  across all three sections.
 - **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`
 
 ### `sunday/plan_history.py`  _(new sub-phase 3, schema revised + reader added sub-phase 4)_
@@ -399,6 +411,35 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   will consume this signal is sub-phase 5, not this one.
 - **Key exports:** `detect_card_movement(run_id) -> list[dict]`
 - **Depended on by:** `sunday/nodes/read_trello.py`
+
+### `sunday/carry_forward.py`  _(new, 2026-07-19)_
+- **What it does:** `get_carry_forward_items(run_id)` -- capped, one-time-only
+  carry-forward for unfinished Reading & Learning / Courses items, reading
+  `companion_item_completions` (a real Postgres table, NOT a LangGraph store
+  namespace -- `url TEXT PK, checked BOOLEAN, run_id TEXT, updated_at
+  TIMESTAMPTZ`, written externally by `companion_writer`; this module is
+  SELECT-only against it, never INSERT/UPDATE/DELETE). Resolves "last week's
+  Reading/Courses items" via `run_history` (most recent `status="success"`,
+  `path="sunday"` entry, excluding the current run) and that run's
+  `digest_item_map` entry, filtered by the `section` field (see
+  `sunday/nodes/assemble_plan.py`'s entry below) to exclude Existing Project
+  Work items entirely -- out of scope, Trello-tracked separately. An item
+  with `checked=false` OR no completion row at all (never interacted with)
+  AND not already in `("weekly_intel","carry_forward_log")` gets carried;
+  logged to that namespace the same call so it can never carry a second
+  time. `checked=true` -> never carried, at any point. Returns
+  `classified_item`-shaped dicts (`classification="plan_item"`,
+  `matched_card_id=None`, original `tags` preserved so a carried course item
+  still lands back in Courses) built directly from last week's
+  already-scored `digest_item_map` data -- never re-scored, never
+  Haiku-charged, and structurally cannot be blocked by `seen_items`: called
+  from `assemble_plan` (the last real node before rendering), a carried
+  item never becomes part of this run's `raw_items`/`clustered_items`, so
+  it never reaches `cluster_dedupe_node`'s `filter_unseen()` or
+  `score_node`'s `mark_seen()` at all, this run or any run -- there is no
+  code path connecting this module to either.
+- **Key exports:** `get_carry_forward_items(run_id) -> list[dict]`
+- **Depended on by:** `sunday/nodes/assemble_plan.py`
 
 ### `sunday/nodes/send_telegram_plan.py`
 - **What it does:** Posts `state["plan_text"]` to Telegram.
@@ -2109,7 +2150,7 @@ actual code, not assumed from the spec's prior draft).
 | `polling_state` | `{value: int}` (update_offset) | `telegram/polling.py` | `telegram/polling.py` |
 | `pending_resume_map` | `{thread_id, proposal_id, run_id}` | `sunday/nodes/await_approval.py` | `telegram/polling.py` |
 | `adhoc_queue` | `{text, queued_at}` | `telegram/polling.py` | `sunday/nodes/process_adhoc_input.py` |
-| `digest_item_map` | `{run_id, items: {number: {url,title,tags,reasoning}}}` | `daily/nodes/send_telegram_digest.py`, `sunday/nodes/send_telegram_plan.py` | `telegram/feedback_router.py` |
+| `digest_item_map` | `{run_id, items: {number: {url,title,tags,reasoning,section}}}` -- `section` (`"reading"`\|`"courses"`\|`"existing_project_work"`) added 2026-07-19, Sunday-plan entries only (daily digest entries don't set it) | `daily/nodes/send_telegram_digest.py`, `sunday/nodes/send_telegram_plan.py` | `telegram/feedback_router.py`, `sunday/carry_forward.py` (`_load_prior_reading_and_course_items`) |
 | `feedback_events` | `{item_id, feedback_text, replied_at, run_id, tags, title, content_summary, sentiment}` | `sunday/approval_actions.py` (`handle_feedback`) | `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) |
 | `seen_items` | `{seen: true, seen_at}` (rolling 35-day expiry, 2026-07-18) | `discovery/seen_items.py` (`mark_seen`) | `discovery/seen_items.py` (`filter_unseen`, also runs `_expire_stale_entries`) |
 | `recent_item_embeddings` | `{item_id, url, embedding_vector, fetched_at, scored_at}` -- `embedding_vector` is 2048-dim as of the 2026-07-19 NVIDIA swap (was 384-dim; the namespace was cleared, not migrated, at swap time -- see "Embedding provider: NVIDIA NIM swap" below) | `discovery/semantic_dedup.py` | `discovery/semantic_dedup.py` |
@@ -2122,6 +2163,9 @@ actual code, not assumed from the spec's prior draft).
 | `node_summary` | `{run_id, node_name, items_in, items_out, dropped, cost_usd, duration_seconds, langsmith_url, error_summary}` | `observability.py` (`record_node_summary`, called from `cluster_dedupe_node`, `scrape_blogs`, `score_node`, `correlate_trello`, `classify_item`) | manual query -- durable per-node aggregate + LangSmith pointer, no automated reader yet |
 | `run_history` | `{run_id, path, started_at, finished_at, status: "in_progress"\|"success"\|"failed"\|"paused", total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `observability.py` (`record_run_started` writes the initial `in_progress` marker; `record_run_history` overwrites the same key with the final outcome -- called from `run_daily.py`/`run_sunday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet. A record stuck at `status="in_progress"` with no overwrite means the run never finished (crashed harder than a Python exception could catch) |
 | `plan_history` | `{run_id, cards: [{card_id, list_name}, ...], generated_at}` (one entry per Sunday run, keyed by `run_id`, never overwritten; schema revised sub-phase 4 -- was bare `card_ids: list[str]` in sub-phase 3) | `sunday/plan_history.py` (`record_plan_history`, called from `sunday/nodes/assemble_plan.py`) | `sunday/plan_history.py` (`get_most_recent_prior_entry`, called from `sunday/card_movement.py`, called from `sunday/nodes/read_trello.py`) |
+| `carry_forward_log` | `{url, carried_in_run_id, carried_at}` (one entry per url, EVER -- keyed by url, never overwritten, never expired) | `sunday/carry_forward.py` (`_log_carried`, called from `get_carry_forward_items`) | `sunday/carry_forward.py` (`_already_carried`, same module) -- a url's mere presence here means it was already given its one carry-forward chance, regardless of outcome |
+
+**Not a `weekly_intel` store namespace -- a real, separate Postgres table**, same `DB_URI` database: `companion_item_completions` (`url TEXT PK, checked BOOLEAN, run_id TEXT, updated_at TIMESTAMPTZ`), written externally by `companion_writer` (a separate app, not part of this repo). `sunday/carry_forward.py` is SELECT-only against it -- confirmed present and matching this exact schema via a live `information_schema.columns` query, 2026-07-19, before any code was written against it.
 
 ## What does NOT exist yet
 
@@ -2817,3 +2861,145 @@ in that run will raise `KeyError` and `semantic_dedup`/`taste_prefilter`
 will degrade to their already-built graceful-failure paths (pass
 everything through unfiltered), not a hard pipeline failure, but real
 filtering value lost until the secret is added.
+
+## Capped one-time carry-forward for unfinished Reading/Courses items (2026-07-19)
+
+Confirmed first, not assumed: `discovery/seen_items.py` marks a url seen
+permanently (well, rolling-35-day, functionally permanent -- see that
+file's own WORKFLOW.md entry) the moment it's scored, regardless of
+keep/drop, and completely independent of whether Pooja ever actually
+engaged with it. `plan_history`/`card_movements` (the recent Sunday plan
+checkpoint) are Trello-card-only, verified via direct grep to have zero
+functional reference to `seen_items` or item urls -- confirmed blind to
+Reading & Learning/Courses items entirely. No existing signal, partial or
+otherwise, distinguished "shown once" from "actually done" for those
+items before this entry.
+
+**Real prerequisite verified live before writing any code** (same
+discipline as every other "is X actually there" check this session):
+queried `information_schema.columns` directly against the real `DB_URI`
+database for `companion_item_completions` -- confirmed it exists with
+exactly the described schema (`url TEXT PK, checked BOOLEAN, run_id TEXT,
+updated_at TIMESTAMPTZ`), one real test row already in it, zero existing
+code references anywhere in this repo (genuinely new integration).
+
+**A real gap found and closed before the feature could work at all:**
+`digest_item_map` entries were identically shaped across Reading &
+Learning, Courses, and Existing Project Work -- no field distinguished
+which section an item came from. Without it, "last week's Reading/Courses
+items" couldn't be reliably resolved from Existing Project Work items
+(which are Trello-tracked separately and explicitly out of scope here).
+Added a `section` field to every `item_map` entry in
+`sunday/nodes/assemble_plan.py`'s `format_plan()` -- necessary
+infrastructure for this feature, not scope creep, same category as
+sub-phase 4's `plan_history` schema revision.
+
+**Design decisions:**
+- **Where it runs:** `sunday/carry_forward.py`'s `get_carry_forward_items()`,
+  called from `assemble_plan()` -- the last real node before rendering.
+  Placed here specifically so a carried item's already-scored data can be
+  injected directly into a LOCAL `classified_items` copy, never into
+  `state["classified_items"]` itself (so `plan_history`/
+  `prioritize_plan_items`, both already run earlier in the graph, never
+  see carried items -- they have no `matched_card_id` anyway).
+- **Why no re-score/no seen_items block is structural, not just
+  intended:** a carried item never becomes part of the CURRENT run's
+  `raw_items`/`clustered_items` at all -- it's built directly from last
+  week's `digest_item_map` entry and merged in at `assemble_plan`, which
+  runs after `cluster_dedupe_node`/`score_node` have already finished
+  with this run's own new items. There is no code path connecting
+  `carry_forward.py` to either node, this run or any run -- confirmed by
+  the module having zero import of either, and by the live test below
+  showing zero Anthropic cost.
+- **"Last week's Sunday run"** resolved via `run_history`
+  (`path="sunday"`, `status="success"`, most recent `finished_at`,
+  excluding the current run defensively) rather than assuming the
+  previous run in wall-clock time was a Sunday run -- `run_history` also
+  holds `daily`/`poll` entries interleaved with `sunday` ones.
+- **`companion_item_completions` is read-only from this codebase** --
+  SELECT only, confirmed by the module having zero INSERT/UPDATE/DELETE
+  against it. Checking it off is `companion_writer`'s job (a separate
+  app), not this pipeline's.
+- **One url with no completion row at all is treated as unchecked** --
+  "never interacted with" per the explicit spec, not skipped or treated
+  as done.
+
+**Files changed:**
+- `sunday/nodes/assemble_plan.py` -- `section` field added to every
+  `item_map` entry (all three sections); `assemble_plan()` now merges
+  `get_carry_forward_items(run_id)`'s result into a local
+  `classified_items` copy before calling `format_plan()`.
+- `sunday/carry_forward.py` -- **new file** (see its own file-by-file
+  entry above for full detail: `_find_prior_sunday_run_id`,
+  `_load_prior_reading_and_course_items`, `_fetch_completion_status`
+  (SELECT-only), `_already_carried`, `_log_carried`,
+  `get_carry_forward_items`).
+- `tests/test_carry_forward.py` -- **new file**, 11 tests: no-prior-run
+  permissive default, no-row-at-all treated as unchecked, explicit
+  `checked=false` carried, `checked=true` never carried, already-carried
+  never carried twice, Existing Project Work items excluded via the
+  `section` filter, a carried course item keeps its `course` tag, the
+  carry gets logged with the correct `run_id`, most-recent-of-multiple-
+  prior-runs picked correctly, non-Sunday and non-`success` `run_history`
+  entries ignored.
+- `tests/test_assemble_plan.py` -- 5 existing node-wrapper tests updated
+  to mock `get_carry_forward_items` (now a real dependency of every
+  `assemble_plan()` call); 3 new tests covering the merge itself (a
+  carried item renders in the plan; `get_carry_forward_items` is called
+  with the current run's real `run_id`; a carried item is never recorded
+  in `plan_history`, since it has no `matched_card_id`).
+
+**Real evidence:** full suite `230 passed, 1 skipped` (14 new tests, 0
+broken). **Live, end-to-end, three-week simulation against the real
+Supabase store and the real `companion_item_completions` table** (not a
+dry description):
+
+- **Week 1 setup:** wrote a real `run_history` entry (`path="sunday"`,
+  `status="success"`) and a real `digest_item_map` entry with two items --
+  one Reading item with NO completion row at all, one Courses item with a
+  REAL `checked=true` row inserted into `companion_item_completions`.
+- **Week 2 -- real `assemble_plan()` call:** rendered plan text (verbatim):
+  ```
+  📋 *Weekly Plan*
+
+  **Reading & Learning**
+  1. [An unfinished article (never interacted with)](https://live-carry-test.example.com/unfinished-article-DELETE-ME)
+     _Directly relevant to active work._
+
+  _1 plan items · run: live-car_
+  ```
+  **CHECK 1 (unchecked item carried forward): TRUE.** **CHECK 3 (checked=true
+  item never carried): TRUE** -- the course item is absent from the output
+  entirely. `assemble_plan`'s own returned cost: `{'cost_usd': 0.0, ...}`.
+- **Week 2's real returned `item_map` was then persisted** as a real
+  `run_history`/`digest_item_map` pair (not fabricated separately --
+  exactly what `assemble_plan()` actually returned), to set up a genuine
+  week 3 lookup.
+- **Week 3 -- real `assemble_plan()` call:** rendered plan text (verbatim):
+  ```
+  📋 *Weekly Plan*
+
+  _Nothing on the plan this week._
+  ```
+  **CHECK 2 (does not appear a third time): TRUE** -- correctly dropped
+  permanently, no exceptions.
+- **CHECK 4 (zero Haiku cost):** both week 2 and week 3's `assemble_plan`
+  calls returned `cost_usd: 0.0`. Neither this test nor `carry_forward.py`
+  itself ever imports or calls `score_node`/`classify_item`/
+  `correlate_trello` -- the zero cost is architectural, not incidental.
+- **One real mistake caught mid-verification, not hidden:** an earlier
+  test attempt crashed (an unrelated Windows console Unicode error, after
+  `assemble_plan()` had already fully executed and already logged the url
+  to `carry_forward_log`); a same-day retry without also clearing that
+  namespace produced a false CHECK 1 failure (the url was correctly
+  excluded as "already carried" from the stale prior attempt, not a bug).
+  Diagnosed, `carry_forward_log` cleared properly, re-ran clean -- the
+  result above is from the clean run.
+- **Cleanup fully verified, not assumed:** all real test entries
+  (`run_history`, `digest_item_map`, `carry_forward_log`, the
+  `companion_item_completions` test row) confirmed removed via follow-up
+  queries returning zero remaining rows/entries each. `current_weekly_plan`
+  was read and stashed before the test and restored to its exact real
+  prior value afterward -- the lesson from this same mistake earlier in
+  this project (sub-phase 3's live smoke test) applied this time, not
+  repeated.

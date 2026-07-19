@@ -383,6 +383,7 @@ def test_assemble_plan_records_cards_from_prioritized_project_work():
     priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
         assemble_plan(_sunday_state(items, [_card("card1")], priority))
 
@@ -397,6 +398,7 @@ def test_assemble_plan_records_empty_when_prioritized_project_work_is_empty():
     items = [_plan_item(matched_card_id="card1", title="Project B")]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
         assemble_plan(_sunday_state(items, [_card("card1")], prioritized_project_work=[]))
 
@@ -407,6 +409,7 @@ def test_assemble_plan_falls_back_to_unknown_list_name_if_card_not_in_trello_car
     priority = [_priority_entry(matched_card_id="ghost-card", item_url="https://example.com")]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
          patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
         assemble_plan(_sunday_state([], trello_cards=[], prioritized_project_work=priority))
 
@@ -417,6 +420,7 @@ def test_assemble_plan_still_writes_current_weekly_plan():
     items = [_plan_item(matched_card_id=None, title="Article A")]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
          patch("sunday.nodes.assemble_plan.record_plan_history"):
         assemble_plan(_sunday_state(items))
 
@@ -434,8 +438,55 @@ def test_assemble_plan_passes_prioritized_project_work_through_to_format_plan():
                                  priority_reasoning="Idle for weeks.")]
     fake_store = MagicMock()
     with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
          patch("sunday.nodes.assemble_plan.record_plan_history"):
         result = assemble_plan(_sunday_state([], [_card("card1", "My Card")], priority))
 
     assert "**Existing Project Work**" in result["plan_text"]
     assert "My Card" in result["plan_text"]
+
+
+# ── assemble_plan() node wrapper: carry-forward integration ────────────────────
+
+def test_assemble_plan_merges_carried_items_into_rendered_plan():
+    carried = [{
+        "url": "https://carried.com/1", "title": "Carried Article", "text": "body",
+        "reasoning": "carried forward, unfinished last week", "classification": "plan_item",
+        "proposal_type": None, "classification_reasoning": "carried forward, unfinished last week",
+        "matched_card_id": None, "tags": ["agentic-engineering"],
+    }]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=carried), \
+         patch("sunday.nodes.assemble_plan.record_plan_history"):
+        result = assemble_plan(_sunday_state([]))
+
+    assert "Carried Article" in result["plan_text"]
+    assert "**Reading & Learning**" in result["plan_text"]
+
+
+def test_assemble_plan_calls_get_carry_forward_items_with_current_run_id():
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=[]) as mock_carry, \
+         patch("sunday.nodes.assemble_plan.record_plan_history"):
+        assemble_plan(_sunday_state([]))
+
+    mock_carry.assert_called_once_with(RUN_ID)
+
+
+def test_assemble_plan_carried_item_not_recorded_in_plan_history():
+    """Carried items have no matched_card_id -- they must never appear in
+    plan_history (Trello-only) regardless of how they got into the plan."""
+    carried = [{
+        "url": "https://carried.com/1", "title": "Carried Article", "text": "body",
+        "reasoning": "r", "classification": "plan_item", "proposal_type": None,
+        "classification_reasoning": "r", "matched_card_id": None, "tags": [],
+    }]
+    fake_store = MagicMock()
+    with patch("sunday.nodes.assemble_plan.get_store", return_value=fake_store), \
+         patch("sunday.nodes.assemble_plan.get_carry_forward_items", return_value=carried), \
+         patch("sunday.nodes.assemble_plan.record_plan_history") as mock_record:
+        assemble_plan(_sunday_state([]))
+
+    mock_record.assert_called_once_with(RUN_ID, [])
