@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Capped one-time carry-forward for unfinished Reading/Courses items -- see bottom section
+Last updated: Fixed real send_telegram_plan 400 (Markdown/HTML parse_mode mismatch) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -376,6 +376,15 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   Reading/Courses items apart from Existing Project Work ones in
   `digest_item_map`, whose entries were otherwise identically shaped
   across all three sections.
+  **2026-07-19, HTML rendering fix:** `format_plan()` now renders with
+  Telegram HTML parse_mode -- `<b>`/`<i>`/`<a href="...">` real tags
+  instead of `**`/`_`/`[]()` Markdown syntax, every dynamic value
+  (`title`, `reasoning`, `card_name`, `url`) escaped via
+  `telegram/markdown.py`'s `escape_html()` at the point of interpolation,
+  not before. `item_map` still stores RAW (unescaped) values -- only the
+  rendered `lines` strings are escaped, so a carried-forward item fed
+  back through `format_plan()` next week doesn't get double-escaped. Full
+  investigation and real evidence in the dated entry below.
 - **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`
 
 ### `sunday/plan_history.py`  _(new sub-phase 3, schema revised + reader added sub-phase 4)_
@@ -462,16 +471,42 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 ### `telegram/__init__.py`
 - **What it does:** Empty package marker.
 
-### `telegram/bot_client.py`
-- **What it does:** Stdlib HTTP wrapper for Telegram `sendMessage`. Returns full API
-  response dict (`{"ok": true, "result": {"message_id": int, ...}}`).
-- **Key exports:** `send_message(text, parse_mode="Markdown") -> dict`
+### `telegram/bot_client.py`  _(default parse_mode + real error surfacing, 2026-07-19)_
+- **What it does:** Stdlib HTTP wrapper for Telegram `sendMessage`. Default
+  `parse_mode` changed from legacy v1 `"Markdown"` to `"HTML"` -- root-caused a
+  real `send_telegram_plan` 400 (full investigation in the dated entry below).
+  `parse_mode=None` omits the key entirely, sending plain unformatted text (used
+  by `sunday/approval_actions.py`'s two confirmation messages, which have no
+  formatting intent). `urllib.error.HTTPError` is now caught and its real
+  response body read and both logged and included in the raised `RuntimeError`
+  -- previously this propagated unread, so any failure only ever surfaced the
+  generic `"HTTP Error 400: Bad Request"` string, never Telegram's actual
+  description (e.g. `"can't parse entities: Can't find end of the entity
+  starting at byte offset N"`). Returns full API response dict
+  (`{"ok": true, "result": {"message_id": int, ...}}`) on success.
+- **Key exports:** `send_message(text, parse_mode="HTML") -> dict`
+
+### `telegram/markdown.py`  _(escape_html added, 2026-07-19)_
+- **What it does:** `escape_markdown_v2` (pre-existing) -- used only where
+  `parse_mode="MarkdownV2"` is passed explicitly (`sunday/nodes/await_approval.py`),
+  NOT the project's default. `escape_html` (new) -- `&`/`<`/`>` escaping for
+  Telegram's HTML parse mode, `&` replaced first to avoid double-escaping the
+  `&` introduced by escaping `<`/`>`. Used by `assemble_plan.py`/
+  `assemble_digest.py` for every piece of dynamic/free text (titles, reasoning,
+  card names, tags, urls placed inside `href="..."`).
+- **Key exports:** `escape_markdown_v2(text) -> str`, `escape_html(text) -> str`
 
 ### `daily/__init__.py`, `daily/nodes/__init__.py`
 - **What it does:** Empty package markers.
 
-### `daily/nodes/assemble_digest.py`
-- **What it does:** Formats the daily Telegram digest.
+### `daily/nodes/assemble_digest.py`  _(HTML rendering, 2026-07-19)_
+- **What it does:** Formats the daily Telegram digest. Renders with Telegram
+  HTML parse_mode now, not Markdown -- `<b>`/`<i>`/`<a href="...">`/`<code>`
+  real tags instead of `*`/`_`/`[]()`/backtick syntax, every dynamic value
+  escaped via `escape_html()` at the point of interpolation. `item_map` still
+  stores RAW (unescaped) values -- only the rendered `lines` strings are
+  escaped, same rationale as `assemble_plan.py`'s `format_plan()` (see its
+  entry below).
 - **Key exports:** `format_digest(...)`, `assemble_digest(state) -> dict`
 
 ### `daily/nodes/send_telegram_digest.py`
@@ -3007,3 +3042,132 @@ dry description):
   prior value afterward -- the lesson from this same mistake earlier in
   this project (sub-phase 3's live smoke test) applied this time, not
   repeated.
+
+## Real send_telegram_plan 400: root cause, fix, and live re-verification (2026-07-19)
+
+A real Sunday run (`run_id 5677ca1d`, `status: "failed"`,
+`error_summary: "HTTPError: HTTP Error 400: Bad Request"` in `run_history`)
+failed to post to Telegram. Investigated before touching any code, per the
+explicit instruction -- root cause confirmed with real evidence, not
+guessed.
+
+### Root cause
+
+`telegram/bot_client.py`'s `send_message()` defaulted to
+`parse_mode="Markdown"` -- Telegram's **legacy v1** Markdown, which has
+**no escape mechanism at all** (a backslash before a character does
+nothing; the character is still a live entity delimiter). Meanwhile
+`sunday/nodes/assemble_plan.py` (and, found during this investigation,
+`daily/nodes/assemble_digest.py` independently) escaped underscores with
+**MarkdownV2** syntax (`reasoning.replace("_", r"\_")`) -- a mismatch
+between the escaping strategy and the actual parse_mode in use. This had
+been latent until `prioritize_plan_items`'s real LLM-generated reasoning
+happened to contain the literal substring `last_activity` (in the
+Existing Project Work movement notes) -- the un-escaped-in-practice `_`
+inside `last_activity`, nested inside an already-open `_..._` italic
+span, threw off entity pairing for the rest of the entire message.
+
+Also confirmed as a real, separate gap: `send_message()` let
+`urllib.error.HTTPError` propagate completely unread on any failure --
+the response body (where Telegram's real, specific error description
+lives) was never captured. `run_history.error_summary` only ever showed
+the generic `"HTTPError: HTTP Error 400: Bad Request"` string. Root-
+causing this run required a manual reproduction script with proper
+exception handling; that script's real Telegram error response:
+
+```json
+{"ok":false,"error_code":400,"description":"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 3911"}
+```
+
+Byte offset 3911 was the very last character of the message (the
+footer's closing `_`) -- not itself the problem, just the final casualty
+of a pairing cascade that started with `last_activity` earlier in the
+text.
+
+**Length checked and ruled out for this specific failure:** the real
+`plan_text` (pulled from `current_weekly_plan`, the exact text that was
+sent) was 3876 characters -- under Telegram's 4096 limit. Not the cause
+this time, but flagged below as a real separate risk.
+
+### Fix
+
+- `telegram/bot_client.py` -- default `parse_mode` changed from
+  `"Markdown"` to `"HTML"`. `urllib.error.HTTPError` now caught, the real
+  response body read, logged, and included in the raised `RuntimeError`
+  -- this is what should have (and now will) surface the real cause
+  immediately on any future failure, no manual reproduction needed.
+  `parse_mode=None` support added (omits the key entirely -> plain,
+  unformatted text) for callers with no formatting intent.
+- `telegram/markdown.py` -- new `escape_html()` helper (`&` escaped
+  first, then `<`/`>`, to avoid double-escaping). The pre-existing
+  `escape_markdown_v2()` (used only by `sunday/nodes/await_approval.py`,
+  which already correctly passes `parse_mode="MarkdownV2"` explicitly)
+  is untouched and unaffected by this change.
+- `sunday/nodes/assemble_plan.py` and `daily/nodes/assemble_digest.py` --
+  both rewritten to render with real HTML tags (`<b>`, `<i>`,
+  `<a href="...">`, `<code>` for digest tags) instead of Markdown syntax,
+  every dynamic value HTML-escaped at the point of interpolation.
+  `item_map` continues to store RAW unescaped values in both files --
+  verified this doesn't create double-escaping for `assemble_plan.py`'s
+  `carry_forward.py` reuse path with a dedicated test.
+- **Real, necessary blast-radius fix, not scope creep:** `sunday/approval_actions.py`
+  has two `send_message()` calls (card-approval confirmations) that relied
+  on the *default* parse_mode with **zero escaping** of the interpolated
+  real Trello `card['name']`/`card['url']`. Changing the default to HTML
+  would have left these newly exposed to the exact same bug class if a
+  card name ever contained `&`/`<`/`>`. Fixed by passing `parse_mode=None`
+  explicitly (plain text -- neither message has any formatting intent, so
+  this sidesteps needing to escape at all, simpler than escaping).
+  `telegram/polling.py`'s one static-string `send_message()` call was
+  checked and left alone -- no dynamic content, no special characters,
+  genuinely no risk either way.
+
+### Real evidence
+
+Full test suite: `254 passed, 1 skipped` (new coverage: `tests/test_bot_client.py`
+and `tests/test_telegram_markdown.py`, both previously zero-coverage files;
+`tests/test_assemble_plan.py`/`tests/test_assemble_digest.py` rewritten for
+the new HTML assertions plus new escaping-specific tests).
+
+**Live re-send of the exact failed run's real content, through the fixed
+pipeline** (not the old broken text resent as-is -- the real classified
+items/Trello cards/`prioritized_project_work` entries reconstructed
+faithfully from `run 5677ca1d`'s stored `plan_text`, including the exact
+real `last_activity`-containing reasoning strings that caused the
+original 400, fed through the FIXED `format_plan()` to produce a properly
+HTML-rendered message, then sent through the FIXED `send_message()`):
+
+```
+REAL SEND SUCCEEDED
+message_id: 48
+ok: True
+```
+
+**Live daily digest send** (today's real stored `current_daily_digest`
+turned out to be just the empty "Nothing new today" fallback -- `daily.yml`
+doesn't run Sundays, confirmed via a live store read before deciding how
+to test this -- so real content from the same day's real pipeline output
+was reshaped as `ScoredItem`s to actually exercise `format_digest()`'s
+tag-as-`<code>` rendering path, which the Sunday plan format doesn't
+have at all):
+
+```
+REAL SEND SUCCEEDED
+message_id: 49
+ok: True
+```
+
+Both real messages are now sitting in Pooja's actual Telegram chat.
+
+### Flagged, explicitly NOT fixed: message length risk
+
+The reconstructed HTML version of `run 5677ca1d`'s real content is
+**4032 characters** -- UP from the original Markdown version's 3876,
+since `<b>`/`<i>`/`<a href="...">` tags are more verbose than `*`/`_`/
+`[]()` syntax for the same content. This is now **98.4% of Telegram's
+4096-character limit**, tighter than before this fix, not looser. Not
+touched in this pass, per explicit instruction -- a real, separate
+decision (truncation vs. splitting into multiple messages) is needed as
+a follow-up before this silently becomes the next real production
+failure, likely sooner than the original length margin would have
+suggested.

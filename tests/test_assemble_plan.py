@@ -44,7 +44,7 @@ def _priority_entry(matched_card_id="card1", source="new_item", item_url="https:
 
 def test_zero_plan_items_zero_proposals_fallback():
     text, item_map = format_plan([], 0, RUN_ID, [])
-    assert text == "📋 *Weekly Plan*\n\n_Nothing on the plan this week._"
+    assert text == "📋 <b>Weekly Plan</b>\n\n<i>Nothing on the plan this week.</i>"
     assert item_map == {}
 
 
@@ -66,7 +66,7 @@ def test_stale_nudge_only_week_does_not_trigger_empty_fallback():
     priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None)]
     text, item_map = format_plan([], 0, RUN_ID, [_card("card1")], priority)
     assert "Nothing on the plan" not in text
-    assert "**Existing Project Work**" in text
+    assert "<b>Existing Project Work</b>" in text
 
 
 # ── Section routing ───────────────────────────────────────────────────────────
@@ -81,9 +81,9 @@ def test_proposals_excluded_from_output():
 def test_unmatched_item_in_reading_section_only():
     items = [_plan_item(matched_card_id=None, title="Read this")]
     text, item_map = format_plan(items, 0, RUN_ID, [])
-    assert "**Reading & Learning**" in text
+    assert "<b>Reading & Learning</b>" in text
     assert "Read this" in text
-    assert "**Existing Project Work**" not in text
+    assert "<b>Existing Project Work</b>" not in text
 
 
 def test_matched_item_in_project_section_only():
@@ -93,9 +93,9 @@ def test_matched_item_in_project_section_only():
     items = [_plan_item(matched_card_id="card1", title="Continue this")]
     priority = [_priority_entry(matched_card_id="card1", item_url=items[0]["url"])]
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
-    assert "**Existing Project Work**" in text
+    assert "<b>Existing Project Work</b>" in text
     assert "Continue this" in text
-    assert "**Reading & Learning**" not in text
+    assert "<b>Reading & Learning</b>" not in text
 
 
 def test_both_sections_present_when_both_types_exist():
@@ -105,8 +105,8 @@ def test_both_sections_present_when_both_types_exist():
     ]
     priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
-    assert "**Reading & Learning**" in text
-    assert "**Existing Project Work**" in text
+    assert "<b>Reading & Learning</b>" in text
+    assert "<b>Existing Project Work</b>" in text
     assert text.index("Article A") < text.index("Project B")
 
 
@@ -125,15 +125,15 @@ def test_matched_item_not_selected_by_prioritization_does_not_render():
 def test_course_tagged_item_in_courses_section_not_reading():
     items = [_plan_item(matched_card_id=None, title="Deep Learning Specialization", tags=["course"])]
     text, item_map = format_plan(items, 0, RUN_ID, [])
-    assert "**Courses**" in text
+    assert "<b>Courses</b>" in text
     assert "Deep Learning Specialization" in text
-    assert "**Reading & Learning**" not in text
+    assert "<b>Reading & Learning</b>" not in text
 
 
 def test_courses_section_omitted_when_no_course_items():
     items = [_plan_item(matched_card_id=None, title="Article A")]
     text, item_map = format_plan(items, 0, RUN_ID, [])
-    assert "**Courses**" not in text
+    assert "<b>Courses</b>" not in text
 
 
 def test_course_tagged_item_goes_to_courses_even_when_matched_to_a_card():
@@ -144,9 +144,9 @@ def test_course_tagged_item_goes_to_courses_even_when_matched_to_a_card():
     prioritize_plan_items)."""
     items = [_plan_item(matched_card_id="card1", title="Agents Course", tags=["course"])]
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")])
-    assert "**Courses**" in text
+    assert "<b>Courses</b>" in text
     assert "Agents Course" in text
-    assert "**Existing Project Work**" not in text
+    assert "<b>Existing Project Work</b>" not in text
 
 
 def test_all_three_sections_present_and_ordered():
@@ -157,9 +157,9 @@ def test_all_three_sections_present_and_ordered():
     ]
     priority = [_priority_entry(matched_card_id="card1", item_url=items[2]["url"])]
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
-    assert "**Reading & Learning**" in text
-    assert "**Courses**" in text
-    assert "**Existing Project Work**" in text
+    assert "<b>Reading & Learning</b>" in text
+    assert "<b>Courses</b>" in text
+    assert "<b>Existing Project Work</b>" in text
     assert text.index("Article A") < text.index("Course B") < text.index("Project C")
 
 
@@ -171,7 +171,7 @@ def test_stale_nudge_entry_renders_from_trello_card_not_scored_item():
     priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None,
                                  priority_reasoning="Idle for weeks.")]
     text, item_map = format_plan([], 0, RUN_ID, [_card("card1", "My Stale Card", "https://trello.com/c/stale")], priority)
-    assert "**Existing Project Work**" in text
+    assert "<b>Existing Project Work</b>" in text
     assert "My Stale Card" in text
     assert 'continues card: "My Stale Card"' in text
     assert item_map[1]["url"] == "https://trello.com/c/stale"
@@ -187,7 +187,7 @@ def test_movement_note_appended_to_reasoning():
 def test_no_movement_note_leaves_reasoning_unmodified():
     priority = [_priority_entry(matched_card_id="card1", priority_reasoning="Just this.", movement_note=None)]
     text, item_map = format_plan([], 0, RUN_ID, [_card("card1")], priority)
-    assert "Just this._" in text  # closing italic immediately after, no trailing " — "
+    assert "Just this.</i>" in text  # closing italic tag immediately after, no trailing " — "
 
 
 def test_project_section_renders_in_prioritized_order_not_source_order():
@@ -216,6 +216,43 @@ def test_new_item_entry_with_unresolvable_url_falls_back_to_card():
     assert "Fallback Card" in text
 
 
+# ── HTML escaping ────────────────────────────────────────────────────────────
+
+def test_ampersand_in_title_is_html_escaped():
+    """A real trigger for the original bug class: unescaped special
+    characters in LLM/source-generated text breaking the parser. HTML
+    mode reserves &, <, > -- not underscores."""
+    items = [_plan_item(title="Research & Compare Tools", reasoning="Good.")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "Research &amp; Compare Tools" in text
+    assert "Research & Compare Tools</a>" not in text  # raw & must not appear unescaped inside the tag
+
+
+def test_angle_brackets_in_reasoning_are_html_escaped():
+    items = [_plan_item(reasoning="Compares <LangGraph> vs other frameworks.")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "&lt;LangGraph&gt;" in text
+    assert "<LangGraph>" not in text
+
+
+def test_card_name_with_special_characters_is_html_escaped():
+    items = [_plan_item(matched_card_id="card1")]
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[0]["url"])]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1", 'R&D <notes>')], priority)
+    assert "R&amp;D &lt;notes&gt;" in text
+
+
+def test_underscore_no_longer_needs_escaping():
+    """The actual root cause of the real 2026-07-19 send_telegram_plan 400:
+    a literal underscore in reasoning must render as a plain literal
+    character under HTML mode, not trigger any escaping at all -- HTML
+    mode doesn't reserve '_'."""
+    items = [_plan_item(reasoning="Uses score_node and run_id and last_activity.")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "score_node and run_id and last_activity" in text
+    assert "\\_" not in text
+
+
 # ── Numbering ─────────────────────────────────────────────────────────────────
 
 def test_items_numbered_sequentially_across_sections():
@@ -225,8 +262,9 @@ def test_items_numbered_sequentially_across_sections():
     ]
     priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
-    assert "1. [Article A]" in text
-    assert "2. [Project B]" in text
+    assert "1. <a" in text
+    assert "2. <a" in text
+    assert text.index("Article A") < text.index("Project B")
 
 
 def test_items_numbered_sequentially_across_all_three_sections():
@@ -237,9 +275,9 @@ def test_items_numbered_sequentially_across_all_three_sections():
     ]
     priority = [_priority_entry(matched_card_id="card1", item_url=items[2]["url"])]
     text, item_map = format_plan(items, 0, RUN_ID, [_card("card1")], priority)
-    assert "1. [Article A]" in text
-    assert "2. [Course B]" in text
-    assert "3. [Project C]" in text
+    assert item_map[1]["title"] == "Article A"
+    assert item_map[2]["title"] == "Course B"
+    assert item_map[3]["title"] == "Project C"
 
 
 # ── Card name resolution ──────────────────────────────────────────────────────
@@ -261,17 +299,10 @@ def test_unknown_card_id_falls_back_to_id_string():
 
 # ── Formatting (Reading & Learning section -- unaffected by this sub-phase) ────
 
-def test_underscore_escaping_in_reasoning():
-    items = [_plan_item(reasoning="Uses score_node and run_id.")]
-    text, item_map = format_plan(items, 0, RUN_ID, [])
-    assert r"score\_node" in text
-    assert r"run\_id" in text
-
-
-def test_reasoning_wrapped_in_italic():
+def test_reasoning_wrapped_in_italic_tag():
     items = [_plan_item(reasoning="This is the reasoning.")]
     text, item_map = format_plan(items, 0, RUN_ID, [])
-    assert "_This is the reasoning._" in text
+    assert "<i>This is the reasoning.</i>" in text
 
 
 def test_title_truncated_to_80_chars():
@@ -279,6 +310,12 @@ def test_title_truncated_to_80_chars():
     text, item_map = format_plan(items, 0, RUN_ID, [])
     assert "A" * 80 in text
     assert "A" * 81 not in text
+
+
+def test_title_rendered_as_html_link():
+    items = [_plan_item(title="Article Title", url="https://example.com/article")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert '<a href="https://example.com/article">Article Title</a>' in text
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
@@ -333,6 +370,20 @@ def test_item_map_keyed_by_display_number_with_correct_fields():
     assert item_map[1]["url"] == "https://a.example.com"
     assert item_map[1]["title"] == "Article A"
     assert item_map[1]["text"] == "article body"
+
+
+def test_item_map_stores_raw_unescaped_text_not_rendered_html():
+    """Critical for carry_forward.py: item_map must store RAW text, not
+    the HTML-escaped rendered version -- otherwise a carried item fed
+    back through format_plan() a second time would get double-escaped
+    ('&' -> '&amp;' -> '&amp;amp;')."""
+    items = [_plan_item(title="R&D notes", reasoning="Uses <brackets> and & signs.")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert item_map[1]["title"] == "R&D notes"
+    assert item_map[1]["reasoning"] == "Uses <brackets> and & signs."
+    # but the rendered text itself IS escaped
+    assert "R&amp;D notes" in text
+    assert "&lt;brackets&gt;" in text
 
 
 def test_item_map_numbering_continues_across_both_sections():
@@ -442,7 +493,7 @@ def test_assemble_plan_passes_prioritized_project_work_through_to_format_plan():
          patch("sunday.nodes.assemble_plan.record_plan_history"):
         result = assemble_plan(_sunday_state([], [_card("card1", "My Card")], priority))
 
-    assert "**Existing Project Work**" in result["plan_text"]
+    assert "<b>Existing Project Work</b>" in result["plan_text"]
     assert "My Card" in result["plan_text"]
 
 
@@ -462,7 +513,7 @@ def test_assemble_plan_merges_carried_items_into_rendered_plan():
         result = assemble_plan(_sunday_state([]))
 
     assert "Carried Article" in result["plan_text"]
-    assert "**Reading & Learning**" in result["plan_text"]
+    assert "<b>Reading & Learning</b>" in result["plan_text"]
 
 
 def test_assemble_plan_calls_get_carry_forward_items_with_current_run_id():

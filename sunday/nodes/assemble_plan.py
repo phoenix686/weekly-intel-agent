@@ -6,6 +6,7 @@ from state import SundayGraphState, NodeCost
 from sunday.memory_store_config import get_store
 from sunday.plan_history import record_plan_history
 from sunday.carry_forward import get_carry_forward_items
+from telegram.markdown import escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,14 @@ def format_plan(
     trello_cards: list[dict],
     prioritized_project_work: list[dict] | None = None,
 ) -> tuple[str, dict[int, dict]]:
+    """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
+    NOT Markdown. item_map keeps RAW (unescaped) title/text/reasoning --
+    only the rendered `lines` strings are HTML-escaped, at the point of
+    interpolation. This matters for sunday/carry_forward.py, which reads
+    item_map's stored fields back out next week and feeds them through
+    format_plan() again as a fresh classified_item -- if item_map stored
+    already-escaped text, a carried item would get double-escaped
+    ("&amp;" -> "&amp;amp;") on its second render."""
     prioritized_project_work = prioritized_project_work or []
     plan_items = [i for i in classified_items if i["classification"] == "plan_item"]
     project_entries = _build_project_entries(prioritized_project_work, trello_cards, plan_items)
@@ -116,23 +125,22 @@ def format_plan(
     reading = [i for i in plan_items if "course" not in i.get("tags", []) and i.get("matched_card_id") is None]
 
     if not reading and not courses and not project_entries:
-        msg = "📋 *Weekly Plan*\n\n_Nothing on the plan this week."
+        msg = "📋 <b>Weekly Plan</b>\n\n<i>Nothing on the plan this week."
         if pending_approvals_count > 0:
             msg += f" {pending_approvals_count} proposals pending approval — check Telegram."
-        msg += "_"
+        msg += "</i>"
         return msg, {}
 
-    lines = ["📋 *Weekly Plan*", ""]
+    lines = ["📋 <b>Weekly Plan</b>", ""]
     counter = 1
     item_map: dict[int, dict] = {}
 
     if reading:
-        lines.append("**Reading & Learning**")
+        lines.append("<b>Reading & Learning</b>")
         for item in reading:
             title = (item.get("title") or item["text"])[:80]
-            reasoning = item["reasoning"].replace("_", r"\_")
-            lines.append(f"{counter}. [{title}]({item['url']})")
-            lines.append(f"   _{reasoning}_")
+            lines.append(f'{counter}. <a href="{escape_html(item["url"])}">{escape_html(title)}</a>')
+            lines.append(f"   <i>{escape_html(item['reasoning'])}</i>")
             lines.append("")
             item_map[counter] = {
                 "url": item["url"], "title": title,
@@ -142,12 +150,11 @@ def format_plan(
             counter += 1
 
     if courses:
-        lines.append("**Courses**")
+        lines.append("<b>Courses</b>")
         for item in courses:
             title = (item.get("title") or item["text"])[:80]
-            reasoning = item["reasoning"].replace("_", r"\_")
-            lines.append(f"{counter}. [{title}]({item['url']})")
-            lines.append(f"   _{reasoning}_")
+            lines.append(f'{counter}. <a href="{escape_html(item["url"])}">{escape_html(title)}</a>')
+            lines.append(f"   <i>{escape_html(item['reasoning'])}</i>")
             lines.append("")
             item_map[counter] = {
                 "url": item["url"], "title": title,
@@ -157,11 +164,10 @@ def format_plan(
             counter += 1
 
     if project_entries:
-        lines.append("**Existing Project Work**")
+        lines.append("<b>Existing Project Work</b>")
         for entry in project_entries:
-            reasoning = entry["reasoning"].replace("_", r"\_")
-            lines.append(f"{counter}. [{entry['title']}]({entry['url']})")
-            lines.append(f'   _{reasoning}_ — continues card: "{entry["card_name"]}"')
+            lines.append(f'{counter}. <a href="{escape_html(entry["url"])}">{escape_html(entry["title"])}</a>')
+            lines.append(f'   <i>{escape_html(entry["reasoning"])}</i> — continues card: "{escape_html(entry["card_name"])}"')
             lines.append("")
             item_map[counter] = {
                 "url": entry["url"], "title": entry["title"],
@@ -172,11 +178,9 @@ def format_plan(
 
     total_rendered = len(reading) + len(courses) + len(project_entries)
     if pending_approvals_count > 0:
-        footer = f"_{total_rendered} plan items · {pending_approvals_count} proposals pending approval · run: {run_id[:8]}_"
+        footer = f"<i>{total_rendered} plan items · {pending_approvals_count} proposals pending approval · run: {run_id[:8]}</i>"
     else:
-        footer = f"_{total_rendered} plan items · run: {run_id[:8]}_"
+        footer = f"<i>{total_rendered} plan items · run: {run_id[:8]}</i>"
     lines.append(footer)
 
     return "\n".join(lines), item_map
-
-

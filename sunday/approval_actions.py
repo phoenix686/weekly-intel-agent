@@ -51,13 +51,20 @@ def _log_approval_outcome(item_id: str, outcome: str, run_id: str) -> None:
 
 def handle_approval(item: dict, thread_id: str, run_id: str) -> None:
     """Creates or updates the relevant Trello card, sends Telegram confirmation."""
+    # parse_mode=None (plain text): no formatting is intended here, and a
+    # real Trello card name is uncontrolled free text -- since
+    # bot_client.py's default parse_mode is now "HTML" (2026-07-19,
+    # docs/WORKFLOW.md), an unescaped '&'/'<'/'>' in a card name would
+    # otherwise 400 this send the same way an unescaped '_' broke
+    # assemble_plan.py under the old default. Plain text sidesteps needing
+    # to escape at all, since there's nothing here meant to render as markup.
     if item.get("proposal_type") == "extend" and item.get("matched_card_id"):
         card = update_trello_card(item["matched_card_id"], desc=item["reasoning"])
-        send_message(f"✅ Updated card: {card['name']}\n{card['url']}")
+        send_message(f"✅ Updated card: {card['name']}\n{card['url']}", parse_mode=None)
     else:
         title = item.get("title") or item["text"][:80]
         card = create_trello_card(title, get_dump_list_id(), item["reasoning"])
-        send_message(f"✅ Created new card: {card['name']}\n{card['url']}")
+        send_message(f"✅ Created new card: {card['name']}\n{card['url']}", parse_mode=None)
     logger.info(f"handle_approval: processed approval for {item.get('url')}")
     _log_approval_outcome(item.get("url"), "approved", run_id)
 

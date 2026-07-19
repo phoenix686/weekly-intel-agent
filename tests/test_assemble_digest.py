@@ -29,14 +29,14 @@ RUN_ID = "abc12345-0000-0000-0000-000000000000"
 
 def test_empty_input_returns_nothing_today():
     text, item_map = format_digest([], RUN_ID)
-    assert text == "🤖 *Daily Digest*\n\n_Nothing new today._"
+    assert text == "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>"
     assert item_map == {}
 
 
 def test_all_dropped_returns_nothing_today():
     items = [_item(keep=False), _item(keep=False)]
     text, item_map = format_digest(items, RUN_ID)
-    assert text == "🤖 *Daily Digest*\n\n_Nothing new today._"
+    assert text == "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>"
     assert item_map == {}
 
 
@@ -47,12 +47,22 @@ def test_only_kept_items_appear():
     assert "Drop me" not in text
 
 
-def test_underscores_in_reasoning_are_escaped():
+def test_underscore_no_longer_needs_escaping():
+    """The same root cause as the real 2026-07-19 send_telegram_plan 400
+    (docs/WORKFLOW.md): this file independently escaped underscores with
+    MarkdownV2 syntax while sending under legacy v1 Markdown, which has
+    no escape mechanism at all. HTML mode doesn't reserve '_' -- it must
+    render as a plain literal character now, no escaping applied."""
     items = [_item(keep=True, reasoning="Uses score_node and run_id internally.")]
     text, item_map = format_digest(items, RUN_ID)
-    assert r"score\_node" in text
-    assert r"run\_id" in text
-    assert "score_node" not in text.split("reasoning")[0]  # raw underscore gone from body
+    assert "score_node and run_id internally" in text
+    assert "\\_" not in text
+
+
+def test_ampersand_in_title_is_html_escaped():
+    items = [_item(keep=True, title="Research & Compare Tools")]
+    text, item_map = format_digest(items, RUN_ID)
+    assert "Research &amp; Compare Tools" in text
 
 
 def test_exactly_15_kept_items_all_appear():
@@ -82,17 +92,32 @@ def test_footer_uses_first_8_chars_of_run_id():
     assert "run: abc12345" in text
 
 
-def test_tags_rendered_as_backtick_code():
+def test_tags_rendered_as_html_code_tags():
     items = [_item(keep=True, tags=["agentic-engineering", "evals"])]
     text, item_map = format_digest(items, RUN_ID)
-    assert "`agentic-engineering`" in text
-    assert "`evals`" in text
+    assert "<code>agentic-engineering</code>" in text
+    assert "<code>evals</code>" in text
 
 
-def test_reasoning_wrapped_in_italic():
+def test_reasoning_wrapped_in_italic_tag():
     items = [_item(keep=True, reasoning="This is the reasoning.")]
     text, item_map = format_digest(items, RUN_ID)
-    assert "_This is the reasoning._" in text
+    assert "<i>This is the reasoning.</i>" in text
+
+
+def test_title_rendered_as_html_link():
+    items = [_item(keep=True, title="Article Title")]
+    text, item_map = format_digest(items, RUN_ID)
+    assert '<a href="https://example.com">Article Title</a>' in text
+
+
+def test_item_map_stores_raw_unescaped_text_not_rendered_html():
+    items = [_item(keep=True, title="R&D notes", reasoning="Uses <brackets> and & signs.")]
+    text, item_map = format_digest(items, RUN_ID)
+    assert item_map[1]["title"] == "R&D notes"
+    assert item_map[1]["reasoning"] == "Uses <brackets> and & signs."
+    assert "R&amp;D notes" in text
+    assert "&lt;brackets&gt;" in text
 
 
 def test_missing_title_falls_back_to_text():
