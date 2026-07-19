@@ -126,6 +126,9 @@ class DiscoverySubgraphState(TypedDict):
     source_context: Literal["daily", "sunday"]  # read by route_sources() to
                                                  # decide the active source
                                                  # node(s) for this invocation
+    dry_run: bool  # when True, score_node skips mark_seen() -- lets manual
+                    # testing exercise the pipeline without permanently
+                    # exhausting the real seen_items pool
 
 
 class DailyGraphState(TypedDict):
@@ -200,9 +203,11 @@ class SundayGraphState(TypedDict):
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
     source_context: Literal["daily", "sunday"]
+    dry_run: bool  # passed through by name intersection into the nested
+                    # discovery subgraph; see DiscoverySubgraphState.dry_run
 
 
-def make_sunday_initial_state(run_id: str) -> SundayGraphState:
+def make_sunday_initial_state(run_id: str, dry_run: bool = False) -> SundayGraphState:
     return SundayGraphState(
         run_id=run_id,
         scored_items=[],
@@ -218,4 +223,5 @@ def make_sunday_initial_state(run_id: str) -> SundayGraphState:
         costs=[],
         errors=[],
         source_context="sunday",
+        dry_run=dry_run,
     )

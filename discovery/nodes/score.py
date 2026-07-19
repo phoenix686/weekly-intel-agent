@@ -161,7 +161,10 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         cost_usd=round(cost_usd, 6),
     )
 
-    mark_seen([item["url"] for item in all_scored])
+    if state.get("dry_run", False):
+        logger.info(f"dry_run=True -- skipping mark_seen() for {len(all_scored)} item(s)")
+    else:
+        mark_seen([item["url"] for item in all_scored])
 
     kept_count = sum(1 for item in all_scored if item["keep"])
     record_node_summary(

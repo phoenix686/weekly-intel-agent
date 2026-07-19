@@ -6,6 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# --dry-run: skips mark_seen() in score_node so manual testing doesn't
+# permanently exhaust the real seen_items pool. Everything else (real
+# fetches, real Anthropic scoring calls, real Telegram sends, real
+# run_history/node_summary logging) still happens for real.
+dry_run = "--dry-run" in sys.argv
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -36,7 +42,7 @@ config = {
 
 graph = build_sunday_graph()
 
-print(f"Starting Sunday run {run_id[:8]} (thread_id={thread_id})")
+print(f"Starting Sunday run {run_id[:8]} (thread_id={thread_id})" + (" [DRY RUN -- mark_seen() disabled]" if dry_run else ""))
 
 # run_history must still get a real record on a crash, not just a clean
 # finish -- see run_daily.py for the same reasoning. Re-raises so the
@@ -45,7 +51,7 @@ status = "failed"
 final_state = None
 error_summary = None
 try:
-    final_state = graph.invoke(make_sunday_initial_state(run_id=run_id), config=config)
+    final_state = graph.invoke(make_sunday_initial_state(run_id=run_id, dry_run=dry_run), config=config)
     status = "success"
 except Exception as e:
     error_summary = f"{type(e).__name__}: {e}"

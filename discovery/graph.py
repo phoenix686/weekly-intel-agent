@@ -100,7 +100,7 @@ def build_discovery_subgraph():
     return builder.compile()
 
 
-def make_initial_state(source_context: str = "daily") -> DiscoverySubgraphState:
+def make_initial_state(source_context: str = "daily", dry_run: bool = False) -> DiscoverySubgraphState:
     """Helper to build a fresh, valid initial state for a standalone run."""
     return DiscoverySubgraphState(
         raw_items=[],
@@ -111,4 +111,5 @@ def make_initial_state(source_context: str = "daily") -> DiscoverySubgraphState:
         costs=[],
         errors=[],
         source_context=source_context,
+        dry_run=dry_run,
     )

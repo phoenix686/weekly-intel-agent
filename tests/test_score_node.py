@@ -111,6 +111,26 @@ def test_mark_seen_called_with_every_scored_url_regardless_of_keep():
     assert set(called_urls) == {"https://a.com/1", "https://b.com/1"}
 
 
+def test_dry_run_skips_mark_seen():
+    """dry_run=True lets manual testing exercise the full pipeline without
+    permanently exhausting the real seen_items pool -- mark_seen() must not
+    be called at all when the flag is set, regardless of keep/drop."""
+    items = [_clustered_item("https://a.com/1")]
+    haiku_reply = [
+        {"index": 0, "keep": True, "reasoning": "r", "tags": ["evals"]},
+    ]
+
+    state = _state(items)
+    state["dry_run"] = True
+
+    p_create, p_mark_seen, p_summary, p_dropped = _patched()
+    with p_create as mock_create, p_mark_seen as mock_mark_seen, p_summary, p_dropped:
+        mock_create.return_value = _haiku_response(haiku_reply)
+        score_node(state)
+
+    mock_mark_seen.assert_not_called()
+
+
 def test_record_node_summary_reflects_kept_count_not_total():
     items = [_clustered_item("https://a.com/1"), _clustered_item("https://b.com/1"), _clustered_item("https://c.com/1")]
     haiku_reply = [
