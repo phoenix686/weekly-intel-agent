@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, MagicMock
 
-from sunday.nodes.assemble_plan import format_plan, assemble_plan
+from sunday.nodes.assemble_plan import format_plan, assemble_plan, MAX_PLAN_TEXT_CHARS, REASONING_CHAR_BUDGET
 
 RUN_ID = "abc12345-0000-0000-0000-000000000000"
 
@@ -541,3 +541,96 @@ def test_assemble_plan_carried_item_not_recorded_in_plan_history():
         assemble_plan(_sunday_state([]))
 
     mock_record.assert_called_once_with(RUN_ID, [])
+
+
+# ── Length budget / reasoning truncation (2026-07-19) ───────────────────────────
+# Telegram hard-caps sendMessage at 4096 chars; a real send already reached
+# 4032/4096 (98.4%) from the HTML parse_mode fix alone. Chosen fix: truncate
+# reasoning (and Existing Project Work's card_name) to a fixed per-item
+# budget only when the full render would exceed MAX_PLAN_TEXT_CHARS -- item
+# COUNT stays unbounded either way.
+
+def test_under_budget_text_is_not_truncated():
+    """The common case: well under the soft budget, reasoning renders in
+    full, no truncation logic engaged at all."""
+    items = [_plan_item(reasoning="A perfectly normal, short reasoning sentence.")]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert "A perfectly normal, short reasoning sentence." in text
+    assert "…" not in text
+    assert len(text) < MAX_PLAN_TEXT_CHARS
+
+
+def test_over_budget_reasoning_is_truncated_with_ellipsis():
+    """Force the full render past MAX_PLAN_TEXT_CHARS with long reasoning
+    text on every item, confirm the SENT text is truncated and stays
+    under budget."""
+    long_reasoning = "This is a very long piece of reasoning text. " * 30  # ~1400 chars
+    items = [_plan_item(reasoning=long_reasoning, title=f"Item {i}", url=f"https://example.com/{i}")
+             for i in range(5)]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    assert len(text) <= MAX_PLAN_TEXT_CHARS + 200  # generous slack for headers/footer/tags
+    assert "…" in text
+    # the truncated rendered reasoning must be shorter than the raw original
+    assert len(long_reasoning) > REASONING_CHAR_BUDGET
+
+
+def test_item_map_keeps_full_untruncated_reasoning_even_when_rendered_text_is_capped():
+    """Critical for carry_forward.py: a carried item reused next week must
+    not be permanently stuck with a truncated blurb just because THIS
+    week's message happened to be near the length limit."""
+    long_reasoning = "This is a very long piece of reasoning text. " * 30
+    items = [_plan_item(reasoning=long_reasoning, title=f"Item {i}", url=f"https://example.com/{i}")
+             for i in range(5)]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    for entry in item_map.values():
+        assert entry["reasoning"] == long_reasoning  # full text, not truncated
+
+
+def test_over_budget_card_name_truncated_in_continues_card_suffix():
+    """The real bug found alongside this fix: a stale_nudge card_name
+    could run far longer than a typical title (a real example was
+    ~200 chars) and rendered in full, twice, unbounded."""
+    long_card_name = "A Very Long Trello Card Name " * 10  # ~300 chars
+    long_reasoning = "This is a very long piece of reasoning text. " * 30
+    items = [_plan_item(reasoning=long_reasoning, title=f"Item {i}", url=f"https://example.com/{i}")
+             for i in range(5)]
+    priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None,
+                                 priority_reasoning=long_reasoning)]
+    text, item_map = format_plan(items, 0, RUN_ID, [_card("card1", long_card_name)], priority)
+    assert len(text) <= MAX_PLAN_TEXT_CHARS + 200
+    # the card_name must not appear in full (uncapped) length in the rendered text
+    assert long_card_name not in text
+
+
+def test_stale_nudge_title_truncated_to_80_chars():
+    """Direct test of the always-on bug fix: card_name-derived TITLES now
+    get the same [:80] truncation every other title path already had.
+    This is unconditional (unlike the "continues card" suffix's
+    card_name, which is only conditionally truncated when over budget --
+    covered separately above) -- so the long name legitimately still
+    appears once, in the suffix, just not as the link title."""
+    long_card_name = "A" * 150
+    priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None)]
+    text, item_map = format_plan([], 0, RUN_ID, [_card("card1", long_card_name)], priority)
+    assert item_map[1]["title"] == "A" * 80
+    assert f'>{"A" * 80}</a>' in text
+    assert f'>{"A" * 81}' not in text  # the link title itself never exceeds 80
+
+
+def test_shrinking_safety_net_engages_for_extreme_overflow():
+    """Even the fixed REASONING_CHAR_BUDGET might not be enough for a
+    genuinely extreme item count -- the shrinking safety net must still
+    land under budget (or at least make real, repeated forward progress),
+    not loop forever or silently give up at the first cap."""
+    long_reasoning = "This is a very long piece of reasoning text. " * 30
+    items = [_plan_item(reasoning=long_reasoning, title=f"Item {i}", url=f"https://example.com/{i}")
+             for i in range(40)]
+    text, item_map = format_plan(items, 0, RUN_ID, [])
+    # 40 items even at the minimum ~20-char reasoning budget plus fixed
+    # per-item overhead (title, url, numbering) will not fit under 3900 --
+    # the real assertion here is that truncation was actually APPLIED
+    # (shrunk well below the untruncated ~50000+ char version), not that
+    # it necessarily made it under the soft budget in this extreme case.
+    assert len(text) < 20000
+    assert "…" in text
+

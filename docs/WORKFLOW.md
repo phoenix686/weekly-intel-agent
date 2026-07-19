@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Fixed real send_telegram_plan 400 (Markdown/HTML parse_mode mismatch) -- see bottom section
+Last updated: Length-budget fix for plan_text (reasoning truncation over message splitting) -- see bottom section
 
 ## Scheduled runs (GitHub Actions)
 
@@ -385,7 +385,37 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   rendered `lines` strings are escaped, so a carried-forward item fed
   back through `format_plan()` next week doesn't get double-escaped. Full
   investigation and real evidence in the dated entry below.
-- **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`
+  **2026-07-19, length-budget fix:** the HTML fix alone pushed a real
+  message to 4032/4096 chars (98.4%) -- `format_plan()` now renders via a
+  new internal `_render()` helper (factored out of the three near-
+  identical section loops) called first without a budget; if the result
+  exceeds `MAX_PLAN_TEXT_CHARS` (3900, soft budget under Telegram's real
+  4096 hard limit), it re-renders with every item's reasoning (and
+  Existing Project Work's `card_name`, used in the "continues card"
+  suffix) capped to `REASONING_CHAR_BUDGET` (150) raw characters via a new
+  `_truncate()` helper (truncates raw text before escaping, appends `…`),
+  with a shrinking safety net (`budget //= 2`, floor 20) for the rare case
+  where even that fixed cap isn't enough. Item COUNT stays unbounded
+  either way -- only per-item reasoning verbosity is capped, and only
+  when needed. `item_map` always stores the FULL untruncated original
+  text regardless -- truncation is a rendering-time-only concern, so a
+  carried-forward item isn't permanently stuck with a truncated blurb
+  just because one week's message happened to be near the limit. Also
+  fixed a real related bug found during this investigation:
+  `_build_project_entries()`'s `stale_nudge` title path (`title =
+  card_name`) never applied the `[:80]` truncation every other title
+  path already had -- a real card name observed at ~200 chars was
+  rendering in full. Chosen over splitting into multiple Telegram
+  messages: fully contained within this function, zero changes needed to
+  `send_telegram_plan.py`, the `assemble_plan()` node wrapper, or
+  `digest_item_map`'s one-entry-per-run shape that `carry_forward.py`'s
+  lookup already assumes (a real correctness bug -- confirmed by reading
+  the code, not assumed -- that splitting would have introduced: its
+  `_load_prior_reading_and_course_items()` returns on the FIRST matching
+  `digest_item_map` entry per `run_id`, so a second message's items would
+  be silently missed).
+- **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`,
+  `MAX_PLAN_TEXT_CHARS`, `REASONING_CHAR_BUDGET`
 
 ### `sunday/plan_history.py`  _(new sub-phase 3, schema revised + reader added sub-phase 4)_
 - **What it does:** `record_plan_history(run_id, cards)` writes one entry per
@@ -3171,3 +3201,79 @@ decision (truncation vs. splitting into multiple messages) is needed as
 a follow-up before this silently becomes the next real production
 failure, likely sooner than the original length margin would have
 suggested.
+
+## Length-budget follow-up: reasoning truncation over message splitting (2026-07-19)
+
+The flagged risk above landed the same day: the HTML parse_mode fix
+alone pushed a real message to 4032/4096 chars (98.4%), and normal week-
+to-week variation in item count/reasoning length would exceed the real
+4096 hard limit soon.
+
+### Decision: truncation, not multi-message splitting
+
+Checked the actual blast radius of splitting before choosing, not just
+theorized: `send_telegram_plan.py` currently sends exactly one message
+and persists exactly one `digest_item_map` entry per run; splitting would
+require changes to `assemble_plan()`'s node wrapper AND
+`send_telegram_plan.py` (looping over chunks, one `send_message()` call
+and one `digest_item_map` write per chunk), and would introduce a real
+correctness bug in already-shipped code: `sunday/carry_forward.py`'s
+`_load_prior_reading_and_course_items()` returns on the FIRST
+`digest_item_map` entry matching a given `run_id` -- with multiple
+entries per run (one per message chunk), a second chunk's items would be
+silently missed by next week's carry-forward lookup. Truncation is fully
+contained inside `format_plan()`, with zero changes needed anywhere
+downstream -- the less invasive choice given the current structure, per
+the explicit ask.
+
+### What was built
+
+See `sunday/nodes/assemble_plan.py`'s file-by-file entry above for the
+full mechanism (`_render()`, `_truncate()`, `MAX_PLAN_TEXT_CHARS = 3900`,
+`REASONING_CHAR_BUDGET = 150`, the shrinking safety net). Also fixed,
+found during this same investigation: `_build_project_entries()`'s
+`stale_nudge` title path never truncated `card_name` to 80 characters
+like every other title path already did -- a real card name observed at
+~200 chars was rendering in full (contributing meaningfully to the
+original overflow, independent of reasoning length).
+
+### Real evidence
+
+Full test suite: `260 passed, 1 skipped` (6 new tests in
+`tests/test_assemble_plan.py`: under-budget text unaffected/no
+truncation applied; over-budget reasoning truncated with a visible `…`
+marker and the final render confirmed under budget; `item_map` confirmed
+to keep the FULL untruncated reasoning even when the rendered text was
+capped -- critical for `carry_forward.py` reuse; `card_name` truncated in
+the "continues card" suffix when over budget; the `stale_nudge` title
+`[:80]` bug fix tested directly; the shrinking safety net engaging for a
+genuinely extreme 40-item case).
+
+**Live test, deliberately constructed over 4096 chars** (9 Reading items
++ 4 Existing Project Work stale_nudge entries, all with realistic-length
+synthetic reasoning/card names matching real observed lengths, not
+minimal fixtures):
+
+- Confirmed the **untruncated** render was **6260 characters** -- would
+  have failed exactly like the original real 2026-07-19 400.
+- Through the fixed `format_plan()`, real log output showed the safety
+  net actually engaging, not just the first fixed cap succeeding by luck:
+  ```
+  format_plan: rendered text 6260 chars exceeds the 3900-char budget -- re-rendering with reasoning capped to 150 chars per item
+  format_plan: still over budget at 4936 chars -- shrinking reasoning cap to 75
+  format_plan: still over budget at 3924 chars -- shrinking reasoning cap to 37
+  ```
+- Final rendered length: **3287 characters** -- under both the 4096 hard
+  limit and the 3900 soft budget. All 13 items still present (unbounded
+  item count preserved, exactly as intended -- only reasoning verbosity
+  was cut).
+- **Real send via the fixed `send_message()`:**
+  ```
+  REAL SEND SUCCEEDED
+  message_id: 50
+  ok: True
+  ```
+
+Three real messages now sit in Pooja's actual Telegram chat from this
+day's investigation-and-fix work (`message_id`s 48, 49, 50) -- the
+original parse_mode fix's two live tests, plus this length-budget test.

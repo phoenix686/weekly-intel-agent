@@ -87,7 +87,12 @@ def _build_project_entries(prioritized_project_work: list[dict], trello_cards: l
         else:
             # stale_nudge, or a new_item whose url didn't resolve -- render
             # the Trello card itself rather than crashing or dropping it.
-            title = card_name
+            # [:80] matches every other title's truncation -- found missing
+            # here 2026-07-19 while investigating a real near-4096-char
+            # plan_text: a real card name can run far longer than a typical
+            # article title (one real example was ~200 chars) and was
+            # rendering in full, unlike every other title path.
+            title = card_name[:80]
             url = card.get("url", "")
             tags = []
             text = ""
@@ -103,44 +108,46 @@ def _build_project_entries(prioritized_project_work: list[dict], trello_cards: l
     return entries
 
 
-def format_plan(
-    classified_items: list[dict],
-    pending_approvals_count: int,
-    run_id: str,
-    trello_cards: list[dict],
-    prioritized_project_work: list[dict] | None = None,
+MAX_PLAN_TEXT_CHARS = 3900  # soft budget, headroom under Telegram's real 4096 hard limit
+REASONING_CHAR_BUDGET = 150  # applied only when the full render exceeds MAX_PLAN_TEXT_CHARS
+
+
+def _truncate(text: str, max_len: int) -> str:
+    """Truncates the RAW text, before HTML-escaping -- truncating
+    post-escape risks cutting mid-entity (e.g. splitting "&amp;" into
+    "&am"). Appends an ellipsis so truncation is visible, not silently
+    misleading."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "…"
+
+
+def _render(
+    reading: list[dict], courses: list[dict], project_entries: list[dict],
+    pending_approvals_count: int, run_id: str, reasoning_budget: int | None = None,
 ) -> tuple[str, dict[int, dict]]:
-    """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
-    NOT Markdown. item_map keeps RAW (unescaped) title/text/reasoning --
-    only the rendered `lines` strings are HTML-escaped, at the point of
-    interpolation. This matters for sunday/carry_forward.py, which reads
-    item_map's stored fields back out next week and feeds them through
-    format_plan() again as a fresh classified_item -- if item_map stored
-    already-escaped text, a carried item would get double-escaped
-    ("&amp;" -> "&amp;amp;") on its second render."""
-    prioritized_project_work = prioritized_project_work or []
-    plan_items = [i for i in classified_items if i["classification"] == "plan_item"]
-    project_entries = _build_project_entries(prioritized_project_work, trello_cards, plan_items)
-    courses = [i for i in plan_items if "course" in i.get("tags", [])]
-    reading = [i for i in plan_items if "course" not in i.get("tags", []) and i.get("matched_card_id") is None]
-
-    if not reading and not courses and not project_entries:
-        msg = "📋 <b>Weekly Plan</b>\n\n<i>Nothing on the plan this week."
-        if pending_approvals_count > 0:
-            msg += f" {pending_approvals_count} proposals pending approval — check Telegram."
-        msg += "</i>"
-        return msg, {}
-
+    """One rendering pass. reasoning_budget, when set, caps each item's/
+    entry's reasoning -- and, for Existing Project Work, the card_name
+    shown in the "continues card" suffix -- to that many raw characters
+    (see format_plan()'s length-safety docstring for why). item_map
+    always stores the FULL, untruncated original text regardless of
+    reasoning_budget: truncation is a rendering-time concern only, so a
+    carried-forward item (sunday/carry_forward.py) that gets reused next
+    week isn't permanently stuck with a truncated blurb just because
+    this week's message happened to be near the length limit."""
     lines = ["📋 <b>Weekly Plan</b>", ""]
     counter = 1
     item_map: dict[int, dict] = {}
+
+    def _cap(raw: str) -> str:
+        return _truncate(raw, reasoning_budget) if reasoning_budget else raw
 
     if reading:
         lines.append("<b>Reading & Learning</b>")
         for item in reading:
             title = (item.get("title") or item["text"])[:80]
             lines.append(f'{counter}. <a href="{escape_html(item["url"])}">{escape_html(title)}</a>')
-            lines.append(f"   <i>{escape_html(item['reasoning'])}</i>")
+            lines.append(f"   <i>{escape_html(_cap(item['reasoning']))}</i>")
             lines.append("")
             item_map[counter] = {
                 "url": item["url"], "title": title,
@@ -154,7 +161,7 @@ def format_plan(
         for item in courses:
             title = (item.get("title") or item["text"])[:80]
             lines.append(f'{counter}. <a href="{escape_html(item["url"])}">{escape_html(title)}</a>')
-            lines.append(f"   <i>{escape_html(item['reasoning'])}</i>")
+            lines.append(f"   <i>{escape_html(_cap(item['reasoning']))}</i>")
             lines.append("")
             item_map[counter] = {
                 "url": item["url"], "title": title,
@@ -166,8 +173,10 @@ def format_plan(
     if project_entries:
         lines.append("<b>Existing Project Work</b>")
         for entry in project_entries:
+            reasoning = _cap(entry["reasoning"])
+            card_name = _cap(entry["card_name"])
             lines.append(f'{counter}. <a href="{escape_html(entry["url"])}">{escape_html(entry["title"])}</a>')
-            lines.append(f'   <i>{escape_html(entry["reasoning"])}</i> — continues card: "{escape_html(entry["card_name"])}"')
+            lines.append(f'   <i>{escape_html(reasoning)}</i> — continues card: "{escape_html(card_name)}"')
             lines.append("")
             item_map[counter] = {
                 "url": entry["url"], "title": entry["title"],
@@ -184,3 +193,63 @@ def format_plan(
     lines.append(footer)
 
     return "\n".join(lines), item_map
+
+
+def format_plan(
+    classified_items: list[dict],
+    pending_approvals_count: int,
+    run_id: str,
+    trello_cards: list[dict],
+    prioritized_project_work: list[dict] | None = None,
+) -> tuple[str, dict[int, dict]]:
+    """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
+    NOT Markdown. item_map keeps RAW (unescaped) title/text/reasoning --
+    only the rendered `lines` strings are HTML-escaped, at the point of
+    interpolation. This matters for sunday/carry_forward.py, which reads
+    item_map's stored fields back out next week and feeds them through
+    format_plan() again as a fresh classified_item -- if item_map stored
+    already-escaped text, a carried item would get double-escaped
+    ("&amp;" -> "&amp;amp;") on its second render.
+
+    Length safety (2026-07-19): Telegram hard-caps a single sendMessage
+    at 4096 characters -- a real send_telegram_plan send already reached
+    4032/4096 (98.4%) even before this safeguard existed, purely from the
+    HTML tags added by the parse_mode fix (see docs/WORKFLOW.md). Item
+    COUNT stays unbounded for Reading & Learning/Courses either way (that
+    commitment is about selection, not per-item verbosity) -- if the full
+    render exceeds MAX_PLAN_TEXT_CHARS, every item's reasoning (and, for
+    Existing Project Work, the "continues card" name) is re-rendered
+    capped to REASONING_CHAR_BUDGET characters instead, with a shrinking
+    safety net for the rare case where even that fixed budget isn't
+    enough. Chosen over splitting into multiple Telegram messages: fully
+    contained here, zero changes needed to send_telegram_plan.py, the
+    assemble_plan() node wrapper, or digest_item_map's one-entry-per-run
+    shape that carry_forward.py's lookup already depends on."""
+    prioritized_project_work = prioritized_project_work or []
+    plan_items = [i for i in classified_items if i["classification"] == "plan_item"]
+    project_entries = _build_project_entries(prioritized_project_work, trello_cards, plan_items)
+    courses = [i for i in plan_items if "course" in i.get("tags", [])]
+    reading = [i for i in plan_items if "course" not in i.get("tags", []) and i.get("matched_card_id") is None]
+
+    if not reading and not courses and not project_entries:
+        msg = "📋 <b>Weekly Plan</b>\n\n<i>Nothing on the plan this week."
+        if pending_approvals_count > 0:
+            msg += f" {pending_approvals_count} proposals pending approval — check Telegram."
+        msg += "</i>"
+        return msg, {}
+
+    text, item_map = _render(reading, courses, project_entries, pending_approvals_count, run_id)
+
+    if len(text) > MAX_PLAN_TEXT_CHARS:
+        budget = REASONING_CHAR_BUDGET
+        logger.warning(
+            f"format_plan: rendered text {len(text)} chars exceeds the {MAX_PLAN_TEXT_CHARS}-char "
+            f"budget -- re-rendering with reasoning capped to {budget} chars per item (run={run_id})"
+        )
+        text, item_map = _render(reading, courses, project_entries, pending_approvals_count, run_id, reasoning_budget=budget)
+        while len(text) > MAX_PLAN_TEXT_CHARS and budget > 20:
+            budget //= 2
+            logger.warning(f"format_plan: still over budget at {len(text)} chars -- shrinking reasoning cap to {budget} (run={run_id})")
+            text, item_map = _render(reading, courses, project_entries, pending_approvals_count, run_id, reasoning_budget=budget)
+
+    return text, item_map
