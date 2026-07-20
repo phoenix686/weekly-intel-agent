@@ -126,3 +126,33 @@ jobs:
           name: sunday-run-log-${{ github.run_id }}
           path: sunday_run.log
           retention-days: 14
+
+      # discovery/parsers/rss_common.py's fetch_rss_feed() dumps the raw
+      # response body to logs/parse_errors/ on an XML ParseError (see
+      # _dump_parse_error_body) -- the only way to get byte-level proof of
+      # a malformed feed (MarkTechPost's "not well-formed (invalid
+      # token)" has hit twice with no local repro). That directory only
+      # exists on the runner's disk, which is destroyed at job end, so it
+      # has to be uploaded as an artifact to survive and be downloadable
+      # from the run's summary page. Most runs won't have any parse
+      # errors at all, so upload-artifact@v4's own path-must-match-a-file
+      # requirement would otherwise fail this step on every clean run --
+      # explicitly checked first so the step no-ops instead of erroring
+      # when the directory is empty or was never created.
+      - name: Check for RSS parse-error dumps
+        id: check_parse_errors
+        if: always()
+        run: |
+          if [ -d logs/parse_errors ] && [ -n "$(ls -A logs/parse_errors 2>/dev/null)" ]; then
+            echo "has_files=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload RSS parse-error dumps
+        if: always() && steps.check_parse_errors.outputs.has_files == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rss-parse-errors-${{ github.run_id }}
+          path: logs/parse_errors/
+          retention-days: 14
