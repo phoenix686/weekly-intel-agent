@@ -80,7 +80,7 @@ Persistence (checkpoints, human-in-the-loop interrupts, and all durable state â€
 
    | Variable | What it's for |
    |---|---|
-   | `PYTHONPATH=.` | So `from state import ...` resolves from any subdirectory |
+   | `PYTHONPATH=.` | So `from core.state import ...` resolves from any subdirectory |
    | `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` | Tracing (optional but recommended) |
    | `ANTHROPIC_API_KEY` | Every LLM call in the pipeline |
    | `NVIDIA_API_KEY` | Embeddings (`nemotron-3-embed-1b` via NVIDIA NIM) for dedup + taste pre-filter |
