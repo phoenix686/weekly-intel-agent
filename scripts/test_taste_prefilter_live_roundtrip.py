@@ -14,7 +14,7 @@ Run: uv run --env-file .env python scripts/test_taste_prefilter_live_roundtrip.p
 from dotenv import load_dotenv
 load_dotenv()
 
-from logging_config import setup_logging
+from core.logging_config import setup_logging
 setup_logging()
 
 from discovery.taste_vectors import (

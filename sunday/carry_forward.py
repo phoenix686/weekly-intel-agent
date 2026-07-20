@@ -49,7 +49,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from connection_pool import get_connection_pool
+from core.connection_pool import get_connection_pool
 from sunday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)

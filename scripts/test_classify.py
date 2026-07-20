@@ -22,7 +22,7 @@ from sunday.nodes.read_trello import read_trello
 from sunday.nodes.correlate_trello import correlate_trello
 
 from sunday.nodes.classify_item import classify_item
-from state import make_sunday_initial_state
+from core.state import make_sunday_initial_state
 
 SCORED_ITEMS_PATH = Path("data/scored_items.json")
 TEST_FIXTURE_PATH = "data/test_fixture.json"

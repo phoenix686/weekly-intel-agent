@@ -15,7 +15,7 @@ Run: uv run --env-file .env python scripts/test_sunday_rewrite_live_roundtrip.py
 from dotenv import load_dotenv
 load_dotenv()
 
-from logging_config import setup_logging
+from core.logging_config import setup_logging
 setup_logging()
 
 import uuid

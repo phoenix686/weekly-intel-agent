@@ -5,7 +5,7 @@ keep/drop judgment and tag validation, not just "it runs without
 crashing". All external dependencies mocked: the real Anthropic call
 (client.messages.create), mark_seen (real store write via
 discovery.seen_items), record_node_summary (real store write via
-observability.py), and the dropped-tag log file (real local file I/O)
+core/observability.py), and the dropped-tag log file (real local file I/O)
 so this suite stays fully offline like the rest of this project's tests.
 """
 import sys

@@ -8,7 +8,7 @@ After resume: {'value': 'got: approve'}
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from typing import TypedDict
-from checkpointer_config import get_checkpointer
+from core.checkpointer_config import get_checkpointer
 
 class TestState(TypedDict):
     value: str

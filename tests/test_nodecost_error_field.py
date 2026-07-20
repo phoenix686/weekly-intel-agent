@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from state import NodeCost
+from core.state import NodeCost
 
 
 def test_nodecost_constructs_with_error_set():

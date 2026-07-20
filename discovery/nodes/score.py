@@ -2,9 +2,9 @@ import json
 import logging
 import time
 import anthropic
-from state import DiscoverySubgraphState, ScoredItem, NodeCost
+from core.state import DiscoverySubgraphState, ScoredItem, NodeCost
 from discovery.seen_items import mark_seen
-from observability import record_node_summary
+from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
 

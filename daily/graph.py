@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, START, END
-from state import DailyGraphState
+from core.state import DailyGraphState
 from discovery.graph import build_discovery_subgraph
 from daily.nodes.assemble_digest import assemble_digest
 from daily.nodes.send_telegram_digest import send_telegram_digest

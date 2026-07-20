@@ -1,4 +1,4 @@
-from checkpointer_config import get_checkpointer
+from core.checkpointer_config import get_checkpointer
 
 cp = get_checkpointer()
 

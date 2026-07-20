@@ -14,7 +14,7 @@ dependencies = [
 
 [tool.uv]
 # This project is a script-style layout, not an installable package.
-# Root-level modules (state.py, etc.) are importable via PYTHONPATH=.
+# Shared infra modules (core/state.py, etc.) are importable via PYTHONPATH=.
 # set in .env. Pass --env-file .env explicitly (uv does not auto-load .env):
 #   uv run --env-file .env python <script>
 # Or set UV_ENV_FILE=.env in your shell profile to avoid repeating the flag.

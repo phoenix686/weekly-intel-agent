@@ -2,7 +2,7 @@ import os
 import time
 
 from discovery.parsers.bookmarks_json import parse_bookmarks_json
-from state import DiscoverySubgraphState, RawItem, NodeCost
+from core.state import DiscoverySubgraphState, RawItem, NodeCost
 
 
 def ingest_bookmarks(state: DiscoverySubgraphState) -> dict:

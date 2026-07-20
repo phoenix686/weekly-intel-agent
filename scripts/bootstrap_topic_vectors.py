@@ -10,7 +10,7 @@ Run: uv run --env-file .env python scripts/bootstrap_topic_vectors.py
 from dotenv import load_dotenv
 load_dotenv()
 
-from logging_config import setup_logging
+from core.logging_config import setup_logging
 setup_logging()
 
 from pathlib import Path

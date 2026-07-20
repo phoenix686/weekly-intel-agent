@@ -1,7 +1,7 @@
 import time
 from telegram.bot_client import send_message
 from sunday.memory_store_config import get_store
-from state import DailyGraphState, NodeCost
+from core.state import DailyGraphState, NodeCost
 
 
 def send_telegram_digest(state: DailyGraphState) -> dict:

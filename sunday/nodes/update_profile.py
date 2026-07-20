@@ -35,7 +35,7 @@ from pathlib import Path
 
 import anthropic
 
-from state import SundayGraphState, NodeCost
+from core.state import SundayGraphState, NodeCost
 from sunday.memory_store_config import get_store
 from discovery.taste_vectors import recompute_topic_vectors
 

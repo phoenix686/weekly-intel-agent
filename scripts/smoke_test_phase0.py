@@ -2,7 +2,7 @@
 Phase 0 smoke test.
 
 Run this to prove, end to end:
-  1. state.py's schema is real and instantiable (not just aspirational)
+  1. core/state.py's schema is real and instantiable (not just aspirational)
   2. the discovery subgraph skeleton compiles
   3. a trivial run executes node-by-node in the right order
   4. the compiled graph can emit its own Mermaid source (for rendering)
@@ -62,7 +62,7 @@ def main():
     # write "sourced", cluster_dedupe_node writes "clustered", score_node
     # writes "scored" -- score_node's own "scored" is the natural terminal
     # marker (no separate "done" value). "stage" uses a last-write-wins
-    # reducer (state.py's _last_write_wins) because on Sunday runs
+    # reducer (core/state.py's _last_write_wins) because on Sunday runs
     # scrape_blogs and process_adhoc_input both write "sourced" in the same
     # superstep -- a plain key would raise InvalidUpdateError on that
     # concurrent write, the same class of bug operator.add fixed for 'errors'.

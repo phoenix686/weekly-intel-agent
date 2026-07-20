@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import uuid
 from langgraph.graph import StateGraph, START, END
-from state import DiscoverySubgraphState
+from core.state import DiscoverySubgraphState
 from discovery.nodes.cluster_dedupe import cluster_dedupe_node
 from discovery.nodes.score import score_node
 from discovery.nodes.scrape_blogs import scrape_blogs

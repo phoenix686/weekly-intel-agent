@@ -13,9 +13,9 @@ Run: uv run --env-file .env python scripts/test_sunday_approval.py
 import json
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send, Command
-from checkpointer_config import get_checkpointer
+from core.checkpointer_config import get_checkpointer
 from sunday.nodes.await_approval import route_to_approvals, proposal_worker
-from state import make_sunday_initial_state
+from core.state import make_sunday_initial_state
 from sunday.nodes.read_trello import read_trello
 from sunday.nodes.correlate_trello import correlate_trello
 from sunday.nodes.classify_item import classify_item

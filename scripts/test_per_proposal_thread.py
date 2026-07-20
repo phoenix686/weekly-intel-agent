@@ -36,7 +36,7 @@ import hashlib
 from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
-from checkpointer_config import get_checkpointer
+from core.checkpointer_config import get_checkpointer
 
 
 class ProposalState(TypedDict):

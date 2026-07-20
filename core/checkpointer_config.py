@@ -1,6 +1,6 @@
 import os
 from langgraph.checkpoint.postgres import PostgresSaver
-from connection_pool import get_connection_pool
+from core.connection_pool import get_connection_pool
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 

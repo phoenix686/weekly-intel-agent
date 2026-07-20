@@ -1,5 +1,5 @@
 """
-observability.py (2026-07-17): durable, queryable run/node summaries --
+core/observability.py (2026-07-17): durable, queryable run/node summaries --
 the thin-log design confirmed against a real 108-item LangSmith trace
 (no truncation, full per-item detail survives intact), so this
 deliberately records aggregate counts + a trace pointer, not per-item
@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, MagicMock
 
-import observability
+import core.observability as observability
 
 
 class _FakeStore:

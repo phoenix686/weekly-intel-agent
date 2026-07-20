@@ -61,7 +61,7 @@ from operator import add
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command, Send
-from checkpointer_config import get_checkpointer
+from core.checkpointer_config import get_checkpointer
 
 SEND_COUNTS: dict[str, int] = {}
 

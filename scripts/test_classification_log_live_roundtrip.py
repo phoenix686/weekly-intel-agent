@@ -13,7 +13,7 @@ Run: uv run --env-file .env python scripts/test_classification_log_live_roundtri
 from dotenv import load_dotenv
 load_dotenv()
 
-from logging_config import setup_logging
+from core.logging_config import setup_logging
 setup_logging()
 
 from sunday.nodes.classify_item import classify_item, _CLASSIFICATION_LOG_NAMESPACE

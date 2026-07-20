@@ -5,7 +5,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logging_config import setup_logging
+from core.logging_config import setup_logging
 setup_logging()
 
 from discovery.nodes.score import score_node

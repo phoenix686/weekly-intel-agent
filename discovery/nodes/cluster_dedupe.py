@@ -13,11 +13,11 @@ import time
 from collections import defaultdict
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
-from state import DiscoverySubgraphState, RawItem, ClusteredItem, NodeCost
+from core.state import DiscoverySubgraphState, RawItem, ClusteredItem, NodeCost
 from discovery.seen_items import filter_unseen
 from discovery.semantic_dedup import dedupe_semantic
 from discovery.taste_vectors import taste_prefilter
-from observability import record_node_summary
+from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
 

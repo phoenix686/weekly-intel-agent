@@ -1,7 +1,7 @@
 import logging
 import time
 from langgraph.store.postgres import PostgresStore
-from connection_pool import get_connection_pool
+from core.connection_pool import get_connection_pool
 
 logger = logging.getLogger(__name__)
 

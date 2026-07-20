@@ -11,7 +11,7 @@ Run: uv run --env-file .env python scripts/test_same_day_nudge_roundtrip.py
 from dotenv import load_dotenv
 load_dotenv()
 
-from logging_config import setup_logging
+from core.logging_config import setup_logging
 setup_logging()
 
 from sunday.same_day_nudge import apply_nudge, _NAMESPACE, _week_key

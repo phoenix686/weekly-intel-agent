@@ -13,7 +13,7 @@ Run: uv run --env-file .env python scripts/test_item_feedback_logging_roundtrip.
 from dotenv import load_dotenv
 load_dotenv()
 
-from logging_config import setup_logging
+from core.logging_config import setup_logging
 setup_logging()
 
 from sunday.approval_actions import handle_feedback, _FEEDBACK_NAMESPACE

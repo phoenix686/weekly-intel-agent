@@ -5,7 +5,7 @@ given Sunday run, tied to run_id. Sunday plan LLM prioritization
 checkpoint, sub-phase 3; schema revised in sub-phase 4.
 
 One entry per run, keyed by run_id (same keying pattern as
-observability.py's run_history/node_summary) -- entries accumulate
+core/observability.py's run_history/node_summary) -- entries accumulate
 across weeks, never overwritten, since cross-week movement detection
 (sub-phase 4) needs to compare against the MOST RECENT PRIOR entry, not
 just whatever the latest one happens to be.

@@ -1,5 +1,5 @@
 from langgraph.types import Command
-from checkpointer_config import get_checkpointer
+from core.checkpointer_config import get_checkpointer
 # rebuild compiled/config exactly as in test_sunday_approval.py, same thread_id
 
 resume_map = {

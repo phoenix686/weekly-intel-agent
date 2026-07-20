@@ -2,8 +2,8 @@ import time
 
 from discovery.parsers.scrape_blogs import fetch_one_source, fetch_agentmail_sources
 from discovery.blog_sources_config import entries_for_context
-from state import DiscoverySubgraphState, RawItem, NodeCost
-from observability import record_node_summary
+from core.state import DiscoverySubgraphState, RawItem, NodeCost
+from core.observability import record_node_summary
 
 
 def _row_to_item(row: dict) -> RawItem:

@@ -39,7 +39,7 @@ https://twitter.com/synthetic/status/1000000000000000010 | plan_item | None | Sc
 _5 plan items · 5 proposals pending approval · run: test-syn_
 """
 import json
-from state import make_sunday_initial_state
+from core.state import make_sunday_initial_state
 from sunday.nodes.read_trello import read_trello
 from sunday.nodes.correlate_trello import correlate_trello
 from sunday.nodes.classify_item import classify_item

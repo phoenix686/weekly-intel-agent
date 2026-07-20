@@ -1,6 +1,6 @@
 import time
 import logging
-from state import SundayGraphState, NodeCost
+from core.state import SundayGraphState, NodeCost
 from sunday.trello_client import fetch_board_cards
 from sunday.card_movement import detect_card_movement
 
