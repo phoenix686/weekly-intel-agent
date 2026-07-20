@@ -74,3 +74,30 @@ jobs:
           name: daily-run-log-${{ github.run_id }}
           path: daily_run.log
           retention-days: 14
+
+      # Same mechanism as sunday.yml: discovery/parsers/rss_common.py's
+      # fetch_rss_feed() dumps the raw response body to logs/parse_errors/
+      # on an XML ParseError (shared code, used by both daily and Sunday
+      # runs) -- this was added to sunday.yml but not here, and the first
+      # real occurrence since (MarkTechPost, 2026-07-20 daily run) was
+      # missed as a result: the dump happened on the runner but was never
+      # uploaded, so it was lost when the runner was destroyed. Backfilling
+      # the same check-then-upload steps here so the next occurrence is
+      # actually captured.
+      - name: Check for RSS parse-error dumps
+        id: check_parse_errors
+        if: always()
+        run: |
+          if [ -d logs/parse_errors ] && [ -n "$(ls -A logs/parse_errors 2>/dev/null)" ]; then
+            echo "has_files=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload RSS parse-error dumps
+        if: always() && steps.check_parse_errors.outputs.has_files == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rss-parse-errors-${{ github.run_id }}
+          path: logs/parse_errors/
+          retention-days: 14
