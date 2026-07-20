@@ -1,70 +1,35 @@
-# Blog/newsletter/RSS source list for scrape_blogs (the single generic
-# source-fetching node -- TLDR AI, Smol AI News, and Anthropic's dev blog
-# used to be separate dedicated node files; all sources are RSS/HTML reads
-# through this one config now). Each entry has a `name`, a `bucket`
-# (daily | sunday), exactly one of `feed_url` (RSS/Atom, fetched via
+# Blog/newsletter/RSS source list for scrape_blogs, the single generic
+# source-fetching node. Each entry has a `name`, a `bucket` (daily |
+# sunday), exactly one of `feed_url` (RSS/Atom, fetched via
 # discovery/parsers/rss_common.py) or `scrape_url` (HTML fallback, only
-# used by the Anthropic entry today via discovery/parsers/anthropic_blog.py),
-# and an optional `fetch_limit` (max items fetched from that source per
-# run -- falls back to fetch_one_source()'s own default of 30 when
-# omitted, see discovery/parsers/scrape_blogs.py).
+# used by the Anthropic entry via discovery/parsers/anthropic_blog.py),
+# and an optional `fetch_limit` (max items fetched per run -- falls back
+# to fetch_one_source()'s own default of 30 when omitted, see
+# discovery/parsers/scrape_blogs.py).
 #
 # bucket=daily entries fire on both daily and sunday invocations.
 # bucket=sunday entries fire on sunday only. See
 # discovery/parsers/scrape_blogs.py's fetch_blog_entries().
 #
-# fetch_limit set per-bucket (2026-07-17, deliberate volume reduction, not
-# left at the prior blanket default of 30): daily-bucket sources get 15
-# (fire on both daily and sunday invocations, so a higher cap there costs
-# more twice); sunday-only sources get 6 (weekly-or-slower cadence --
-# these publications rarely post more than a handful of new items in a
-# week, so 30 was always fetching mostly items seen_items would filter
-# out anyway).
+# fetch_limit is set per-bucket: daily-bucket sources get 15 (fire on
+# both daily and sunday invocations, so a higher cap there costs more
+# twice); sunday-only sources get 6 (weekly-or-slower cadence -- these
+# publications rarely post more than a handful of new items in a week).
 #
-# All entries live-verified 2026-07-15 (real fetch, not assumed from prior
-# commits) via discovery/parsers/rss_common.py's fetch_rss_feed(). Part 7
-# sources were re-verified, not carried over on trust.
+# deeplearning.ai / The Batch is intentionally excluded -- no public RSS
+# feed.
 #
-# Smol AI News removed entirely (2026-07-15, explicit instruction) --
-# discovery/nodes/smol_ai_news.py deleted.
-#
-# DecodingML/DecodingAI: the original https://decodingml.substack.com/feed
-# was found dead (valid but empty RSS channel, account renamed to a
-# personal feed) and dropped 2026-07-15. Found and re-verified same day:
-# the publication rebranded to "Decoding AI Magazine" at a custom domain,
-# https://www.decodingai.com/feed -- live-verified, 10 real items
-# returned, no errors.
-#
-# deeplearning.ai / The Batch intentionally excluded -- no public RSS feed,
-# confirmed independently twice.
-#
-# JamWithAI, The Nuanced Perspective, AI with Aish, The Neural Maze, Decoding
-# AI Magazine, and Ahead of AI used to be RSS entries here. JamWithAI/The
-# Nuanced Perspective/AI with Aish/The Neural Maze (all Substack-hosted)
-# were confirmed unreachable specifically from GitHub Actions runners --
-# real production node_summary entries (2026-07-17) showed all four
-# failing with HTTP 403 Forbidden on every run (most likely Substack
-# rate-limiting/blocking GitHub's shared runner IP ranges -- re-tested
-# from a non-Actions machine and every one succeeded, so the block itself
-# never reproduced here; a browser-realistic User-Agent, tried in
-# discovery/parsers/rss_common.py, made no difference either).
-#
-# FIXED 2026-07-18 by routing around the block entirely, not by fetching
-# RSS anymore: all 6 of the above (plus 4 more that never had an RSS
-# entry at all -- The AI Merge/Alex Razvant, DiamantAI, The Batch, and
-# "AI Engineering"/Sumanth P) are now read AS EMAIL via a single shared
-# AgentMail inbox instead. This is NOT a blog_sources.yaml entry --
-# unlike every other source in this file, it's a completely separate
+# 10 sources (including Decoding AI Magazine, JamWithAI, The Nuanced
+# Perspective, AI with Aish, The Neural Maze, and others) are read AS
+# EMAIL via a single shared AgentMail inbox instead of RSS, and are
+# deliberately NOT entries in this file -- it's a completely separate
 # fetch path (discovery/parsers/scrape_blogs.py's
 # fetch_agentmail_sources(), called directly by discovery/nodes/
 # scrape_blogs.py alongside, not through, this file's per-entry loop).
-# The real inbox ID and the real sender-address-to-source-name mapping
-# for all 10 senders live in discovery/config/agentmail_sources.yaml --
-# gitignored (personal subscription data, same category as .env), with
-# a tracked agentmail_sources.yaml.example documenting the expected shape.
-# A future session should not go looking for these 6 sources' feed_url
-# entries in this file -- they're gone from here on purpose, not missing
-# by accident.
+# The real inbox ID and sender-address-to-source-name mapping live in
+# discovery/config/agentmail_sources.yaml -- gitignored (personal
+# subscription data, same category as .env), with a tracked
+# agentmail_sources.yaml.example documenting the expected shape.
 
 - name: "TLDR AI"
   feed_url: "https://tldr.tech/api/rss/ai"
@@ -100,7 +65,7 @@
   feed_url: "https://hnrss.org/show"
   bucket: sunday
   fetch_limit: 8
-  # Re-added 2026-07-18. Deliberately NO keyword query filter on the fetch
+  # Deliberately NO keyword query filter on the fetch
   # itself (hnrss.org supports one, e.g. hnrss.org/show?q=agent, but using
   # it would reintroduce the exact keyword-matching brittleness this
   # project moved away from -- semantic scoring, not keyword matching, is
