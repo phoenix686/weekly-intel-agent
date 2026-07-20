@@ -1,6 +1,6 @@
 # Workflow Map
 
-Last updated: Length-budget fix for plan_text (reasoning truncation over message splitting) -- see bottom section
+Last updated: daily.yml schedule-delay pattern documented (Scheduled runs section) -- see below
 
 ## Scheduled runs (GitHub Actions)
 
@@ -63,6 +63,27 @@ Last updated: Length-budget fix for plan_text (reasoning truncation over message
   `checkpointer_config.py`/`memory_store_config.py` need the latter) — added
   both; `pyproject.toml` already listed them correctly, `requirements.txt` had
   drifted out of sync.
+- **`daily.yml`'s `schedule` trigger runs consistently ~2.5-3h late — this is
+  a known, evidenced pattern, not a broken workflow.** Real run history
+  (Actions tab, checked 2026-07-20) against the pre-2026-07-19 cron
+  (`30 2 * * 1-6`, target 08:00 IST):
+  | Run | Target | Actual | Delay |
+  |---|---|---|---|
+  | #2, Jul 16 | 08:00 IST | 10:54 IST | 2h54m |
+  | #3, Jul 17 | 08:00 IST | 10:56 IST | 2h56m |
+  | #4, Jul 18 | 08:00 IST | 10:38 IST | 2h38m |
+
+  All three real, separate days land in a tight 2h38m-2h56m band — too
+  consistent to be one-off congestion noise; reads as a systematic
+  scheduling lag for this workflow/account with GitHub Actions' `schedule`
+  trigger (which GitHub documents as best-effort, no delivery SLA). The
+  2026-07-19 change to `30 1 * * 1-6` (target 07:00 IST) had not yet been
+  exercised by a real run at the time this was recorded, but the delay looks
+  tied to GitHub's scheduling congestion, not the specific target time, so
+  the same ~2.5-3h lag is expected to carry over: **treat ~9:30-10:00 AM IST
+  as the realistic expected fire time, not 07:00 IST.** Don't re-investigate
+  "it didn't fire" as a fresh mystery before that window has passed — only
+  treat it as a real problem if nothing has appeared by roughly 10:30 IST.
 
 ## How data flows through this project
 
