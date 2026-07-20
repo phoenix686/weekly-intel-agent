@@ -35,7 +35,6 @@ collect_ignore = [
     "test_same_day_nudge_roundtrip.py",
     "test_semantic_dedup_live_roundtrip.py",
     "test_sunday_approval.py",
-    "test_sunday_rejection.py",
     "test_sunday_rewrite_live_roundtrip.py",
     "test_taste_prefilter_live_roundtrip.py",
     "test_trello_checklist.py",

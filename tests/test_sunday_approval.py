@@ -1,4 +1,17 @@
 """
+!!! REQUIRES MANUAL INPUT -- DO NOT RUN UNATTENDED OR UNDER PYTEST !!!
+
+On its second invocation (resuming an already-paused thread), this
+script calls input() twice to collect a real interrupt id and a real
+approve/reject decision from a human at the keyboard. That's the actual
+point of this tool -- it's the one place that exercises the real
+pause -> real Telegram message -> real human decision -> real resume
+flow end-to-end, which nothing else in this codebase covers -- so the
+input() calls can't be removed without removing the entire reason this
+script exists. Never invoked by pytest's default collection (see
+tests/conftest.py's collect_ignore) or any CI/scheduled workflow --
+keep it that way.
+
 Single end-to-end test: synthetic proposals -> real await_approval ->
 real pause -> (you approve via Telegram or manually) -> real resume ->
 real write_outputs.
@@ -7,7 +20,7 @@ Run once to trigger the pause. Run again (same file) to resume — the
 script detects an existing paused thread and skips straight to the
 resume step instead of re-triggering everything from scratch.
 
-Run: uv run --env-file .env python scripts/test_sunday_approval.py
+Run: uv run --env-file .env python tests/test_sunday_approval.py
 """
 
 import json
