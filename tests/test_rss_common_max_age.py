@@ -113,6 +113,60 @@ def test_parse_error_dumps_raw_body_to_logs_parse_errors(tmp_path):
 
     dumped = list(fake_dir.glob("Bad_Source_*.xml"))
     assert len(dumped) == 1
+
+
+def test_bare_ampersand_recovers_via_fallback_retry(tmp_path):
+    """MarkTechPost's real "not well-formed (invalid token)" failure (hit 3
+    times in production, 2026-07-19/07-20) is the canonical ElementTree
+    error for a bare `&` in text content -- e.g. "Q&A" instead of "Q&amp;A".
+    An otherwise well-formed feed containing exactly that must now recover
+    via the bare-ampersand-escape retry, not be treated as a hard failure:
+    the row is returned, zero errors, and no diagnostic dump is written
+    (dumping is reserved for the case where even the fallback fails)."""
+    malformed_body = (
+        b"<rss><channel><item>"
+        b"<title>Q&A with the DevRel team</title>"
+        b"<link>https://example.com/qa</link>"
+        b"</item></channel></rss>"
+    )
+
+    import discovery.parsers.rss_common as rss_common_mod
+    fake_dir = tmp_path / "logs" / "parse_errors"
+    with patch("urllib.request.urlopen", return_value=_mock_response(malformed_body)), \
+         patch.object(rss_common_mod, "_PARSE_ERROR_LOG_DIR", fake_dir):
+        result = fetch_rss_feed("https://example.com/feed", source_name="MarkTechPost")
+
+    assert result.errors == []
+    assert len(result.rows) == 1
+    assert result.rows[0]["title"] == "Q&A with the DevRel team"
+    assert result.rows[0]["url"] == "https://example.com/qa"
+
+    # the fallback succeeded -- nothing should have been dumped
+    assert not fake_dir.exists() or list(fake_dir.glob("*.xml")) == []
+
+
+def test_unparseable_even_after_ampersand_fallback_still_fails_cleanly(tmp_path):
+    """A bare `&` is not the only way to be malformed -- if the fallback
+    retry still can't parse it (e.g. genuinely truncated/unclosed XML),
+    this must still degrade to a clean per-source error (dumped for
+    forensics) rather than raising and taking down the whole scrape_blogs
+    fan-out -- unchanged behavior from before this fix, just confirming
+    the new fallback layer doesn't break the existing failure path."""
+    malformed_body = b"<rss><channel><item><title>Bad & unescaped and never closed"
+
+    import discovery.parsers.rss_common as rss_common_mod
+    fake_dir = tmp_path / "logs" / "parse_errors"
+    with patch("urllib.request.urlopen", return_value=_mock_response(malformed_body)), \
+         patch.object(rss_common_mod, "_PARSE_ERROR_LOG_DIR", fake_dir):
+        result = fetch_rss_feed("https://example.com/feed", source_name="MarkTechPost")
+
+    assert len(result.errors) == 1
+    assert result.errors[0][0] == "MarkTechPost"
+    assert result.rows == []
+
+    dumped = list(fake_dir.glob("MarkTechPost_*.xml"))
+    assert len(dumped) == 1
+    assert dumped[0].read_bytes() == malformed_body
     assert dumped[0].read_bytes() == malformed_body
 
 

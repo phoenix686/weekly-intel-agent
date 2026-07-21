@@ -42,6 +42,21 @@ _XML_ILLEGAL_CHARS = re.compile(
     "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
 )
 
+# Canonical cause of ElementTree's "not well-formed (invalid token)" error --
+# a bare `&` in text content that isn't part of a recognized entity
+# reference (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, or a numeric
+# `&#123;`/`&#x7B;`). MarkTechPost's WordPress-generated feed has hit this
+# 3 times in real production runs (2026-07-19, 2026-07-20, recurring),
+# always intermittent -- content-dependent on a specific post's
+# title/excerpt, never reproducible on a direct refetch since the
+# offending post has typically already rotated out of the feed by the
+# time anyone checks, and no raw-byte dump was ever preserved from those
+# occurrences to confirm the exact character. Used only as a retry
+# fallback after the first parse attempt fails (see fetch_rss_feed), not
+# applied unconditionally like the control-char strip above, since
+# escaping every bare `&` is a real content rewrite, not a no-op.
+_BARE_AMPERSAND = re.compile(r"&(?!(?:amp|lt|gt|quot|apos|#[0-9]+|#x[0-9a-fA-F]+);)")
+
 
 _PARSE_ERROR_LOG_DIR = Path("logs/parse_errors")
 
@@ -143,8 +158,14 @@ def fetch_rss_feed(
         try:
             root = ET.fromstring(raw_text.encode("utf-8"))
         except ET.ParseError:
-            _dump_parse_error_body(source_name, raw_bytes)
-            raise
+            # Retry once against a bare-ampersand-escaped version before
+            # giving up on this source entirely -- see _BARE_AMPERSAND's
+            # comment for why this is the first thing worth trying.
+            try:
+                root = ET.fromstring(_BARE_AMPERSAND.sub("&amp;", raw_text).encode("utf-8"))
+            except ET.ParseError:
+                _dump_parse_error_body(source_name, raw_bytes)
+                raise
 
         channel = root.find("channel")
         items = channel.findall("item") if channel is not None else root.findall(".//item")
