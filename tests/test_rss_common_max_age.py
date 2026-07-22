@@ -22,10 +22,11 @@ def _rss(items: list[tuple[str, str, datetime | None]]) -> bytes:
     return body.encode("utf-8")
 
 
-def _mock_response(body: bytes):
+def _mock_response(body: bytes, content_type: str = "application/rss+xml"):
     resp = MagicMock()
     resp.read.return_value = body
     resp.headers.get_content_charset.return_value = "utf-8"
+    resp.headers.get_content_type.return_value = content_type
     resp.__enter__.return_value = resp
     resp.__exit__.return_value = False
     return resp
@@ -168,6 +169,50 @@ def test_unparseable_even_after_ampersand_fallback_still_fails_cleanly(tmp_path)
     assert len(dumped) == 1
     assert dumped[0].read_bytes() == malformed_body
     assert dumped[0].read_bytes() == malformed_body
+
+
+def test_bot_challenge_page_classified_distinctly_from_malformed_xml(tmp_path):
+    """MarkTechPost, 2026-07-22: a real 200 whose body is a Cloudflare
+    bot-challenge interstitial (confirmed via a raw-body dump showing a
+    `/.well-known/sgcaptcha/` redirect), not the feed itself. This must be
+    reported as a distinct "blocked by bot-challenge" error -- not the
+    generic ElementTree "not well-formed" message a malformed feed
+    produces -- so the two causes are distinguishable from daily_run.log
+    alone, without pulling the raw artifact dump."""
+    challenge_body = (
+        b'<html><head><link rel="icon" href="data:;">'
+        b'<meta http-equiv="refresh" content="0;/.well-known/sgcaptcha/?r=%2Ffeed%2F">'
+        b"</meta></head></html>"
+    )
+
+    import discovery.parsers.rss_common as rss_common_mod
+    fake_dir = tmp_path / "logs" / "parse_errors"
+    with patch("urllib.request.urlopen", return_value=_mock_response(challenge_body, content_type="text/html")), \
+         patch.object(rss_common_mod, "_PARSE_ERROR_LOG_DIR", fake_dir):
+        result = fetch_rss_feed("https://www.marktechpost.com/feed/", source_name="MarkTechPost")
+
+    assert result.rows == []
+    assert len(result.errors) == 1
+    assert result.errors[0][0] == "MarkTechPost"
+    assert "bot-challenge" in result.errors[0][1]
+    assert "not well-formed" not in result.errors[0][1]
+
+    dumped = list(fake_dir.glob("MarkTechPost_*.xml"))
+    assert len(dumped) == 1
+    assert dumped[0].read_bytes() == challenge_body
+
+
+def test_real_xml_content_type_never_misclassified_as_bot_challenge():
+    """A feed whose content happens to mention a word like "cloudflare" in
+    a post title/body must not be misclassified as a bot-challenge purely
+    from body text -- the content-type check must short-circuit first for
+    any real xml/rss response."""
+    body = _rss([("Cloudflare just a moment... outage postmortem", "https://example.com/a", _NOW - timedelta(hours=2))])
+    with patch("urllib.request.urlopen", return_value=_mock_response(body, content_type="application/rss+xml")):
+        result = fetch_rss_feed("https://example.com/feed", source_name="test")
+
+    assert result.errors == []
+    assert len(result.rows) == 1
 
 
 def test_sunday_bucket_sources_use_216h_cutoff():

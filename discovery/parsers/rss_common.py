@@ -57,20 +57,49 @@ _XML_ILLEGAL_CHARS = re.compile(
 # escaping every bare `&` is a real content rewrite, not a no-op.
 _BARE_AMPERSAND = re.compile(r"&(?!(?:amp|lt|gt|quot|apos|#[0-9]+|#x[0-9a-fA-F]+);)")
 
+# Distinct from a malformed-XML feed (_BARE_AMPERSAND above): these are
+# real HTTP 200s whose body is an HTML bot-challenge/CAPTCHA interstitial
+# instead of the feed itself -- confirmed 2026-07-22, MarkTechPost, via a
+# raw-body dump showing a Cloudflare `/.well-known/sgcaptcha/` redirect
+# page. A plain ET.ParseError on this body would be misclassified as the
+# same "not well-formed" bug as the ampersand case, hiding the real cause
+# (bot-blocked, not malformed) behind an identical-looking error message.
+# Checked BEFORE attempting any XML parse, not as a parse-failure retry.
+_BOT_CHALLENGE_MARKERS = (
+    "sgcaptcha",
+    "cf-chl",
+    "cdn-cgi/challenge-platform",
+    "checking your browser before accessing",
+    "attention required! | cloudflare",
+    "just a moment...",
+)
+
+
+def _looks_like_bot_challenge(content_type: str, raw_text: str) -> bool:
+    """A real feed always declares an xml/rss content-type -- trust that
+    over sniffing the body. Only sniff for challenge markers when the
+    content-type itself doesn't already look like a feed."""
+    if content_type and ("xml" in content_type.lower() or "rss" in content_type.lower()):
+        return False
+    lowered = raw_text[:2000].lower()
+    return any(marker in lowered for marker in _BOT_CHALLENGE_MARKERS)
+
 
 _PARSE_ERROR_LOG_DIR = Path("logs/parse_errors")
 
 
 def _dump_parse_error_body(source_name: str, raw_bytes: bytes) -> None:
     """Writes the raw (pre-decode, pre-strip) response body to
-    logs/parse_errors/{source}_{timestamp}.xml on an XML ParseError -- the
-    only way to get byte-level proof of what's actually malformed, since a
+    logs/parse_errors/{source}_{timestamp}.xml on an XML ParseError, or on
+    a detected bot-challenge response (see _looks_like_bot_challenge) --
+    the only way to get byte-level proof of what's actually wrong, since a
     manual refetch after the fact keeps missing the moment (confirmed
     twice: 2026-07-19, MarkTechPost's "not well-formed (invalid token):
     line 1, column 119" reproduced in CI but not on a direct local
-    refetch, same exact error both times). Best-effort -- a failure to
-    write this diagnostic file must never mask or replace the original
-    parse error itself.
+    refetch, same exact error both times; and 2026-07-22, same source,
+    a Cloudflare bot-challenge page reproduced in CI but not locally).
+    Best-effort -- a failure to write this diagnostic file must never mask
+    or replace the original error itself.
     """
     _PARSE_ERROR_LOG_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", source_name)
@@ -140,8 +169,10 @@ def fetch_rss_feed(
     fall back to "now" (see _parse_pubdate) and are always kept, since
     there's no real timestamp to judge staleness against.
 
-    Feed-level failures (network error, malformed XML) are appended to
-    ParseResult.errors as (source_name, message); rows is empty in that case.
+    Feed-level failures (network error, malformed XML, or a bot-challenge
+    interstitial served in place of the feed) are appended to
+    ParseResult.errors as (source_name, message), each distinctly worded
+    per cause -- rows is empty in that case.
     """
     rows: list[dict] = []
     errors: list[tuple[str, str]] = []
@@ -151,8 +182,19 @@ def fetch_rss_feed(
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw_bytes = resp.read()
             charset = resp.headers.get_content_charset() or "utf-8"
+            content_type = resp.headers.get_content_type()
 
         raw_text = _XML_ILLEGAL_CHARS.sub("", raw_bytes.decode(charset, errors="replace"))
+
+        if _looks_like_bot_challenge(content_type, raw_text):
+            _dump_parse_error_body(source_name, raw_bytes)
+            errors.append((
+                source_name,
+                f"blocked by bot-challenge (content-type={content_type!r}, "
+                f"not XML/RSS) -- raw body dumped to logs/parse_errors/ for inspection",
+            ))
+            return ParseResult(rows=rows, errors=errors)
+
         # re-encode to bytes: ET.fromstring rejects a `str` that still carries
         # an <?xml encoding=...?> declaration
         try:
