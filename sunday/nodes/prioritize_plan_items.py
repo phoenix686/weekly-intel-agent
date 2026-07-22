@@ -124,6 +124,34 @@ def prioritize_plan_items(state: SundayGraphState) -> dict:
         and "course" not in i.get("tags", [])
         and i.get("matched_card_id") is not None
     ]
+
+    if not matched_items:
+        # No new content matched to an existing Trello card this week --
+        # removed (2026-07-22, Step 6) the prior fallback that still sent
+        # the FULL Trello board state to Haiku and let it backfill Existing
+        # Project Work with pure stale_nudge picks even with zero new
+        # items. format_plan() already renders "Nothing on the plan this
+        # week" (or simply omits the Existing Project Work section, if
+        # Reading/Courses/uncategorized have real content) when
+        # prioritized_project_work is empty -- no board cards enter into
+        # consideration at all here, so none can leak into the plan as a
+        # substitute for real new content. Zero-cost: no LLM call is made.
+        logger.info(
+            f"prioritize_plan_items: 0 new plan item(s) matched to a Trello card this week -- "
+            f"skipping board prioritization, no fallback (run_id={state['run_id']})"
+        )
+        cost = NodeCost(
+            node_name="prioritize_plan_items",
+            input_tokens=0, output_tokens=0, cost_usd=0.0,
+            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+        )
+        record_node_summary(
+            run_id=state["run_id"], node_name="prioritize_plan_items",
+            items_in=0, items_out=0, cost_usd=0.0,
+            duration_seconds=round(time.perf_counter() - t0, 3),
+        )
+        return {"prioritized_project_work": [], "costs": [cost]}
+
     trello_cards = state["trello_cards"]
     movements = state["card_movements"]
 
