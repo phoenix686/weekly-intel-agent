@@ -100,6 +100,19 @@ itself failed, distinct from "resolved fine but wasn't a post");
 fetch_agentmail_newsletters marks a confirmed-content-free message read
 but leaves a transiently-failed one unread for retry.
 
+CONTENT-FREE WARN TRIPWIRE (2026-07-22, same follow-up): before trusting
+"confirmed content-free" as safe to mark read, read-only-inspected every
+real currently-unread message that lands there (list+get only, no
+messages.update() -- did not touch the live inbox). 6 of 7 were genuine
+boilerplate (390-1851 real visible chars); one (DiamantAI's welcome
+email) had 3013 chars of real content about the newsletter's repos,
+course, and books -- still never produces a row (no href matches a post
+URL, unchanged from before this fix), but worth a human glance if a
+sender's format shifts. fetch_agentmail_newsletters now logs a WARNing
+(not an error, still marks read) when a confirmed-content-free body
+exceeds _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS -- visibility only, no new
+extraction/scoring path.
+
 No langgraph imports.
 """
 
@@ -259,6 +272,37 @@ def _html_to_text(html: str) -> str:
     return re.sub(r"\s+", " ", " ".join(stripper.parts)).strip()
 
 
+# Coarse tripwire, not a classifier (2026-07-22, Step 4 follow-up): real
+# inspection of every currently-unread "confirmed content-free" message
+# (read-only, live inbox) found 6 genuine welcome/subscription emails with
+# 390-1851 chars of real visible boilerplate text, and one (DiamantAI's)
+# with 3013 chars describing real newsletter content -- open-source repos,
+# a course, two books. This threshold sits above the clear-boilerplate
+# cluster and below that real example, so a WARN fires if a "confirmed
+# content-free" message's body is this substantial -- purely so Pooja can
+# notice if a sender's format ever shifts toward writing real content
+# inline, without building any new extraction/scoring path for it. A false
+# positive (a long but still-boilerplate email) is expected and cheap to
+# dismiss at WARN level; a false negative is the actual risk being
+# guarded against, so this deliberately leans toward over-flagging.
+_SUBSTANTIAL_CONTENT_FREE_BODY_CHARS = 2000
+
+
+def _visible_body_length(html: str) -> int:
+    """Strips <style>/<script> before handing off to _html_to_text --
+    confirmed real, 2026-07-22: _html_to_text's HTMLParser-based tag
+    stripping does NOT skip <style> content on its own, and a real
+    newsletter email's <head><style>...</style></head> block alone runs
+    to thousands of chars of raw CSS, which would swamp any real signal
+    in the visible-body length used by the WARN tripwire above. Scoped
+    to that check only -- does not change what _html_to_text returns for
+    an actually-matched row's own 'text' field; that's a separate,
+    pre-existing question out of scope here."""
+    cleaned = re.sub(r"(?is)<style.*?</style>", " ", html or "")
+    cleaned = re.sub(r"(?is)<script.*?</script>", " ", cleaned)
+    return len(_html_to_text(cleaned))
+
+
 def _match_sender_name(from_address: str, sender_to_name: dict[str, str]) -> str | None:
     """Matches a message's real from_ header (e.g. 'Jane Doe <jane@pub.
     substack.com>') against the configured sender_to_name map's bare
@@ -333,6 +377,12 @@ def fetch_agentmail_newsletters(
                     errors.append((source_name, f"{label}: no resolvable article URL found in email body (resolution error -- left unread for retry)"))
                     continue
                 errors.append((source_name, f"{label}: no resolvable article URL found in email body (confirmed content-free -- marking read)"))
+                body_len = _visible_body_length(html)
+                if body_len > _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS:
+                    logger.warning(
+                        f"agentmail_newsletters: confirmed content-free but body is substantial "
+                        f"({body_len} chars) -- sender: {source_name}, subject: {label!r} -- consider reviewing"
+                    )
                 client.inboxes.messages.update(
                     inbox_id, item.message_id, add_labels=["read"], remove_labels=["unread"]
                 )

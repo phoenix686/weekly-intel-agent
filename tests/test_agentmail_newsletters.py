@@ -305,6 +305,88 @@ def test_fetch_agentmail_newsletters_confirmed_content_free_grouped_under_real_s
     assert fake_messages.update_calls == [("inbox-123", "msg-3", ["read"], ["unread"])]
 
 
+def test_fetch_agentmail_newsletters_warns_when_confirmed_content_free_body_is_substantial():
+    """DiamantAI-shaped fixture (Step 4 WARN tripwire, 2026-07-22): a
+    confirmed content-free welcome email whose real visible body is
+    substantial (well over _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS), like
+    the real DiamantAI welcome email found during the read-only audit --
+    real content about the newsletter's repos/course/books, still no
+    /p/ post link anywhere. Must log a WARNing (visibility only) AND
+    still mark the message read, same as any other confirmed
+    content-free case -- no new extraction path, no behavior change to
+    what gets captured as a row."""
+    now = datetime.now(timezone.utc)
+    substantial_paragraph = (
+        "DiamantAI's real newsletter content: deep dives on RAG techniques, "
+        "open-source agent repositories, and hands-on production courses. "
+    ) * 20  # well over 2000 chars once tags/whitespace are stripped
+    html = (
+        "<html><head><style>body { color: #030712; font-size: 14px; } "
+        ".wrapper { max-width: 600px; }</style></head><body>"
+        f"<p>{substantial_paragraph}</p>"
+        '<a href="https://email.mg-d0.substack.com/c/tokenY">Unsubscribe</a>'
+        "</body></html>"
+    )
+    fake_messages = _FakeMessagesClient(
+        list_items=[_FakeMessageItem("msg-diamantai", "Welcome to the DiamantAI Community!")],
+        get_by_id={
+            "msg-diamantai": _FakeMessage(
+                "msg-diamantai", "Welcome to the DiamantAI Community!", html,
+                "diamantai@substack.com", now,
+            ),
+        },
+    )
+    diamantai_sender_map = dict(_SENDER_TO_NAME, **{"diamantai@substack.com": "DiamantAI"})
+
+    with patch.object(agentmail_mod, "AgentMail", return_value=_FakeAgentMailClient(fake_messages)), \
+         patch.object(agentmail_mod, "_resolve_redirect", return_value="https://magazine.example.com/unsubscribe"), \
+         patch.object(agentmail_mod, "logger") as mock_logger, \
+         patch.dict(os.environ, {"AGENTMAIL_API_KEY": "fake-key-for-test"}):
+        result = fetch_agentmail_newsletters("inbox-123", diamantai_sender_map, limit=20)
+
+    assert result.rows == []
+    mock_logger.warning.assert_called_once()
+    warn_message = mock_logger.warning.call_args[0][0]
+    assert "substantial" in warn_message
+    assert "DiamantAI" in warn_message
+    # Still marked read -- visibility only, does not change the mark-seen outcome.
+    assert fake_messages.update_calls == [("inbox-123", "msg-diamantai", ["read"], ["unread"])]
+
+
+def test_fetch_agentmail_newsletters_does_not_warn_for_pure_boilerplate_content_free_body():
+    """Pure-boilerplate fixture, mirroring the real 6/7 confirmed
+    content-free messages found during the Step 4 audit (a short real
+    welcome email, e.g. JamWithAI's 390-char body) -- well under
+    _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS. Must NOT warn, and must still
+    mark read exactly as before."""
+    now = datetime.now(timezone.utc)
+    html = (
+        "<html><head><style>body { color: #030712; }</style></head><body>"
+        "<p>You're receiving free posts from Jam with AI. Unsubscribe in one click.</p>"
+        '<a href="https://email.mg2.substack.com/c/tokenZ">Unsubscribe</a>'
+        "</body></html>"
+    )
+    fake_messages = _FakeMessagesClient(
+        list_items=[_FakeMessageItem("msg-boilerplate", "Welcome to Jam with AI")],
+        get_by_id={
+            "msg-boilerplate": _FakeMessage(
+                "msg-boilerplate", "Welcome to Jam with AI", html,
+                "jamwithai@substack.com", now,
+            ),
+        },
+    )
+
+    with patch.object(agentmail_mod, "AgentMail", return_value=_FakeAgentMailClient(fake_messages)), \
+         patch.object(agentmail_mod, "_resolve_redirect", return_value="https://jamwithai.substack.com/unsubscribe"), \
+         patch.object(agentmail_mod, "logger") as mock_logger, \
+         patch.dict(os.environ, {"AGENTMAIL_API_KEY": "fake-key-for-test"}):
+        result = fetch_agentmail_newsletters("inbox-123", _SENDER_TO_NAME, limit=20)
+
+    assert result.rows == []
+    mock_logger.warning.assert_not_called()
+    assert fake_messages.update_calls == [("inbox-123", "msg-boilerplate", ["read"], ["unread"])]
+
+
 def test_fetch_agentmail_newsletters_transient_resolve_error_not_marked_read():
     """A transient failure during resolution (e.g. a real socket timeout in
     _resolve_redirect's tier-3 HTTP call) must land the same way a
