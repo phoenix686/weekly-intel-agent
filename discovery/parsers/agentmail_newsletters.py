@@ -50,16 +50,51 @@ https://magazine.sebastianraschka.com/subscribe, a real, different URL
 than the tracking link itself). Parsing the raw HTML for a /p/{slug}
 pattern directly (the original design) would NEVER match a real email --
 this was caught before it shipped by inspecting real received messages,
-not assumed to work from the synthetic fixture alone. _extract_article_url
-now resolves each candidate href via a real HTTP request (following
-redirects) and checks the RESOLVED url for the /p/{slug} convention
-(shared by both Substack and beehiiv), not the raw href.
+not assumed to work from the synthetic fixture alone.
+
+URL EXTRACTION -- THREE-TIER FIX (2026-07-22, real production bug): a
+real Sunday Pipeline run (2026-07-22, run c6c5624d) failed to extract an
+article URL for EVERY message it processed, including 3 with genuinely
+real, present article links (Decoding AI Magazine "What's Harness
+Engineering?", The Neural Maze "The SLM OCR Course...", AI Engineering
+"[Hands-On] Build a Browser Automation Agent") -- confirmed a real bug,
+not a content-free email, by re-running this exact extraction code
+against the exact same real HTML from an unblocked machine: it found a
+valid /p/{slug} match every time. The old code's ONLY extraction path
+was a live HTTP redirect-follow per href (_resolve_redirect) -- the same
+class of GitHub-Actions-shared-runner-IP-blocking issue already
+confirmed twice elsewhere in this project (Substack RSS 403s,
+2026-07-17; MarkTechPost's Cloudflare challenge, 2026-07-22) is the most
+likely explanation, though it can't be directly confirmed without a live
+GH Actions network trace.
+
+Fix: _extract_article_url now tries three tiers, cheapest/most-robust
+first, over the SAME hrefs list:
+  1. The raw href already matches /p/{slug} directly -- e.g. a plain
+     open.substack.com/pub/{name}/p/{slug} link, not itself a redirect.
+     Zero network calls; cannot be affected by any redirect-target
+     blocking, confirmed present in both the Decoding AI Magazine and
+     The Neural Maze real messages.
+  2. Substack's newer redirect/2/{base64} format embeds the real
+     destination directly as base64-encoded JSON ({"e": "https://..."})
+     -- decoded locally, zero network calls. Confirmed real: The Neural
+     Maze's actual email decodes cleanly to its real /p/{slug} URL.
+  3. Fall back to the original live HTTP redirect-follow -- still needed
+     for genuinely opaque tracking-only links (beehiiv's
+     link.mail.beehiiv.com tokens confirmed NOT base64-JSON-decodable;
+     Substack's older redirect/{uuid}?j=... tokens are opaque too).
+Tiers 1-2 remove the network dependency entirely for the cases they
+cover (both real Substack failures above), directly shrinking exposure
+to whatever caused the real failure; tier 3 remains the only path for
+beehiiv and is still exposed to the same class of risk.
 
 No langgraph imports.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
@@ -117,18 +152,61 @@ def _resolve_redirect(url: str, timeout: float = 10.0) -> str | None:
         return None
 
 
+_SUBSTACK_REDIRECT_2 = re.compile(r"substack\.com/redirect/2/([A-Za-z0-9_-]+)")
+
+
+def _decode_substack_redirect_2(href: str) -> str | None:
+    """Substack's newer /redirect/2/{base64} format embeds the real
+    destination directly as base64url-encoded JSON ({"e": "https://..."})
+    -- decodable with zero network calls, immune to any blocking of the
+    resolution step itself. Confirmed real, 2026-07-22 (The Neural
+    Maze's actual received email): decodes cleanly to its real
+    /p/{slug} URL. Returns None on anything that doesn't match or
+    doesn't decode -- never raises, same degrade-gracefully contract as
+    _resolve_redirect."""
+    match = _SUBSTACK_REDIRECT_2.search(href)
+    if not match:
+        return None
+    token = match.group(1)
+    try:
+        padded = token + "=" * (-len(token) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        return payload.get("e")
+    except Exception as e:
+        logger.debug(f"agentmail_newsletters: redirect/2 decode failed for {href}: {e}")
+        return None
+
+
 def _extract_article_url(html: str) -> str | None:
-    """Resolves candidate hrefs (in document order, first
-    _MAX_LINKS_TO_RESOLVE only) via a real HTTP request each, returns the
-    first RESOLVED url matching the real /p/{slug} post convention.
-    Raw hrefs are never checked directly -- see this module's docstring
-    for why (real click-tracking redirects, confirmed via actual received
-    emails)."""
+    """Three tiers, cheapest/most-robust first, over the SAME hrefs list
+    (document order, first _MAX_LINKS_TO_RESOLVE only) -- see this
+    module's docstring for the real 2026-07-22 production failure that
+    motivated tiers 1-2:
+    1. The raw href already matches /p/{slug} directly (not itself a
+       redirect) -- zero network calls.
+    2. Substack's redirect/2/{base64} format decodes locally -- zero
+       network calls.
+    3. Fall back to a real HTTP request per href (the original,
+       only-ever mechanism) -- still needed for genuinely opaque
+       tracking-only links (beehiiv, Substack's older redirect/{uuid}
+       format)."""
     hrefs = re.findall(r'href="([^"]+)"', html or "")
-    for href in hrefs[:_MAX_LINKS_TO_RESOLVE]:
+    candidates = hrefs[:_MAX_LINKS_TO_RESOLVE]
+
+    for href in candidates:
+        if _POST_PATH_PATTERN.search(href):
+            return href
+
+    for href in candidates:
+        decoded = _decode_substack_redirect_2(href)
+        if decoded and _POST_PATH_PATTERN.search(decoded):
+            return decoded
+
+    for href in candidates:
         resolved = _resolve_redirect(href)
         if resolved and _POST_PATH_PATTERN.search(resolved):
             return resolved
+
     return None
 
 

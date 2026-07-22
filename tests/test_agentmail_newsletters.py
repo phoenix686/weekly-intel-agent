@@ -78,6 +78,97 @@ def test_extract_article_url_skips_unresolvable_links_and_keeps_checking():
         assert _extract_article_url(html) == "https://pub.substack.com/p/real-post"
 
 
+# ── Three-tier extraction fix (2026-07-22, real production bug) ────────────
+# A real Sunday Pipeline run (c6c5624d, 2026-07-22) failed to extract an
+# article URL for 3 messages that genuinely had one -- confirmed by
+# re-running this exact code against the exact real HTML from an unblocked
+# machine, which found a match every time. Real hrefs below are captured
+# verbatim from those actual received messages.
+
+def test_tier1_raw_href_already_matching_post_pattern_needs_zero_network_calls():
+    """Decoding AI Magazine's real "What's Harness Engineering?" email
+    (2026-07-22): a plain, non-redirect open.substack.com href containing
+    /p/{slug} directly, among a sea of opaque substack.com/redirect/...
+    tracking links. Must be found WITHOUT ever calling _resolve_redirect."""
+    html = (
+        '<a href="https://substack.com/redirect/8e247eaa-6807-4f1f-ac3f-79215c4b64bf?j=eyJ1IjoiMXhrcGtmIn0">t</a>'
+        '<a href="https://substack.com/@pauliusztin">profile</a>'
+        '<a href="https://open.substack.com/pub/technically/p/whats-harness-engineering?utm_source=substack">Read</a>'
+    )
+    with patch.object(agentmail_mod, "_resolve_redirect") as mock_resolve:
+        result = _extract_article_url(html)
+
+    assert result == "https://open.substack.com/pub/technically/p/whats-harness-engineering?utm_source=substack"
+    mock_resolve.assert_not_called()
+
+
+_REAL_NEURAL_MAZE_SUBSCRIBE_HREF = (
+    "https://substack.com/redirect/2/eyJlIjoiaHR0cHM6Ly90aGVuZXVyYWxtYXplLnN1YnN0YWNrLmNvbS9zdWJzY3JpYmU_dXRtX3NvdXJjZT1lbWFpbCZ1dG1fY2FtcGFpZ249ZW1haWwtc3Vic2NyaWJlJnI9OHJ6b201Jm5leHQ9aHR0cHMlM0ElMkYlMkZ0aGVuZXVyYWxtYXplLnN1YnN0YWNrLmNvbSUyRnAlMkZ0aGUtc2xtLW9jci1jb3Vyc2UtbGl2ZS1xLWFuZC1hLWFuZCIsInAiOjIwNzI2MzUzOSwicyI6MzMzMjIwOSwiZiI6dHJ1ZSwidSI6NTMwNzQzOTAxLCJpYXQiOjE3ODQ1NDUxOTYsImV4cCI6MjEwMDEyMTE5NiwiaXNzIjoicHViLTAiLCJzdWIiOiJsaW5rLXJlZGlyZWN0In0.hzQyWw0y4ftdN5hmiUms_ycATbh9yR529hlSjGyjD6I?"
+)
+_REAL_NEURAL_MAZE_POST_HREF = (
+    "https://substack.com/redirect/2/eyJlIjoiaHR0cHM6Ly90aGVuZXVyYWxtYXplLnN1YnN0YWNrLmNvbS9wL3RoZS1zbG0tb2NyLWNvdXJzZS1saXZlLXEtYW5kLWEtYW5kP3V0bV9jYW1wYWlnbj1lbWFpbC1oYWxmLXBvc3Qmcj04cnpvbTUmdG9rZW49ZXlKMWMyVnlYMmxrSWpvMU16QTNORE01TURFc0luQnZjM1JmYVdRaU9qSXdOekkyTXpVek9Td2lhV0YwSWpveE56ZzBOVFExTVRrMkxDSmxlSEFpT2pFM09EY3hNemN4T1RZc0ltbHpjeUk2SW5CMVlpMHpNek15TWpBNUlpd2ljM1ZpSWpvaWNHOXpkQzF5WldGamRHbHZiaUo5LlI1eTVxYkpxcVhqV1VreFVqdEdHTzNDcVhMZU82clFRWjNVZHFEZzF6dTgiLCJwIjoyMDcyNjM1MzksInMiOjMzMzIyMDksImYiOnRydWUsInUiOjUzMDc0MzkwMSwiaWF0IjoxNzg0NTQ1MTk2LCJleHAiOjIxMDAxMjExOTYsImlzcyI6InB1Yi0wIiwic3ViIjoibGluay1yZWRpcmVjdCJ9.WhqgTGA68J9KL1E-nGRCeGzhO-o-uqcPeEQWB_zF7tA?"
+)
+
+
+def test_tier2_substack_redirect_2_decodes_without_network_calls():
+    """The Neural Maze's real "The SLM OCR Course..." email (2026-07-22):
+    a substack.com/redirect/2/{base64} href whose (JWT-shaped, payload.signature)
+    token's payload segment decodes directly to real JSON containing
+    "e": "https://theneuralmaze.substack.com/p/the-slm-ocr-course-live-q-and-a-and?...".
+    Both hrefs below are captured verbatim, full and untruncated, from the
+    actual received message. Must resolve WITHOUT any network call."""
+    html = (
+        f'<a href="{_REAL_NEURAL_MAZE_SUBSCRIBE_HREF}">subscribe</a>'
+        f'<a href="{_REAL_NEURAL_MAZE_POST_HREF}">Read</a>'
+    )
+    with patch.object(agentmail_mod, "_resolve_redirect") as mock_resolve:
+        result = _extract_article_url(html)
+
+    assert result is not None
+    assert "theneuralmaze.substack.com/p/the-slm-ocr-course-live-q-and-a-and" in result
+    mock_resolve.assert_not_called()
+
+
+def test_tier2_ignores_redirect_2_link_that_decodes_to_a_non_post_url():
+    """The first redirect/2/ link in the same real email decodes to a
+    /subscribe page, not a post -- tier 2 must correctly skip it (fall
+    through to the next href/tier), not treat any successful decode as a
+    match regardless of destination."""
+    html = f'<a href="{_REAL_NEURAL_MAZE_SUBSCRIBE_HREF}">subscribe</a>'
+    with patch.object(agentmail_mod, "_resolve_redirect", return_value=None) as mock_resolve:
+        result = _extract_article_url(html)
+
+    assert result is None
+    mock_resolve.assert_called_once()  # falls through to tier 3, which also fails here
+
+
+def test_tier3_still_used_for_genuinely_opaque_tracking_links():
+    """AI Engineering's real beehiiv email (2026-07-22): link.mail.beehiiv.com
+    tokens are NOT base64-JSON-decodable (confirmed directly) -- tiers 1-2
+    must correctly fall through to tier 3's real HTTP resolution, which
+    still works and must still be exercised."""
+    html = '<a href="https://link.mail.beehiiv.com/v1/c/wNq66YaGm0G2BLC2rCTdiVywre9Ryz3w2kdC3UqVQW3WxqRUdGcC2zgWe3GK">Read</a>'
+    with patch.object(agentmail_mod, "_resolve_redirect", return_value="https://aiengineering.beehiiv.com/p/hands-on-build-a-browser-automation-agent") as mock_resolve:
+        result = _extract_article_url(html)
+
+    assert result == "https://aiengineering.beehiiv.com/p/hands-on-build-a-browser-automation-agent"
+    mock_resolve.assert_called_once()
+
+
+def test_tier1_before_tier2_when_both_present():
+    """When a raw href already matches directly (tier 1), tier 2's decode
+    attempt on a LATER href must never even be reached -- tier 1 wins."""
+    html = (
+        '<a href="https://open.substack.com/pub/name/p/first-match">Read</a>'
+        '<a href="https://substack.com/redirect/2/eyJlIjoiaHR0cHM6Ly9leGFtcGxlLmNvbS9wL3NlY29uZC1tYXRjaCJ9">Also a post</a>'
+    )
+    with patch.object(agentmail_mod, "_resolve_redirect") as mock_resolve:
+        result = _extract_article_url(html)
+
+    assert result == "https://open.substack.com/pub/name/p/first-match"
+    mock_resolve.assert_not_called()
+
+
 class _FakeMessageItem:
     def __init__(self, message_id, subject):
         self.message_id = message_id
