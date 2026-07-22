@@ -60,7 +60,7 @@ def test_real_blog_sources_yaml_daily_entries_all_have_fetch_limit_15():
     from discovery.blog_sources_config import load_blog_sources
     entries = load_blog_sources()
     daily_entries = [e for e in entries if e["bucket"] == "daily"]
-    assert len(daily_entries) == 5, f"expected 5 daily-bucket entries, got {len(daily_entries)}"
+    assert len(daily_entries) == 4, f"expected 4 daily-bucket entries, got {len(daily_entries)}"
     for entry in daily_entries:
         assert entry.get("fetch_limit") == 15, f"{entry['name']!r} expected fetch_limit=15, got {entry.get('fetch_limit')!r}"
 
@@ -71,13 +71,14 @@ def test_real_blog_sources_yaml_sunday_only_entries_all_have_fetch_limit_6():
     Neural Maze, Decoding AI Magazine, Ahead of AI -- none of them are
     blog_sources.yaml entries anymore (see discovery/config/
     agentmail_sources.yaml, gitignored, and blog_sources.yaml's dated
-    comment). Hacker News (Show HN) is the one remaining deliberate
-    exception to the sunday-bucket default of 6 (fetch_limit=8, higher
-    real volume)."""
+    comment). Technically moved from daily to sunday (2026-07-22, weekly
+    publish cadence doesn't fit a 48h daily cutoff). Hacker News (Show HN)
+    is the one remaining deliberate exception to the sunday-bucket
+    default of 6 (fetch_limit=8, higher real volume)."""
     from discovery.blog_sources_config import load_blog_sources
     entries = load_blog_sources()
     sunday_entries = [e for e in entries if e["bucket"] == "sunday"]
-    assert len(sunday_entries) == 3, f"expected 3 sunday-bucket entries, got {len(sunday_entries)}"
+    assert len(sunday_entries) == 4, f"expected 4 sunday-bucket entries, got {len(sunday_entries)}"
     for entry in sunday_entries:
         expected = 8 if entry["name"] == "Hacker News (Show HN)" else 6
         assert entry.get("fetch_limit") == expected, f"{entry['name']!r} expected fetch_limit={expected}, got {entry.get('fetch_limit')!r}"

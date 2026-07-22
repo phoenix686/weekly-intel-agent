@@ -63,8 +63,13 @@
 
 - name: "Technically"
   feed_url: "https://read.technically.dev/feed"
-  bucket: daily
-  fetch_limit: 15
+  bucket: sunday
+  fetch_limit: 6
+  # Moved from daily to sunday, 2026-07-22: publishes weekly (Tuesdays),
+  # so a 48h daily cutoff structurally returns ~0-1 items most days --
+  # fits the weekly Sunday digest's cadence, not daily's. fetch_limit
+  # dropped from 15 to 6 to match every other sunday-only source's
+  # weekly-or-slower convention (see this file's header comment).
 
 - name: "Hacker News (Show HN)"
   feed_url: "https://hnrss.org/show"
