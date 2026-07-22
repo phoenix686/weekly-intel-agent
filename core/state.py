@@ -75,6 +75,36 @@ class ScoredItem(TypedDict):
     video_url: NotRequired[str | None]
 
 
+class UncategorizedItem(TypedDict):
+    """A ClusteredItem the taste-prefilter couldn't match to any existing
+    topic tag -- max cosine similarity across every mapped topic vector
+    fell below discovery/taste_vectors.py's 0.30 threshold. Bypasses
+    score_node entirely (no LLM call spent classifying content already
+    known not to fit the current tag vocabulary), but is carried through
+    to output instead of silently dropped -- see assemble_digest's and
+    assemble_plan's trailing "didn't match any existing topic" section,
+    and telegram/feedback_router.py's reuse of the same numbered-reply
+    mechanism. best_tag/similarity_score are audit metadata only, NOT
+    one of ALLOWED_TAGS -- no new tag vector is created or auto-assigned
+    from this; that stays a human (Pooja) decision via a Telegram reply."""
+
+    url: str
+    title: str
+    text: str
+    author_name: str
+    author_handle: str
+    fetched_at: str
+    is_thread: bool
+    thread_contents: str | None
+    expanded_urls: list[str]
+    source: str
+    duplicate_count: int
+    best_tag: str            # closest-matching existing tag, still below threshold
+    similarity_score: float  # that tag's cosine similarity
+    has_video: NotRequired[bool]
+    video_url: NotRequired[str | None]
+
+
 class NodeCost(TypedDict):
     """Per-node cost/metrics record. Logged from Phase 0 onward per the
     'cost/metrics from day one, not bolted on later' principle -- even
@@ -117,6 +147,9 @@ class DiscoverySubgraphState(TypedDict):
     raw_items: Annotated[list[RawItem], operator.add]
     clustered_items: list[ClusteredItem]
     scored_items: list[ScoredItem]
+    uncategorized_items: list[UncategorizedItem]  # populated by cluster_dedupe_node's
+                                                    # taste_prefilter call -- items below the
+                                                    # 0.30 threshold, never reach score_node
 
     # bookkeeping
     run_id: str
@@ -142,6 +175,9 @@ class DailyGraphState(TypedDict):
 
     run_id: str
     scored_items: list[ScoredItem]
+    uncategorized_items: list[UncategorizedItem]  # passed through from DiscoverySubgraphState
+                                                    # by name intersection; see assemble_digest's
+                                                    # trailing "didn't match any existing topic" section
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
     source_context: Literal["daily", "sunday"]
@@ -149,12 +185,15 @@ class DailyGraphState(TypedDict):
     digest_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
                                        # assemble_digest, persisted by send_telegram_digest keyed
                                        # by the sent message_id so a later numbered reply resolves
+                                       # (includes uncategorized items too, numbered after kept ones,
+                                       # so a reply naming a new tag routes through the same path)
 
 
 def make_daily_initial_state(run_id: str) -> DailyGraphState:
     return DailyGraphState(
         run_id=run_id,
         scored_items=[],
+        uncategorized_items=[],
         costs=[],
         errors=[],
         digest_text="",
@@ -176,6 +215,10 @@ class SundayGraphState(TypedDict):
 
     run_id: str
     scored_items: list[ScoredItem]
+    uncategorized_items: list[UncategorizedItem]  # passed through from DiscoverySubgraphState
+                                                    # by name intersection; bypasses
+                                                    # correlate_trello/classify_item entirely --
+                                                    # see assemble_plan's trailing section
     trello_cards: list[dict]        # raw card data from read_trello: card_id, name,
                                     #   desc, list_id, list_name, url, checklist_items,
                                     #   last_activity (Trello dateLastActivity, ISO string)
@@ -211,6 +254,7 @@ def make_sunday_initial_state(run_id: str, dry_run: bool = False) -> SundayGraph
     return SundayGraphState(
         run_id=run_id,
         scored_items=[],
+        uncategorized_items=[],
         trello_cards=[],
         card_movements=[],
         correlated_items=[],

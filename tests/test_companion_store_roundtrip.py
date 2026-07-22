@@ -34,7 +34,7 @@ def test_daily_digest_roundtrip() -> bool:
         "source": "test", "duplicate_count": 1,
         "keep": True, "reasoning": "test", "tags": ["test"],
     }]
-    state = {"scored_items": scored_items, "run_id": "companion-store-test-daily"}
+    state = {"scored_items": scored_items, "uncategorized_items": [], "run_id": "companion-store-test-daily"}
 
     result = assemble_digest(state)
     assert "digest_text" in result and "digest_item_map" in result, "assemble_digest's existing return shape changed"
@@ -62,6 +62,7 @@ def test_weekly_plan_roundtrip() -> bool:
     }]
     state = {
         "classified_items": classified_items,
+        "uncategorized_items": [],
         "pending_approvals": [],
         "run_id": "companion-store-test-sunday",
         "trello_cards": [],

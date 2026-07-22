@@ -74,9 +74,10 @@ def test_item_matching_one_topic_strongly_survives_via_max_not_average():
     strong_agentic_vector = [0.95] + [0.0] * 19  # dim 0 = agentic-engineering
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
          patch("discovery.taste_vectors.embed_texts", return_value=([strong_agentic_vector], [10])):
-        survivors, costs = taste_prefilter([item], run_id="run-1")
+        survivors, uncategorized, costs = taste_prefilter([item], run_id="run-1")
 
     assert survivors == [item]
+    assert uncategorized == []
     assert not any(c.get("error") for c in costs)
 
 
@@ -86,10 +87,33 @@ def test_item_below_threshold_against_every_topic_is_dropped():
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
          patch("discovery.taste_vectors.embed_texts", return_value=([_IRRELEVANT_VECTOR], [10])):
-        survivors, costs = taste_prefilter([item], run_id="run-1")
+        survivors, uncategorized, costs = taste_prefilter([item], run_id="run-1")
 
     assert survivors == []
-    assert any("dropped by taste pre-filter" in c["error"] for c in costs)
+    assert any("uncategorized" in c["error"] for c in costs)
+
+
+def test_item_below_threshold_is_returned_uncategorized_not_silently_dropped():
+    """2026-07-22, lightweight-uncategorized-flagging: a sub-threshold item
+    is no longer just a cost-record error -- it comes back as a real
+    UncategorizedItem carrying its own url/title/text plus best_tag and
+    similarity_score, for assemble_digest/assemble_plan's trailing
+    section and Telegram feedback routing."""
+    item = _item("https://a.com/1", "Unrelated item", "nothing to do with any topic")
+    fake_store = _FakeStore(seed=_topic_vectors_seed())
+
+    with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
+         patch("discovery.taste_vectors.embed_texts", return_value=([_IRRELEVANT_VECTOR], [10])):
+        survivors, uncategorized, costs = taste_prefilter([item], run_id="run-1")
+
+    assert len(uncategorized) == 1
+    assert uncategorized[0]["url"] == "https://a.com/1"
+    assert uncategorized[0]["title"] == "Unrelated item"
+    assert uncategorized[0]["best_tag"] in {
+        "agentic-engineering", "memory-systems", "llm-tooling",
+        "evals", "learning-resource", "distributed-systems",
+    }
+    assert uncategorized[0]["similarity_score"] < 0.30
 
 
 def test_empty_topic_vector_store_lets_everything_through():
@@ -98,9 +122,10 @@ def test_empty_topic_vector_store_lets_everything_through():
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
          patch("discovery.taste_vectors.embed_texts") as mock_embed:
-        survivors, costs = taste_prefilter([item], run_id="run-1")
+        survivors, uncategorized, costs = taste_prefilter([item], run_id="run-1")
 
     assert survivors == [item]
+    assert uncategorized == []
     assert costs == []
     mock_embed.assert_not_called()  # never even tries to embed if there's nothing to compare against
 
@@ -116,9 +141,10 @@ def test_failed_batch_embed_call_passes_all_items_through_unfiltered():
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
          patch("discovery.taste_vectors.embed_texts", side_effect=RuntimeError("model broken")):
-        survivors, costs = taste_prefilter([item_a, item_b], run_id="run-1")
+        survivors, uncategorized, costs = taste_prefilter([item_a, item_b], run_id="run-1")
 
     assert survivors == [item_a, item_b]
+    assert uncategorized == []
     assert len(costs) == 2
     assert all("embed failed" in c["error"] and "passed through unfiltered" in c["error"] for c in costs)
 

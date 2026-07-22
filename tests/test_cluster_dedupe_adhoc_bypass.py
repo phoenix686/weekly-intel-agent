@@ -42,7 +42,7 @@ def test_adhoc_item_bypasses_both_filters_with_zero_embed_calls():
          patch.object(cluster_dedupe_mod, "taste_prefilter", wraps=None) as mock_taste, \
          patch.object(cluster_dedupe_mod, "record_node_summary"):
         mock_dedupe.return_value = ([blog_item], [])
-        mock_taste.return_value = ([blog_item], [])
+        mock_taste.return_value = ([blog_item], [], [])
 
         result = cluster_dedupe_node(_state([adhoc_item, blog_item]))
 
@@ -59,12 +59,33 @@ def test_adhoc_item_bypasses_both_filters_with_zero_embed_calls():
     assert "https://blog.example.com/post" in result_urls
 
 
+def test_uncategorized_items_wired_from_taste_prefilter_into_state_not_clustered_items():
+    """2026-07-22, lightweight-uncategorized-flagging: taste_prefilter's
+    second return value must land in the node's own uncategorized_items
+    output key -- and NOT be folded into clustered_items, since
+    uncategorized items must bypass score_node entirely."""
+    blog_item = _raw_item("https://blog.example.com/post", "blog_scrape", "a scraped blog post")
+    uncategorized_item = {**_raw_item("https://blog.example.com/uncategorized", "blog_scrape", "off-topic content"),
+                           "best_tag": "new-tool-launch", "similarity_score": 0.186}
+
+    with patch.object(cluster_dedupe_mod, "filter_unseen", side_effect=lambda items: (items, [])), \
+         patch.object(cluster_dedupe_mod, "dedupe_semantic", return_value=([blog_item, uncategorized_item], [])), \
+         patch.object(cluster_dedupe_mod, "taste_prefilter", return_value=([blog_item], [uncategorized_item], [])), \
+         patch.object(cluster_dedupe_mod, "record_node_summary"):
+        result = cluster_dedupe_node(_state([blog_item, uncategorized_item]))
+
+    assert result["uncategorized_items"] == [uncategorized_item]
+    clustered_urls = {i["url"] for i in result["clustered_items"]}
+    assert "https://blog.example.com/post" in clustered_urls
+    assert "https://blog.example.com/uncategorized" not in clustered_urls
+
+
 def test_adhoc_only_run_never_calls_dedupe_or_taste_with_any_items():
     adhoc_item = _raw_item("adhoc:xyz", "adhoc_telegram", "a queued ad-hoc message")
 
     with patch.object(cluster_dedupe_mod, "filter_unseen", side_effect=lambda items: (items, [])), \
          patch.object(cluster_dedupe_mod, "dedupe_semantic", return_value=([], [])) as mock_dedupe, \
-         patch.object(cluster_dedupe_mod, "taste_prefilter", return_value=([], [])) as mock_taste, \
+         patch.object(cluster_dedupe_mod, "taste_prefilter", return_value=([], [], [])) as mock_taste, \
          patch.object(cluster_dedupe_mod, "record_node_summary"):
         result = cluster_dedupe_node(_state([adhoc_item]))
 

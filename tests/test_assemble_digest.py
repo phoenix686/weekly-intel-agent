@@ -27,6 +27,89 @@ def _item(keep: bool, title: str = "A title", reasoning: str = "Good content.", 
 RUN_ID = "abc12345-0000-0000-0000-000000000000"
 
 
+def _uncategorized(url="https://example.com/uncategorized", title="An uncategorized title",
+                    best_tag="new-tool-launch", similarity_score=0.186):
+    return {
+        "url": url, "title": title, "text": "body text of the uncategorized item",
+        "author_name": "Author", "author_handle": "author",
+        "fetched_at": "2026-01-01T00:00:00Z", "is_thread": False, "thread_contents": None,
+        "expanded_urls": [], "source": "blog_scrape", "duplicate_count": 1,
+        "best_tag": best_tag, "similarity_score": similarity_score,
+    }
+
+
+# ── Uncategorized-flagging (2026-07-22, lightweight-uncategorized-flagging) ────
+# Real demonstration case: today's actual Latent Space AI-cybersecurity item.
+# Originally taste-prefiltered at cosine=0.186 vs "new-tool-launch" (threshold
+# 0.30) when only the RSS <description> teaser (51 chars) was embedded. After
+# the same-day content-truncation fix (rss_common.py now reads the full
+# <content:encoded> article, 29,364 chars), a LIVE re-check against the real
+# current topic vectors moved the score to 0.251 -- genuinely closer, but
+# still below 0.30: this item needs BOTH fixes, not just one. Confirmed by
+# direct execution against the real store/embeddings, not assumed.
+
+_REAL_CYBERSECURITY_ITEM = _uncategorized(
+    url="https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top",
+    title="[AINews] AI Cybersecurity becomes top of mind",
+    best_tag="new-tool-launch",
+    similarity_score=0.251,
+)
+
+
+def test_uncategorized_item_no_longer_vanishes_before_after():
+    """BEFORE (old behavior, no uncategorized_items param): the item is
+    invisible -- format_digest has no way to know it ever existed.
+    AFTER: passing it through the new parameter surfaces it."""
+    before_text, before_map = format_digest([], RUN_ID)
+    assert "cybersecurity" not in before_text.lower()
+    assert before_map == {}
+
+    after_text, after_map = format_digest([], RUN_ID, uncategorized_items=[_REAL_CYBERSECURITY_ITEM])
+    assert "AI Cybersecurity becomes top of mind" in after_text
+    assert "https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top" in after_text
+    assert "new-tool-launch" in after_text
+    assert "0.251" in after_text
+    assert after_map[1]["url"] == "https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top"
+    assert after_map[1]["tags"] == ["uncategorized"]
+
+
+def test_uncategorized_section_appears_even_with_zero_kept_items():
+    text, item_map = format_digest([], RUN_ID, uncategorized_items=[_uncategorized()])
+    assert "Nothing new today" in text  # kept-section placeholder still shows
+    assert "1 item(s) didn't match any existing topic" in text
+    assert set(item_map.keys()) == {1}
+
+
+def test_uncategorized_numbering_continues_after_kept_items():
+    kept = [_item(keep=True, title="Kept item")]
+    uncategorized = [_uncategorized(title="Uncategorized item")]
+    text, item_map = format_digest(kept, RUN_ID, uncategorized_items=uncategorized)
+    assert set(item_map.keys()) == {1, 2}
+    assert item_map[1]["title"] == "Kept item"
+    assert item_map[2]["title"] == "Uncategorized item"
+    assert "1. <a" in text
+    assert "2. <a" in text
+
+
+def test_uncategorized_item_map_entry_carries_best_tag_and_score_in_reasoning():
+    text, item_map = format_digest([], RUN_ID, uncategorized_items=[_REAL_CYBERSECURITY_ITEM])
+    assert "new-tool-launch" in item_map[1]["reasoning"]
+    assert "0.251" in item_map[1]["reasoning"]
+
+
+def test_footer_includes_uncategorized_count():
+    kept = [_item(keep=True)]
+    text, item_map = format_digest(kept, RUN_ID, uncategorized_items=[_uncategorized(), _uncategorized()])
+    assert "1 scored · 1 kept · 2 uncategorized" in text
+
+
+def test_no_uncategorized_items_omits_the_section_entirely():
+    kept = [_item(keep=True)]
+    text, item_map = format_digest(kept, RUN_ID, uncategorized_items=[])
+    assert "didn't match any existing topic" not in text
+    assert "0 uncategorized" in text  # footer still reports the real (zero) count
+
+
 def test_empty_input_returns_nothing_today():
     text, item_map = format_digest([], RUN_ID)
     assert text == "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>"

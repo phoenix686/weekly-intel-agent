@@ -28,6 +28,7 @@ def assemble_plan(state: SundayGraphState) -> dict:
         state["run_id"],
         state["trello_cards"],
         state["prioritized_project_work"],
+        state["uncategorized_items"],
     )
 
     # plan_history must reflect what was ACTUALLY surfaced in Existing
@@ -125,6 +126,7 @@ def _truncate(text: str, max_len: int) -> str:
 def _render(
     reading: list[dict], courses: list[dict], project_entries: list[dict],
     pending_approvals_count: int, run_id: str, reasoning_budget: int | None = None,
+    uncategorized_items: list[dict] | None = None,
 ) -> tuple[str, dict[int, dict]]:
     """One rendering pass. reasoning_budget, when set, caps each item's/
     entry's reasoning -- and, for Existing Project Work, the card_name
@@ -134,7 +136,14 @@ def _render(
     reasoning_budget: truncation is a rendering-time concern only, so a
     carried-forward item (sunday/carry_forward.py) that gets reused next
     week isn't permanently stuck with a truncated blurb just because
-    this week's message happened to be near the length limit."""
+    this week's message happened to be near the length limit.
+
+    uncategorized_items (2026-07-22, lightweight-uncategorized-flagging):
+    rendered last, numbered CONTINUING the same item_map -- not a
+    separate map -- so a reply naming a new tag for one of these resolves
+    through the exact same telegram/feedback_router.py path as any other
+    plan reply."""
+    uncategorized_items = uncategorized_items or []
     lines = ["📋 <b>Weekly Plan</b>", ""]
     counter = 1
     item_map: dict[int, dict] = {}
@@ -185,12 +194,35 @@ def _render(
             }
             counter += 1
 
+    if uncategorized_items:
+        lines.append(f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic</b>")
+        for item in uncategorized_items:
+            title = (item.get("title") or item["text"])[:80]
+            url = item["url"]
+            best_tag = item["best_tag"]
+            score = item["similarity_score"]
+            reasoning = _cap(f"closest existing tag: {best_tag} (cosine={score:.3f})")
+
+            lines.append(f'{counter}. <a href="{escape_html(url)}">{escape_html(title)}</a>')
+            lines.append(f"   <i>{escape_html(reasoning)}</i>")
+            lines.append("")
+
+            item_map[counter] = {
+                "url": url, "title": title, "text": item["text"],
+                "tags": ["uncategorized"],
+                "reasoning": f"closest existing tag: {best_tag} (cosine={score:.3f})",
+                "section": "uncategorized",
+            }
+            counter += 1
+
     total_rendered = len(reading) + len(courses) + len(project_entries)
+    footer_parts = [f"{total_rendered} plan items"]
+    if uncategorized_items:
+        footer_parts.append(f"{len(uncategorized_items)} uncategorized")
     if pending_approvals_count > 0:
-        footer = f"<i>{total_rendered} plan items · {pending_approvals_count} proposals pending approval · run: {run_id[:8]}</i>"
-    else:
-        footer = f"<i>{total_rendered} plan items · run: {run_id[:8]}</i>"
-    lines.append(footer)
+        footer_parts.append(f"{pending_approvals_count} proposals pending approval")
+    footer_parts.append(f"run: {run_id[:8]}")
+    lines.append(f"<i>{' · '.join(footer_parts)}</i>")
 
     return "\n".join(lines), item_map
 
@@ -201,6 +233,7 @@ def format_plan(
     run_id: str,
     trello_cards: list[dict],
     prioritized_project_work: list[dict] | None = None,
+    uncategorized_items: list[dict] | None = None,
 ) -> tuple[str, dict[int, dict]]:
     """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
     NOT Markdown. item_map keeps RAW (unescaped) title/text/reasoning --
@@ -224,21 +257,32 @@ def format_plan(
     enough. Chosen over splitting into multiple Telegram messages: fully
     contained here, zero changes needed to send_telegram_plan.py, the
     assemble_plan() node wrapper, or digest_item_map's one-entry-per-run
-    shape that carry_forward.py's lookup already depends on."""
+    shape that carry_forward.py's lookup already depends on.
+
+    uncategorized_items (2026-07-22, lightweight-uncategorized-flagging):
+    rendered in their own trailing section via _render() -- see that
+    function's docstring. Present even when reading/courses/project_entries
+    are all empty, so a week with genuinely nothing scored but some
+    uncategorized items still surfaces them rather than showing the
+    generic "nothing on the plan" message."""
     prioritized_project_work = prioritized_project_work or []
+    uncategorized_items = uncategorized_items or []
     plan_items = [i for i in classified_items if i["classification"] == "plan_item"]
     project_entries = _build_project_entries(prioritized_project_work, trello_cards, plan_items)
     courses = [i for i in plan_items if "course" in i.get("tags", [])]
     reading = [i for i in plan_items if "course" not in i.get("tags", []) and i.get("matched_card_id") is None]
 
-    if not reading and not courses and not project_entries:
+    if not reading and not courses and not project_entries and not uncategorized_items:
         msg = "📋 <b>Weekly Plan</b>\n\n<i>Nothing on the plan this week."
         if pending_approvals_count > 0:
             msg += f" {pending_approvals_count} proposals pending approval — check Telegram."
         msg += "</i>"
         return msg, {}
 
-    text, item_map = _render(reading, courses, project_entries, pending_approvals_count, run_id)
+    text, item_map = _render(
+        reading, courses, project_entries, pending_approvals_count, run_id,
+        uncategorized_items=uncategorized_items,
+    )
 
     if len(text) > MAX_PLAN_TEXT_CHARS:
         budget = REASONING_CHAR_BUDGET
@@ -246,10 +290,16 @@ def format_plan(
             f"format_plan: rendered text {len(text)} chars exceeds the {MAX_PLAN_TEXT_CHARS}-char "
             f"budget -- re-rendering with reasoning capped to {budget} chars per item (run={run_id})"
         )
-        text, item_map = _render(reading, courses, project_entries, pending_approvals_count, run_id, reasoning_budget=budget)
+        text, item_map = _render(
+            reading, courses, project_entries, pending_approvals_count, run_id,
+            reasoning_budget=budget, uncategorized_items=uncategorized_items,
+        )
         while len(text) > MAX_PLAN_TEXT_CHARS and budget > 20:
             budget //= 2
             logger.warning(f"format_plan: still over budget at {len(text)} chars -- shrinking reasoning cap to {budget} (run={run_id})")
-            text, item_map = _render(reading, courses, project_entries, pending_approvals_count, run_id, reasoning_budget=budget)
+            text, item_map = _render(
+                reading, courses, project_entries, pending_approvals_count, run_id,
+                reasoning_budget=budget, uncategorized_items=uncategorized_items,
+            )
 
     return text, item_map

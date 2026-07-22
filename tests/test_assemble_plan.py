@@ -40,12 +40,94 @@ def _priority_entry(matched_card_id="card1", source="new_item", item_url="https:
     }
 
 
+def _uncategorized(url="https://example.com/uncategorized", title="An uncategorized title",
+                    best_tag="new-tool-launch", similarity_score=0.186):
+    return {
+        "url": url, "title": title, "text": "body text of the uncategorized item",
+        "best_tag": best_tag, "similarity_score": similarity_score,
+    }
+
+
+_REAL_CYBERSECURITY_ITEM = _uncategorized(
+    url="https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top",
+    title="[AINews] AI Cybersecurity becomes top of mind",
+    best_tag="new-tool-launch",
+    similarity_score=0.251,
+)
+
+
 # ── Zero-items fallbacks ──────────────────────────────────────────────────────
 
 def test_zero_plan_items_zero_proposals_fallback():
     text, item_map = format_plan([], 0, RUN_ID, [])
     assert text == "📋 <b>Weekly Plan</b>\n\n<i>Nothing on the plan this week.</i>"
     assert item_map == {}
+
+
+# ── Uncategorized-flagging (2026-07-22, lightweight-uncategorized-flagging) ────
+# Same real demonstration case as assemble_digest: today's actual Latent
+# Space AI-cybersecurity item. Originally taste-prefiltered at cosine=0.186
+# vs "new-tool-launch" (threshold 0.30) when only the 51-char RSS
+# <description> teaser was embedded. After the same-day content-truncation
+# fix (rss_common.py now reads the full 29,364-char <content:encoded>
+# article), a LIVE re-check against the real current topic vectors moved
+# the score to 0.251 -- closer, but still below 0.30. Confirmed by direct
+# execution against the real store/embeddings, not assumed.
+
+def test_uncategorized_item_no_longer_vanishes_before_after():
+    before_text, before_map = format_plan([], 0, RUN_ID, [])
+    assert "cybersecurity" not in before_text.lower()
+    assert before_map == {}
+
+    after_text, after_map = format_plan(
+        [], 0, RUN_ID, [], uncategorized_items=[_REAL_CYBERSECURITY_ITEM]
+    )
+    assert "AI Cybersecurity becomes top of mind" in after_text
+    assert "https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top" in after_text
+    assert "new-tool-launch" in after_text
+    assert "0.251" in after_text
+    assert after_map[1]["url"] == "https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top"
+    assert after_map[1]["tags"] == ["uncategorized"]
+    assert "Nothing on the plan this week" not in after_text
+
+
+def test_uncategorized_section_appears_even_with_nothing_else_on_plan():
+    text, item_map = format_plan([], 0, RUN_ID, [], uncategorized_items=[_uncategorized()])
+    assert "Nothing on the plan this week" not in text
+    assert "1 item(s) didn't match any existing topic" in text
+    assert set(item_map.keys()) == {1}
+
+
+def test_uncategorized_numbering_continues_after_all_other_sections():
+    items = [
+        _plan_item(matched_card_id=None, title="Article A"),
+        _plan_item(matched_card_id=None, title="Course B", tags=["course"]),
+        _plan_item(matched_card_id="card1", title="Project C"),
+    ]
+    priority = [_priority_entry(matched_card_id="card1", item_url=items[2]["url"])]
+    text, item_map = format_plan(
+        items, 0, RUN_ID, [_card("card1")], priority,
+        uncategorized_items=[_uncategorized(title="Uncategorized D")],
+    )
+    assert item_map[1]["title"] == "Article A"
+    assert item_map[2]["title"] == "Course B"
+    assert item_map[3]["title"] == "Project C"
+    assert item_map[4]["title"] == "Uncategorized D"
+    assert text.index("Project C") < text.index("Uncategorized D")
+
+
+def test_footer_includes_uncategorized_count():
+    text, item_map = format_plan(
+        [_plan_item()], 0, RUN_ID, [], uncategorized_items=[_uncategorized(), _uncategorized()]
+    )
+    assert "1 plan items" in text
+    assert "2 uncategorized" in text
+
+
+def test_no_uncategorized_items_omits_the_section_entirely():
+    text, item_map = format_plan([_plan_item()], 0, RUN_ID, [], uncategorized_items=[])
+    assert "didn't match any existing topic" not in text
+    assert "uncategorized" not in text
 
 
 def test_zero_plan_items_with_proposals_includes_clause():
@@ -418,11 +500,11 @@ def test_item_map_numbering_continues_across_all_three_sections():
 # matched-item set. get_store() and record_plan_history() both mocked so
 # this stays fully offline.)
 
-def _sunday_state(classified_items, trello_cards=None, prioritized_project_work=None, run_id=RUN_ID):
+def _sunday_state(classified_items, trello_cards=None, prioritized_project_work=None, run_id=RUN_ID, uncategorized_items=None):
     return {
         "run_id": run_id, "classified_items": classified_items,
         "trello_cards": trello_cards or [], "prioritized_project_work": prioritized_project_work or [],
-        "pending_approvals": [],
+        "pending_approvals": [], "uncategorized_items": uncategorized_items or [],
     }
 
 

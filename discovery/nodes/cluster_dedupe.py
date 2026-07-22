@@ -123,9 +123,14 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     deduped, semantic_costs = dedupe_semantic(filterable_items, run_id)
     costs.extend(semantic_costs)
 
-    relevant, taste_costs = taste_prefilter(deduped, run_id)
+    relevant, uncategorized, taste_costs = taste_prefilter(deduped, run_id)
     costs.extend(taste_costs)
 
+    # uncategorized items deliberately do NOT join clustered_items -- they
+    # never reach score_node (no LLM call spent classifying content
+    # already known not to fit ALLOWED_TAGS), but are carried through in
+    # their own state field so assemble_digest/assemble_plan can surface
+    # them instead of them vanishing. See taste_prefilter's docstring.
     clustered_items = relevant + adhoc_items
     record_node_summary(
         run_id=run_id,
@@ -138,6 +143,7 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
 
     return {
         "clustered_items": clustered_items,
+        "uncategorized_items": uncategorized,
         "costs": costs,
         "stage": "clustered",
     }

@@ -53,7 +53,7 @@ from langgraph.store.base import PutOp
 from discovery.embeddings import embed_text, embed_texts, cosine_similarity, COST_PER_TOKEN_USD
 from discovery.nodes.score import ALLOWED_TAGS
 from sunday.memory_store_config import get_store
-from core.state import ClusteredItem, NodeCost
+from core.state import ClusteredItem, NodeCost, UncategorizedItem
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +155,23 @@ def _drop_record(item_id: str, similarity: float, compared_against_tag: str, run
     }
 
 
-def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tuple[list[ClusteredItem], list[NodeCost]]:
-    """Returns (surviving_items, cost_records)."""
+def taste_prefilter(
+    items: list[ClusteredItem], run_id: str = "unknown"
+) -> tuple[list[ClusteredItem], list[UncategorizedItem], list[NodeCost]]:
+    """Returns (surviving_items, uncategorized_items, cost_records).
+
+    uncategorized_items (2026-07-22, lightweight-uncategorized-flagging):
+    items whose best cosine similarity across every mapped topic vector
+    still falls below _THRESHOLD are NO LONGER silently discarded here --
+    they're returned separately, tagged with best_tag/similarity_score for
+    transparency, so assemble_digest/assemble_plan can surface them in a
+    trailing "didn't match any existing topic" section instead of them
+    vanishing without a trace. This is flagging only, NOT auto-tagging:
+    no new tag vector is created or auto-assigned, and these items never
+    reach score_node (no ALLOWED_TAGS classification is attempted on
+    content already known not to fit the existing vocabulary). The
+    prefilter_drops audit-log write below is unchanged -- still the
+    permanent record of every drop, real or resurfaced."""
     store = get_store()
     topic_vectors = _load_topic_vectors()
     if not topic_vectors:
@@ -164,13 +179,14 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
         # event) -- permissive default: let everything through rather
         # than dropping everything against an empty comparison set.
         logger.info("taste_vectors: no topic vectors yet, pre-filter skipped for this run")
-        return items, []
+        return items, [], []
 
     survivors: list[ClusteredItem] = []
+    uncategorized: list[UncategorizedItem] = []
     costs: list[NodeCost] = []
 
     if not items:
-        return survivors, costs
+        return survivors, uncategorized, costs
 
     # Embed every item in ONE batched call -- see semantic_dedup.py's
     # dedupe_semantic() for the same fix and the measured ~3.4x speedup
@@ -185,7 +201,7 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
         logger.debug(f"taste_vectors: AFTER embed_texts() ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
         logger.warning(f"taste_vectors: batch embed failed, all {len(items)} item(s) passed through unfiltered: {e}")
-        return list(items), [
+        return list(items), [], [
             NodeCost(
                 node_name="taste_prefilter", input_tokens=0, output_tokens=0,
                 cost_usd=0.0, latency_ms=0.0,
@@ -211,18 +227,25 @@ def taste_prefilter(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
             ))
         else:
             drop_records.append(_drop_record(item["url"], best_sim, best_tag, run_id))
+            uncategorized.append({
+                **item,
+                "best_tag": best_tag,
+                "similarity_score": round(best_sim, 3),
+            })
             costs.append(NodeCost(
                 node_name="taste_prefilter", input_tokens=tokens, output_tokens=0,
                 cost_usd=cost_usd, latency_ms=0.0,
-                error=f"dropped by taste pre-filter: best match {best_tag!r} cosine={best_sim:.3f} < {_THRESHOLD}",
+                error=f"uncategorized: best match {best_tag!r} cosine={best_sim:.3f} < {_THRESHOLD}",
             ))
 
     # One batched call covering every drop, instead of one store.put()
     # per drop -- same fix as filter_unseen/mark_seen/semantic_dedup.py.
+    # Unchanged by uncategorized-flagging: this audit log still records
+    # every sub-threshold item, whether or not it's also resurfaced above.
     if drop_records:
         logger.debug(f"taste_vectors: BEFORE store.batch() (drop_records, {len(drop_records)} record(s))")
         t0 = time.perf_counter()
         store.batch([PutOp(_DROPS_NAMESPACE, str(uuid.uuid4()), record) for record in drop_records])
         logger.debug(f"taste_vectors: AFTER store.batch() (drop_records) ({time.perf_counter() - t0:.3f}s)")
 
-    return survivors, costs
+    return survivors, uncategorized, costs
