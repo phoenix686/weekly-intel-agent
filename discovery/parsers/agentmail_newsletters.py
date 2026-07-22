@@ -88,6 +88,18 @@ cover (both real Substack failures above), directly shrinking exposure
 to whatever caused the real failure; tier 3 remains the only path for
 beehiiv and is still exposed to the same class of risk.
 
+SEEN-MARKING ON EXTRACTION FAILURE (2026-07-22, Step 4 audit, post-
+5cc11dd): traced the real control flow and found the code never marked
+ANY extraction failure read/seen -- correct for a transient resolution
+error (retryable), but wrong for a confirmed content-free email (a real
+welcome/subscription message with no post link anywhere), which would
+otherwise be re-fetched and re-erred on every future run forever, since
+it can never succeed. _extract_article_url now reports
+had_transient_error (True iff some tier-3 _resolve_redirect() call
+itself failed, distinct from "resolved fine but wasn't a post");
+fetch_agentmail_newsletters marks a confirmed-content-free message read
+but leaves a transiently-failed one unread for retry.
+
 No langgraph imports.
 """
 
@@ -177,7 +189,7 @@ def _decode_substack_redirect_2(href: str) -> str | None:
         return None
 
 
-def _extract_article_url(html: str) -> str | None:
+def _extract_article_url(html: str) -> tuple[str | None, bool]:
     """Three tiers, cheapest/most-robust first, over the SAME hrefs list
     (document order, first _MAX_LINKS_TO_RESOLVE only) -- see this
     module's docstring for the real 2026-07-22 production failure that
@@ -189,25 +201,43 @@ def _extract_article_url(html: str) -> str | None:
     3. Fall back to a real HTTP request per href (the original,
        only-ever mechanism) -- still needed for genuinely opaque
        tracking-only links (beehiiv, Substack's older redirect/{uuid}
-       format)."""
+       format).
+
+    Returns (url, had_transient_error). had_transient_error is True iff
+    at least one tier-3 _resolve_redirect() call returned None -- under
+    its documented contract (catches its own exceptions, never raises),
+    that specifically means the HTTP request itself failed (timeout,
+    connection error, non-2xx), not "resolved fine but wasn't a post" --
+    that second case is a normal iteration miss, not an error. Real
+    2026-07-22 finding (Step 4 audit): without this signal, a message
+    where every candidate href genuinely has no post anywhere (e.g. a
+    real welcome/subscription email) was indistinguishable from one that
+    failed only because resolution errored out network-side -- both
+    produced url=None with no way to tell them apart. Callers use this
+    to decide whether the failure is safe to mark read (confirmed, won't
+    change on retry) or must stay unread (retryable)."""
     hrefs = re.findall(r'href="([^"]+)"', html or "")
     candidates = hrefs[:_MAX_LINKS_TO_RESOLVE]
 
     for href in candidates:
         if _POST_PATH_PATTERN.search(href):
-            return href
+            return href, False
 
     for href in candidates:
         decoded = _decode_substack_redirect_2(href)
         if decoded and _POST_PATH_PATTERN.search(decoded):
-            return decoded
+            return decoded, False
 
+    had_transient_error = False
     for href in candidates:
         resolved = _resolve_redirect(href)
-        if resolved and _POST_PATH_PATTERN.search(resolved):
-            return resolved
+        if resolved is None:
+            had_transient_error = True
+            continue
+        if _POST_PATH_PATTERN.search(resolved):
+            return resolved, False
 
-    return None
+    return None, had_transient_error
 
 
 class _TextStripper(HTMLParser):
@@ -251,6 +281,18 @@ def fetch_agentmail_newsletters(
     so the next run doesn't reprocess it. The unread label IS the read
     window -- no separate date-range filter.
 
+    A message with no resolvable article URL is ALSO marked read, but
+    only if _extract_article_url confirms every candidate href was
+    checked without a resolution error (had_transient_error=False) --
+    i.e. it's a real content-free email (welcome/subscription
+    confirmation), not one that merely failed to resolve this run. A
+    resolution error (had_transient_error=True) leaves it unread so the
+    next run retries. Real gap found and fixed 2026-07-22 (Step 4 audit,
+    post-5cc11dd): before this, EVERY "no resolvable article URL" case
+    was left unread unconditionally -- safe for transient failures, but
+    meant a genuinely content-free email would be re-fetched and
+    re-erred on forever, since it can never succeed.
+
     A per-message failure (parse error, unrecognized sender, no
     resolvable article URL, mark-read failure) is recorded in errors and
     does not stop the rest of the batch -- same reliability contract as
@@ -285,9 +327,15 @@ def fetch_agentmail_newsletters(
                 continue
 
             html = message.extracted_html or message.html or ""
-            article_url = _extract_article_url(html)
+            article_url, had_transient_error = _extract_article_url(html)
             if not article_url:
-                errors.append((source_name, f"{label}: no resolvable article URL found in email body"))
+                if had_transient_error:
+                    errors.append((source_name, f"{label}: no resolvable article URL found in email body (resolution error -- left unread for retry)"))
+                    continue
+                errors.append((source_name, f"{label}: no resolvable article URL found in email body (confirmed content-free -- marking read)"))
+                client.inboxes.messages.update(
+                    inbox_id, item.message_id, add_labels=["read"], remove_labels=["unread"]
+                )
                 continue
 
             text_source = message.extracted_html or message.html or message.extracted_text or message.text or ""

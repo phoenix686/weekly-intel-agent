@@ -58,16 +58,19 @@ def test_extract_article_url_resolves_each_href_and_returns_first_real_post_matc
         "https://email.mg-d0.substack.com/c/tokenB": "https://magazine.sebastianraschka.com/action/disable_email",
     }
     with patch.object(agentmail_mod, "_resolve_redirect", side_effect=lambda url, timeout=10.0: resolved[url]):
-        assert _extract_article_url(html) == "https://magazine.sebastianraschka.com/p/coding-the-kv-cache-in-llms"
+        assert _extract_article_url(html) == ("https://magazine.sebastianraschka.com/p/coding-the-kv-cache-in-llms", False)
 
 
 def test_extract_article_url_returns_none_when_nothing_resolves_to_a_post():
     """The real signature of a welcome/onboarding email (confirmed via a
     real received message, 2026-07-18): every link resolves to something
-    real (subscribe, unsubscribe, about page) but none are a /p/ post."""
+    real (subscribe, unsubscribe, about page) but none are a /p/ post.
+    Every resolution succeeded (none returned None), so had_transient_error
+    must be False -- this is a confirmed content-free email, not a
+    resolution failure."""
     html = '<a href="https://email.mg-d0.substack.com/c/tokenA">Subscribe</a>'
     with patch.object(agentmail_mod, "_resolve_redirect", return_value="https://magazine.sebastianraschka.com/subscribe"):
-        assert _extract_article_url(html) is None
+        assert _extract_article_url(html) == (None, False)
 
 
 def test_extract_article_url_skips_unresolvable_links_and_keeps_checking():
@@ -75,7 +78,19 @@ def test_extract_article_url_skips_unresolvable_links_and_keeps_checking():
     def _resolve(url, timeout=10.0):
         return None if url == "https://x/dead" else "https://pub.substack.com/p/real-post"
     with patch.object(agentmail_mod, "_resolve_redirect", side_effect=_resolve):
-        assert _extract_article_url(html) == "https://pub.substack.com/p/real-post"
+        assert _extract_article_url(html) == ("https://pub.substack.com/p/real-post", False)
+
+
+def test_extract_article_url_reports_transient_error_when_a_resolution_fails_and_nothing_else_matches():
+    """Step 4 audit (2026-07-22): if a tier-3 resolution attempt itself
+    fails (_resolve_redirect returns None -- its documented signal for a
+    real request-level failure, not 'resolved but not a post'), and no
+    other candidate resolves to a post either, had_transient_error must
+    be True -- this run couldn't confirm the email is really content-free,
+    so the caller must not mark it read."""
+    html = '<a href="https://x/dead">Dead</a>'
+    with patch.object(agentmail_mod, "_resolve_redirect", return_value=None):
+        assert _extract_article_url(html) == (None, True)
 
 
 # ── Three-tier extraction fix (2026-07-22, real production bug) ────────────
@@ -98,7 +113,7 @@ def test_tier1_raw_href_already_matching_post_pattern_needs_zero_network_calls()
     with patch.object(agentmail_mod, "_resolve_redirect") as mock_resolve:
         result = _extract_article_url(html)
 
-    assert result == "https://open.substack.com/pub/technically/p/whats-harness-engineering?utm_source=substack"
+    assert result == ("https://open.substack.com/pub/technically/p/whats-harness-engineering?utm_source=substack", False)
     mock_resolve.assert_not_called()
 
 
@@ -124,8 +139,9 @@ def test_tier2_substack_redirect_2_decodes_without_network_calls():
     with patch.object(agentmail_mod, "_resolve_redirect") as mock_resolve:
         result = _extract_article_url(html)
 
-    assert result is not None
-    assert "theneuralmaze.substack.com/p/the-slm-ocr-course-live-q-and-a-and" in result
+    assert result[0] is not None
+    assert "theneuralmaze.substack.com/p/the-slm-ocr-course-live-q-and-a-and" in result[0]
+    assert result[1] is False
     mock_resolve.assert_not_called()
 
 
@@ -133,12 +149,15 @@ def test_tier2_ignores_redirect_2_link_that_decodes_to_a_non_post_url():
     """The first redirect/2/ link in the same real email decodes to a
     /subscribe page, not a post -- tier 2 must correctly skip it (fall
     through to the next href/tier), not treat any successful decode as a
-    match regardless of destination."""
+    match regardless of destination. Tier 3 then also fails via a real
+    resolution error (mocked return_value=None, _resolve_redirect's real
+    signal for a request-level failure), so had_transient_error is True --
+    this is NOT a confirmed content-free result."""
     html = f'<a href="{_REAL_NEURAL_MAZE_SUBSCRIBE_HREF}">subscribe</a>'
     with patch.object(agentmail_mod, "_resolve_redirect", return_value=None) as mock_resolve:
         result = _extract_article_url(html)
 
-    assert result is None
+    assert result == (None, True)
     mock_resolve.assert_called_once()  # falls through to tier 3, which also fails here
 
 
@@ -151,7 +170,7 @@ def test_tier3_still_used_for_genuinely_opaque_tracking_links():
     with patch.object(agentmail_mod, "_resolve_redirect", return_value="https://aiengineering.beehiiv.com/p/hands-on-build-a-browser-automation-agent") as mock_resolve:
         result = _extract_article_url(html)
 
-    assert result == "https://aiengineering.beehiiv.com/p/hands-on-build-a-browser-automation-agent"
+    assert result == ("https://aiengineering.beehiiv.com/p/hands-on-build-a-browser-automation-agent", False)
     mock_resolve.assert_called_once()
 
 
@@ -165,7 +184,7 @@ def test_tier1_before_tier2_when_both_present():
     with patch.object(agentmail_mod, "_resolve_redirect") as mock_resolve:
         result = _extract_article_url(html)
 
-    assert result == "https://open.substack.com/pub/name/p/first-match"
+    assert result == ("https://open.substack.com/pub/name/p/first-match", False)
     mock_resolve.assert_not_called()
 
 
@@ -259,7 +278,11 @@ def test_fetch_agentmail_newsletters_unrecognized_sender_grouped_under_stable_ke
     assert fake_messages.update_calls == []
 
 
-def test_fetch_agentmail_newsletters_no_resolvable_url_grouped_under_real_source_name():
+def test_fetch_agentmail_newsletters_confirmed_content_free_grouped_under_real_source_name_and_marked_read():
+    """Every href resolves successfully (no resolution error) but none is
+    a /p/ post -- a confirmed content-free email (real welcome message).
+    Step 4 fix (2026-07-22): this case is now marked read, since retrying
+    it next run could never produce a different outcome."""
     now = datetime.now(timezone.utc)
     fake_messages = _FakeMessagesClient(
         list_items=[_FakeMessageItem("msg-3", "Welcome to Ahead of AI!")],
@@ -279,10 +302,48 @@ def test_fetch_agentmail_newsletters_no_resolvable_url_grouped_under_real_source
     assert result.rows == []
     assert len(result.errors) == 1
     assert result.errors[0][0] == "Ahead of AI"  # grouped by real source, not the raw subject/message_id
-    assert fake_messages.update_calls == []  # eligible for retry -- not marked read
+    assert fake_messages.update_calls == [("inbox-123", "msg-3", ["read"], ["unread"])]
+
+
+def test_fetch_agentmail_newsletters_transient_resolve_error_not_marked_read():
+    """A transient failure during resolution (e.g. a real socket timeout in
+    _resolve_redirect's tier-3 HTTP call) must land the same way a
+    confirmed-no-URL message does: NOT marked read, so the next run
+    retries it. Confirmed real, 2026-07-22 (Step 4 audit): _resolve_redirect
+    itself always catches its own exceptions internally and returns None
+    (see its docstring), so this test raises past that boundary to prove
+    the outer per-message try/except in fetch_agentmail_newsletters also
+    skips the mark-read call on any real, uncaught exception -- same
+    outcome as the "no resolvable URL" path below, since today the code
+    has no way to tell "confirmed no post anywhere" apart from "one or
+    more resolutions errored out network-side"."""
+    now = datetime.now(timezone.utc)
+    fake_messages = _FakeMessagesClient(
+        list_items=[_FakeMessageItem("msg-transient", "Some real post")],
+        get_by_id={
+            "msg-transient": _FakeMessage(
+                "msg-transient", "Some real post",
+                '<a href="https://email.mg-d0.substack.com/c/tokenA">Read</a>',
+                "sebastianraschka@substack.com", now,
+            ),
+        },
+    )
+
+    with patch.object(agentmail_mod, "AgentMail", return_value=_FakeAgentMailClient(fake_messages)), \
+         patch.object(agentmail_mod, "_resolve_redirect", side_effect=TimeoutError("simulated network timeout")), \
+         patch.dict(os.environ, {"AGENTMAIL_API_KEY": "fake-key-for-test"}):
+        result = fetch_agentmail_newsletters("inbox-123", _SENDER_TO_NAME, limit=20)
+
+    assert result.rows == []
+    assert len(result.errors) == 1
+    assert "simulated network timeout" in result.errors[0][1]
+    assert fake_messages.update_calls == []  # not marked read -- eligible for retry
 
 
 def test_fetch_agentmail_newsletters_one_bad_message_does_not_block_the_others():
+    """"bad" resolves cleanly to a non-post (/subscribe) with no resolution
+    error -- confirmed content-free, so it's marked read too, alongside
+    "good"'s real successful parse. Neither one blocks the other."""
     now = datetime.now(timezone.utc)
     fake_messages = _FakeMessagesClient(
         list_items=[_FakeMessageItem("bad", "Welcome"), _FakeMessageItem("good", "Real post")],
@@ -303,7 +364,10 @@ def test_fetch_agentmail_newsletters_one_bad_message_does_not_block_the_others()
     assert len(result.rows) == 1
     assert result.rows[0]["author_name"] == "JamWithAI"
     assert len(result.errors) == 1
-    assert fake_messages.update_calls == [("inbox-123", "good", ["read"], ["unread"])]
+    assert fake_messages.update_calls == [
+        ("inbox-123", "bad", ["read"], ["unread"]),
+        ("inbox-123", "good", ["read"], ["unread"]),
+    ]
 
 
 def test_fetch_agentmail_newsletters_inbox_level_failure_never_raises():
