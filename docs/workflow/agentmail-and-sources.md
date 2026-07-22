@@ -176,7 +176,7 @@ the same way feed_url entries are), zero regressions.
 ## AgentMail full consolidation: 10 sources, real HTTP redirect resolution, gitignored config (2026-07-18)
 
 Replaces the section above entirely -- AGENTMAIL_API_KEY and a real
-inbox now exist (`<REDACTED_AGENTMAIL_ADDRESS>`), so this pass builds
+inbox now exist (`your-inbox-name@agentmail.to`), so this pass builds
 against real data throughout, not a placeholder.
 
 ### 1. Real, critical finding that invalidated the original design

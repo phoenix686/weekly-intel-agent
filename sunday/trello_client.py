@@ -7,7 +7,6 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-BRAIN_BOARD_ID = "<REDACTED_TRELLO_BOARD_ID>"
 TRELLO_API_BASE = "https://api.trello.com/1"
 RELEVANT_LIST_NAMES = {"Dump", "In Progress"}
 DUMP_LIST_NAME = "Dump"
@@ -53,8 +52,15 @@ def _trello_put(path: str, params: dict | None = None) -> dict | list:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
+def fetch_board_cards(board_id: str | None = None) -> list[dict]:
     """Fetch all open cards from all open lists on the Brain board.
+
+    board_id defaults to the real TRELLO_BOARD_ID env var, read lazily at
+    call time (same pattern as core/connection_pool.py's DB_URI read) --
+    never a hardcoded literal, and never silently falls back to a
+    placeholder (2026-07-22, pre-public-release remediation: the real
+    board ID used to be a module-level constant, committed and pushed in
+    plaintext).
 
     Returns plain dicts: card_id, name, desc, list_id, list_name, url,
     checklist_items, last_activity. Including list_name lets correlate_trello
@@ -66,6 +72,7 @@ def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
     cross-week movement use (Sunday plan LLM prioritization checkpoint,
     sub-phase 2) -- not read by correlate_trello today.
     """
+    board_id = board_id or os.environ["TRELLO_BOARD_ID"]
     all_lists = _trello_get(f"/boards/{board_id}/lists", {"filter": "open"})
     relevant = {lst["id"]: lst["name"] for lst in all_lists if lst["name"] in RELEVANT_LIST_NAMES}
     logger.info(f"fetch_board_cards: matched lists {list(relevant.values())} on board {board_id}")
@@ -94,14 +101,18 @@ def fetch_board_cards(board_id: str = BRAIN_BOARD_ID) -> list[dict]:
     return result
 
 
-def fetch_list_id_to_name_map(board_id: str = BRAIN_BOARD_ID) -> dict[str, str]:
+def fetch_list_id_to_name_map(board_id: str | None = None) -> dict[str, str]:
     """Return {list_id: list_name} for EVERY open list on the board, not just
     RELEVANT_LIST_NAMES -- includes "Done" and any other list a card might
     have moved to since it was last surfaced. Used by cross-week movement
     detection (Sunday plan LLM prioritization checkpoint, sub-phase 4) to
     resolve a card's current idList to a human-readable name; fetch_board_cards()
     itself deliberately still only fetches Dump/In Progress cards -- Done-list
-    cards should never enter correlate_trello's matching pool."""
+    cards should never enter correlate_trello's matching pool.
+
+    board_id defaults to the real TRELLO_BOARD_ID env var, read lazily at
+    call time -- see fetch_board_cards()'s docstring."""
+    board_id = board_id or os.environ["TRELLO_BOARD_ID"]
     all_lists = _trello_get(f"/boards/{board_id}/lists", {"filter": "open"})
     return {lst["id"]: lst["name"] for lst in all_lists}
 
@@ -125,8 +136,11 @@ def fetch_card_current_state(card_id: str) -> dict | None:
     return {"card_id": card["id"], "name": card["name"], "list_id": card["idList"], "closed": card["closed"]}
 
 
-def get_dump_list_id(board_id: str = BRAIN_BOARD_ID) -> str:
-    """Return the list ID for the Dump list. Used when creating new proposal cards."""
+def get_dump_list_id(board_id: str | None = None) -> str:
+    """Return the list ID for the Dump list. Used when creating new proposal
+    cards. board_id defaults to the real TRELLO_BOARD_ID env var, read
+    lazily at call time -- see fetch_board_cards()'s docstring."""
+    board_id = board_id or os.environ["TRELLO_BOARD_ID"]
     all_lists = _trello_get(f"/boards/{board_id}/lists", {"filter": "open"})
     for lst in all_lists:
         if lst["name"] == DUMP_LIST_NAME:
