@@ -232,3 +232,70 @@ def test_sunday_bucket_sources_use_216h_cutoff():
 
     titles = [r["title"] for r in result.rows]
     assert titles == ["Within 9 days"]
+
+
+def test_full_text_prefers_content_encoded_over_description_real_fixture():
+    """The confirmed root cause of the empty-digest investigation: item
+    text was read from RSS's <description> teaser only, discarding the
+    much longer <content:encoded> body already present in the same
+    response. Real fixture, captured live 2026-07-22 from
+    https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top --
+    <description> is 51 chars ("Several new Cyber headlines make us
+    observe a trend"), <content:encoded> is 29,368 chars of the real
+    article. `text` must now be the long one, not the 51-char teaser
+    that produced a cosine=0.186 taste-prefilter drop on 2026-07-22."""
+    fixture_path = Path(__file__).parent / "fixtures" / "latent_space_cybersecurity_item.xml"
+    body = fixture_path.read_bytes()
+
+    with patch("urllib.request.urlopen", return_value=_mock_response(body, content_type="application/rss+xml")):
+        result = fetch_rss_feed(
+            "https://www.latent.space/feed", source_name="Latent Space", max_age_hours=48
+        )
+
+    assert result.errors == []
+    assert len(result.rows) == 1
+    row = result.rows[0]
+    assert row["url"] == "https://www.latent.space/p/ainews-ai-cybersecurity-becomes-top"
+    # Not the 51-char description teaser -- the real article body.
+    assert len(row["text"]) > 25000, f"expected the full ~29,368-char article, got {len(row['text'])} chars"
+    assert "Several new Cyber headlines make us observe a trend" not in row["text"][:100]
+
+
+def test_full_text_falls_back_to_description_when_content_encoded_absent():
+    """TLDR AI and plain feeds with no <content:encoded> at all must keep
+    working exactly as before -- <description> stays the source, and an
+    absent/empty <description> still degrades to "" rather than raising."""
+    body = (
+        b"<rss><channel><item>"
+        b"<title>Plain feed item</title>"
+        b"<link>https://example.com/plain</link>"
+        b"<description>Just a short teaser, no content:encoded here.</description>"
+        b"</item></channel></rss>"
+    )
+    with patch("urllib.request.urlopen", return_value=_mock_response(body)):
+        result = fetch_rss_feed("https://example.com/feed", source_name="test")
+
+    assert result.errors == []
+    assert len(result.rows) == 1
+    assert result.rows[0]["text"] == "Just a short teaser, no content:encoded here."
+
+
+def test_full_text_empty_content_encoded_falls_back_to_description():
+    """An empty <content:encoded/> tag (present but blank) must not win
+    over a real, non-empty <description> -- "present but empty" is
+    treated the same as "absent"."""
+    body = (
+        b'<rss xmlns:content="http://purl.org/rss/1.0/modules/content/">'
+        b"<channel><item>"
+        b"<title>Empty encoded item</title>"
+        b"<link>https://example.com/empty-encoded</link>"
+        b"<description>Real teaser text here.</description>"
+        b"<content:encoded></content:encoded>"
+        b"</item></channel></rss>"
+    )
+    with patch("urllib.request.urlopen", return_value=_mock_response(body)):
+        result = fetch_rss_feed("https://example.com/feed", source_name="test")
+
+    assert result.errors == []
+    assert len(result.rows) == 1
+    assert result.rows[0]["text"] == "Real teaser text here."

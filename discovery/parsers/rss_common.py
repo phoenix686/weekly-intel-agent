@@ -16,6 +16,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 _DC_CREATOR = "{http://purl.org/dc/elements/1.1/}creator"
+_CONTENT_ENCODED = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
 # Real browser UA, not a bot-identifying string (was "weekly-intel-bot/1.0"
 # -- 2026-07-17, real production 403s from 4 Substack-hosted sources on a
@@ -124,6 +125,25 @@ def _text(item: ET.Element, tag: str) -> str:
     return child.text.strip()
 
 
+def _full_text(item: ET.Element) -> str:
+    """Prefer the full article body over the RSS <description> teaser.
+    WordPress/Substack-style feeds carry the complete article in
+    <content:encoded>, in the SAME response already fetched -- no extra
+    network call -- but only <description> was ever read, silently
+    discarding it. Confirmed 2026-07-22: MarkTechPost/The New Stack/
+    Latent Space all provide content:encoded 10x-580x longer than
+    description (e.g. Latent Space's AI-cybersecurity item: 51 chars of
+    description vs 29,368 chars of real article). This was the confirmed
+    root cause of items being taste-prefiltered on ~50-300 characters of
+    near-content-free teaser text instead of the real article -- not a
+    tag-vocabulary or threshold problem. TLDR AI provides neither tag for
+    any item (falls through to the empty-string description, same as
+    before this fix -- no regression, just no improvement for that
+    source, which needs a different fetch strategy entirely)."""
+    encoded = _text(item, _CONTENT_ENCODED)
+    return encoded if encoded else _text(item, "description")
+
+
 def _parse_pubdate(raw: str) -> datetime:
     if not raw:
         return datetime.now(timezone.utc)
@@ -159,6 +179,11 @@ def fetch_rss_feed(
     Row keys match RawItem's shape minus `source` (the caller sets that):
         title, text, url, author_name, author_handle, fetched_at,
         is_thread, thread_contents, expanded_urls, has_video, video_url
+
+    `text` is the full article body (<content:encoded>) when the feed
+    provides one, falling back to the <description> teaser otherwise --
+    see _full_text(). Not truncated here; score_node's Claude call does
+    its own [:500] slice at that later stage, unaffected by this.
 
     max_age_hours: when set, an item whose pubDate is older than this many
     hours is dropped before it's ever returned -- cheaper than parsing it,
@@ -228,13 +253,13 @@ def fetch_rss_feed(
                 continue
 
             title = _text(item, "title")
-            description = _text(item, "description")
+            body_text = _full_text(item)
             author = _text(item, _DC_CREATOR) or _text(item, "author")
-            has_video, video_url = _detect_video(description)
+            has_video, video_url = _detect_video(body_text)
 
             rows.append({
                 "title": title or link,
-                "text": description,
+                "text": body_text,
                 "url": link,
                 "author_name": author,
                 "author_handle": "",
