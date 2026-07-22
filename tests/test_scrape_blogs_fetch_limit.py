@@ -60,7 +60,7 @@ def test_real_blog_sources_yaml_daily_entries_all_have_fetch_limit_15():
     from discovery.blog_sources_config import load_blog_sources
     entries = load_blog_sources()
     daily_entries = [e for e in entries if e["bucket"] == "daily"]
-    assert len(daily_entries) == 4, f"expected 4 daily-bucket entries, got {len(daily_entries)}"
+    assert len(daily_entries) == 5, f"expected 5 daily-bucket entries, got {len(daily_entries)}"
     for entry in daily_entries:
         assert entry.get("fetch_limit") == 15, f"{entry['name']!r} expected fetch_limit=15, got {entry.get('fetch_limit')!r}"
 

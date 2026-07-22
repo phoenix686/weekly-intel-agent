@@ -61,6 +61,11 @@
   bucket: daily
   fetch_limit: 15
 
+- name: "Technically"
+  feed_url: "https://read.technically.dev/feed"
+  bucket: daily
+  fetch_limit: 15
+
 - name: "Hacker News (Show HN)"
   feed_url: "https://hnrss.org/show"
   bucket: sunday
