@@ -14,6 +14,7 @@ from unittest.mock import patch, MagicMock
 from discovery.parsers.scrape_blogs import fetch_one_source, _DEFAULT_FETCH_LIMIT
 from discovery.parsers.rss_common import ParseResult as RssParseResult
 from discovery.parsers.anthropic_blog import ParseResult as AnthropicParseResult
+from discovery.parsers.tldr_ai import ParseResult as TldrParseResult
 
 
 def test_feed_url_entry_passes_its_own_fetch_limit():
@@ -36,6 +37,29 @@ def test_feed_url_entry_without_fetch_limit_falls_back_to_default():
     mock_fetch.assert_called_once_with(
         "https://example.com/feed", source_name="Test Feed", limit=_DEFAULT_FETCH_LIMIT, max_age_hours=48
     )
+
+
+def test_roundup_entry_dispatches_to_fetch_tldr_roundup_not_fetch_rss_feed():
+    """A feed_url entry marked roundup: true (TLDR AI, 2026-07-22) goes
+    through fetch_tldr_roundup(), not the plain fetch_rss_feed() path --
+    its RSS carries zero real content, only issue-level discovery."""
+    entry = {"name": "TLDR AI", "feed_url": "https://tldr.tech/api/rss/ai", "bucket": "daily", "fetch_limit": 15, "roundup": True}
+
+    with patch("discovery.parsers.scrape_blogs.fetch_tldr_roundup", return_value=TldrParseResult(rows=[])) as mock_roundup, \
+         patch("discovery.parsers.scrape_blogs.fetch_rss_feed") as mock_plain:
+        fetch_one_source(entry)
+
+    mock_roundup.assert_called_once_with(
+        "https://tldr.tech/api/rss/ai", source_name="TLDR AI", limit=15, max_age_hours=48
+    )
+    mock_plain.assert_not_called()
+
+
+def test_real_blog_sources_yaml_tldr_ai_is_marked_roundup():
+    from discovery.blog_sources_config import load_blog_sources
+    entries = load_blog_sources()
+    tldr = next(e for e in entries if e["name"] == "TLDR AI")
+    assert tldr.get("roundup") is True
 
 
 def test_scrape_url_entry_passes_its_own_fetch_limit():

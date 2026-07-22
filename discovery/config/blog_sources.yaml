@@ -7,6 +7,13 @@
 # to fetch_one_source()'s own default of 30 when omitted, see
 # discovery/parsers/scrape_blogs.py).
 #
+# `roundup: true` (feed_url entries only, currently only TLDR AI): the
+# feed itself carries zero real content, only issue-level discovery
+# (title/link/pubDate); real content lives on each issue's own linked
+# page, itself a multi-item roundup. Routed through
+# discovery/parsers/tldr_ai.py's fetch_tldr_roundup() instead of the
+# plain fetch_rss_feed() path -- see that module's docstring.
+#
 # bucket=daily entries fire on both daily and sunday invocations.
 # bucket=sunday entries fire on sunday only. See
 # discovery/parsers/scrape_blogs.py's fetch_blog_entries().
@@ -35,6 +42,16 @@
   feed_url: "https://tldr.tech/api/rss/ai"
   bucket: daily
   fetch_limit: 15
+  # roundup: true (2026-07-22, real fix): TLDR's RSS carries zero
+  # <description>/<content:encoded> (confirmed live) -- real content only
+  # exists on each issue's own https://tldr.tech/ai/{date} page, itself a
+  # multi-item roundup (19 unrelated blurbs/sections on the 2026-07-21
+  # issue), not a single article. discovery/parsers/tldr_ai.py's
+  # fetch_tldr_roundup() fetches the RSS for issue-level discovery only,
+  # then fetches+parses each surviving issue's own page into its
+  # individual blurbs. fetch_limit still bounds how many ISSUES stage 1
+  # considers, same as any other feed_url entry.
+  roundup: true
 
 - name: "LangChain Blog"
   feed_url: "https://blog.langchain.dev/rss.xml"

@@ -10,7 +10,13 @@ Dispatches per entry: `feed_url` entries go through
 discovery/parsers/rss_common.py's fetch_rss_feed() (RSS/Atom);
 `scrape_url` entries (currently only Anthropic's dev blog, which has no
 RSS feed) go through discovery/parsers/anthropic_blog.py's
-fetch_anthropic_engineering().
+fetch_anthropic_engineering(); `feed_url` entries additionally marked
+`roundup: true` (currently only TLDR AI, whose RSS carries real
+title/link/pubDate per issue but zero real content -- confirmed
+2026-07-22) go through discovery/parsers/tldr_ai.py's
+fetch_tldr_roundup() instead, which fetches each surviving issue's own
+roundup page and parses it into its individual blurbs rather than
+treating the whole day's page as one item.
 
 AgentMail-sourced newsletters (discovery/config/agentmail_sources.yaml,
 gitignored -- real sender-address-to-source-name mapping for a shared
@@ -31,6 +37,7 @@ from dataclasses import dataclass, field
 
 from discovery.parsers.rss_common import fetch_rss_feed
 from discovery.parsers.anthropic_blog import fetch_anthropic_engineering
+from discovery.parsers.tldr_ai import fetch_tldr_roundup
 from discovery.parsers.agentmail_newsletters import fetch_agentmail_newsletters
 from discovery.blog_sources_config import entries_for_context
 from discovery.agentmail_sources_config import load_agentmail_config
@@ -88,6 +95,15 @@ def fetch_one_source(entry: dict) -> SourceResult:
     many items are fetched from that source -- falls back to
     _DEFAULT_FETCH_LIMIT when the entry doesn't set one."""
     fetch_limit = entry.get("fetch_limit", _DEFAULT_FETCH_LIMIT)
+
+    if "feed_url" in entry and entry.get("roundup"):
+        max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]
+        result = fetch_tldr_roundup(
+            entry["feed_url"], source_name=entry["name"], limit=fetch_limit, max_age_hours=max_age
+        )
+        rows = [row for row in result.rows if row["title"]]
+        error = "; ".join(msg for _, msg in result.errors) if result.errors else None
+        return SourceResult(name=entry["name"], rows=rows, error=error)
 
     if "feed_url" in entry:
         max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]
