@@ -100,13 +100,28 @@ def assemble_digest(state: DailyGraphState) -> dict:
         state["scored_items"], state["run_id"], uncategorized_items=state["uncategorized_items"]
     )
 
+    generated_at = datetime.now(timezone.utc).isoformat()
+
     get_store().put(
         ("companion",),
         "current_daily_digest",
         {
             "run_id": state["run_id"],
             "digest_text": text,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": generated_at,
+        },
+    )
+
+    total_kept = len([i for i in state["scored_items"] if i["keep"]])
+    village_summary = f"{total_kept} item(s) kept" if total_kept else "no new content"
+    get_store().put(
+        ("village",),
+        f"event:{generated_at}",
+        {
+            "agent": "weekly-intel",
+            "event_type": "digest_ready",
+            "summary": village_summary,
+            "timestamp": generated_at,
         },
     )
 

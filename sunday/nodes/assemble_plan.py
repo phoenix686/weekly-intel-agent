@@ -46,13 +46,27 @@ def assemble_plan(state: SundayGraphState) -> dict:
     ]
     record_plan_history(state["run_id"], surfaced_cards)
 
+    generated_at = datetime.now(timezone.utc).isoformat()
+
     get_store().put(
         ("companion",),
         "current_weekly_plan",
         {
             "run_id": state["run_id"],
             "plan_text": text,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": generated_at,
+        },
+    )
+
+    village_summary = f"{len(item_map)} plan item(s)" if item_map else "no new content"
+    get_store().put(
+        ("village",),
+        f"event:{generated_at}",
+        {
+            "agent": "weekly-intel",
+            "event_type": "plan_ready",
+            "summary": village_summary,
+            "timestamp": generated_at,
         },
     )
 
