@@ -55,8 +55,60 @@ logger = logging.getLogger(__name__)
 
 _NAMESPACE = ("weekly_intel", "recent_item_embeddings")
 _DROPS_NAMESPACE = ("weekly_intel", "prefilter_drops")
+_FAILURES_NAMESPACE = ("weekly_intel", "embedding_failures")
 _WINDOW_DAYS = 7
 _THRESHOLD = 0.90
+
+# Second, lower tier: catches "same announcement, different dedicated
+# article" (e.g. a MarkTechPost writeup and an x.com post about the same
+# Cursor Router launch, 10 hours apart across two runs) -- confirmed real,
+# NOT caught by _THRESHOLD since the two articles are worded completely
+# differently, just about the same story. Calibrated 2026-07-23 against
+# the two real confirmed pairs available that session (Laguna S 2.1
+# HF-repo vs. MarkTechPost write-up, within-run: cosine 0.6423; the Cursor
+# Router MarkTechPost-vs-x.com pair, cross-run: cosine 0.6356) against 4
+# real unrelated-item control pairs (highest control: 0.5435). A THIN
+# margin off only 2 positive data points -- treat as a starting point to
+# refine as more real runs accumulate, not a final number. Never applied
+# when either side is a roundup-style item -- see _is_roundup_item.
+_CONTENT_OVERLAP_THRESHOLD = 0.60
+
+# NVIDIA's /v1/embeddings endpoint hard-caps input at 65,536 characters
+# per text (confirmed live, 2026-07-23: a real 76,757-char MarkTechPost
+# article 400'd the entire batch call). Any single oversized item used to
+# silently take down semantic dedup for the WHOLE run -- the batch-wide
+# except below passed every item through unfiltered AND skipped writing
+# to recent_item_embeddings, so the window never rebuilt itself the way
+# this module's NVIDIA-swap docstring assumed it would. 8000 chars is
+# far under the real cap with room for many items per batch, and is
+# plenty for a similarity comparison -- a full 76K-char article doesn't
+# need to be embedded in full to detect topical overlap. Separate from
+# score_node's own 500-char truncation for its Claude prompt -- that's a
+# different call, different budget, different purpose.
+_MAX_EMBED_CHARS = 8000
+
+
+def _record_embedding_failure(run_id: str, item_count: int, error: str) -> None:
+    """Durable record of a batch embed failure -- so semantic dedup going
+    silently no-op for weeks (as it did after the 2026-07-19 NVIDIA swap,
+    undetected until this session's live calibration work stumbled into
+    the real 400) can't recur unnoticed again. A failed write here must
+    never block the graceful-degradation path it's describing, same
+    reliability requirement as every other observability write in this
+    project (approval_log, node_summary)."""
+    try:
+        get_store().put(
+            _FAILURES_NAMESPACE,
+            str(uuid.uuid4()),
+            {
+                "run_id": run_id,
+                "item_count": item_count,
+                "error": error,
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as e:
+        logger.warning(f"semantic_dedup: embedding_failures write itself failed (run={run_id}): {e}")
 
 
 def _load_window() -> list[dict]:
@@ -85,19 +137,52 @@ def _load_window() -> list[dict]:
     return live
 
 
-def _drop_record(item_id: str, similarity: float, compared_against_item_id: str, run_id: str) -> dict:
+def _drop_record(item_id: str, similarity: float, compared_against_item_id: str, run_id: str,
+                  filter_type: str = "dedup") -> dict:
     """Builds a prefilter_drops record without writing it -- the caller
     collects these across the whole per-item loop and writes them all in
     ONE store.batch() call at the end, instead of one store.put() per
-    drop (same batching fix as filter_unseen/mark_seen, 2026-07-17)."""
+    drop (same batching fix as filter_unseen/mark_seen, 2026-07-17).
+
+    filter_type distinguishes the two dedup tiers ("dedup" = near-verbatim
+    @ _THRESHOLD, "content_overlap" = same-story-different-article @
+    _CONTENT_OVERLAP_THRESHOLD) so the real similarity_score distribution
+    per tier stays queryable here as more runs accumulate -- 0.60 was
+    calibrated from exactly 2 confirmed real pairs and 4 controls
+    (2026-07-23), a starting point to refine, not a locked number."""
     return {
         "item_id": item_id,
-        "filter_type": "dedup",
+        "filter_type": filter_type,
         "similarity_score": similarity,
         "compared_against_item_id": compared_against_item_id,
         "compared_against_tag": None,
         "run_id": run_id,
     }
+
+
+def _is_roundup_item(item: dict) -> bool:
+    """Identifies aggregator/roundup-style content that the content-overlap
+    tier (see _CONTENT_OVERLAP_THRESHOLD) must never drop against, per
+    Case A from the 2026-07-23 content-overlap investigation: a roundup's
+    single whole-document embedding is a blend across many stories, so a
+    high similarity to one dedicated article is not reliable evidence of
+    which specific story overlaps (real calibration data showed confirmed
+    roundup/individual overlaps scoring anywhere from 0.03 to 0.58,
+    fully overlapping the unrelated-control range) -- catching that
+    properly needs per-story chunking, deferred to its own design pass.
+    This guard only protects the NEW lower threshold; the existing
+    near-verbatim _THRESHOLD tier is unaffected (a roundup being
+    near-identical to a previous run's near-identical roundup is still a
+    real duplicate).
+
+    source == "TLDR AI" matches blog_sources.yaml's roundup: true config
+    flag (even though TLDR issues are pre-split into individual blurbs by
+    fetch_tldr_roundup() before reaching this function -- kept as a
+    defensive match on the literal source name). The "[AINews]" title
+    prefix is the real, currently-observed signal (Latent Space's
+    aggregation-format posts) -- same prefix-based identification pattern
+    already used for Hacker News's "Show HN:" in discovery/nodes/score.py."""
+    return item.get("source") == "TLDR AI" or (item.get("title") or "").startswith("[AINews]")
 
 
 def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tuple[list[ClusteredItem], list[NodeCost]]:
@@ -123,15 +208,19 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
     logger.debug(f"semantic_dedup: BEFORE embed_texts() ({len(items)} item(s))")
     t0 = time.perf_counter()
     try:
-        all_vectors, all_tokens = embed_texts([f"{item['title']}\n\n{item['text']}" for item in items])
+        all_vectors, all_tokens = embed_texts(
+            [f"{item['title']}\n\n{item['text']}"[:_MAX_EMBED_CHARS] for item in items]
+        )
         logger.debug(f"semantic_dedup: AFTER embed_texts() ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
+        error_msg = f"embed failed, item passed through unfiltered: {e}"
         logger.warning(f"semantic_dedup: batch embed failed, all {len(items)} item(s) passed through unfiltered: {e}")
+        _record_embedding_failure(run_id, len(items), str(e))
         return list(items), [
             NodeCost(
                 node_name="semantic_dedup", input_tokens=0, output_tokens=0,
                 cost_usd=0.0, latency_ms=0.0,
-                error=f"embed failed, item passed through unfiltered: {e}",
+                error=error_msg,
             )
             for _ in items
         ]
@@ -140,27 +229,43 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
 
     for item, vector, tokens in zip(items, all_vectors, all_tokens):
         cost_usd = round(tokens * COST_PER_TOKEN_USD, 8)
+        item_is_roundup = _is_roundup_item(item)
 
-        cross_run_match = next(
-            ((entry, cosine_similarity(vector, entry["embedding_vector"])) for entry in window
-             if cosine_similarity(vector, entry["embedding_vector"]) >= _THRESHOLD),
-            None,
-        )
+        cross_run_match = None
+        for entry in window:
+            sim = cosine_similarity(vector, entry["embedding_vector"])
+            if sim >= _THRESHOLD:
+                match_type = "dedup"
+            elif sim >= _CONTENT_OVERLAP_THRESHOLD and not item_is_roundup and not entry.get("is_roundup", False):
+                match_type = "content_overlap"
+            else:
+                continue
+            if cross_run_match is None or sim > cross_run_match[1]:
+                cross_run_match = (entry, sim, match_type)
+
         if cross_run_match is not None:
-            entry, sim = cross_run_match
-            drop_records.append(_drop_record(item["url"], sim, entry["url"], run_id))
+            entry, sim, match_type = cross_run_match
+            drop_records.append(_drop_record(item["url"], sim, entry["url"], run_id, filter_type=match_type))
+            tier_label = "near-verbatim" if match_type == "dedup" else "content-overlap"
             costs.append(NodeCost(
                 node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
                 cost_usd=cost_usd, latency_ms=0.0,
-                error=f"dropped as duplicate of previously-seen {entry['url']} (cosine={sim:.3f})",
+                error=f"dropped as {tier_label} duplicate of previously-seen {entry['url']} (cosine={sim:.3f})",
             ))
             continue
 
-        within_run_match = next(
-            ((idx, cosine_similarity(vector, sv)) for idx, sv in enumerate(survivor_vectors)
-             if cosine_similarity(vector, sv) >= _THRESHOLD),
-            None,
-        )
+        within_run_match = None
+        for idx, sv in enumerate(survivor_vectors):
+            sim = cosine_similarity(vector, sv)
+            if sim >= _THRESHOLD:
+                match_type = "dedup"
+            elif sim >= _CONTENT_OVERLAP_THRESHOLD and not item_is_roundup and not _is_roundup_item(survivors[idx]):
+                match_type = "content_overlap"
+            else:
+                continue
+            if within_run_match is None or sim > within_run_match[1]:
+                within_run_match = (idx, sim, match_type)
+
         if within_run_match is None:
             survivors.append(item)
             survivor_vectors.append(vector)
@@ -169,28 +274,32 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
                 cost_usd=cost_usd, latency_ms=0.0,
             ))
         else:
-            idx, sim = within_run_match
+            idx, sim, match_type = within_run_match
             existing = survivors[idx]
+            tier_label = "near-verbatim" if match_type == "dedup" else "content-overlap"
             # Earliest-published wins -- not fuller text (verbosity isn't
             # quality). Ties (identical fetched_at) keep the existing
             # survivor, matching _pick_representative's tie-break style
-            # elsewhere in the pipeline.
+            # elsewhere in the pipeline. Same tie-break for both tiers --
+            # "first-seen" (confirmed decision, 2026-07-23) means earliest
+            # published, not earliest processed, matching this existing
+            # near-verbatim behavior rather than introducing a second rule.
             if item["fetched_at"] < existing["fetched_at"]:
                 dropped_url = existing["url"]
                 survivors[idx] = item
                 survivor_vectors[idx] = vector
-                drop_records.append(_drop_record(dropped_url, sim, item["url"], run_id))
+                drop_records.append(_drop_record(dropped_url, sim, item["url"], run_id, filter_type=match_type))
                 costs.append(NodeCost(
                     node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
                     cost_usd=cost_usd, latency_ms=0.0,
-                    error=f"kept over near-duplicate {dropped_url} (cosine={sim:.3f}, published earlier)",
+                    error=f"kept over {tier_label} duplicate {dropped_url} (cosine={sim:.3f}, published earlier)",
                 ))
             else:
-                drop_records.append(_drop_record(item["url"], sim, existing["url"], run_id))
+                drop_records.append(_drop_record(item["url"], sim, existing["url"], run_id, filter_type=match_type))
                 costs.append(NodeCost(
                     node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
                     cost_usd=cost_usd, latency_ms=0.0,
-                    error=f"dropped as duplicate of {existing['url']} (cosine={sim:.3f})",
+                    error=f"dropped as {tier_label} duplicate of {existing['url']} (cosine={sim:.3f})",
                 ))
 
     # Two batched store.batch() calls covering every drop/survivor at
@@ -214,6 +323,7 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
                 "embedding_vector": vector,
                 "fetched_at": item["fetched_at"],
                 "scored_at": scored_at,
+                "is_roundup": _is_roundup_item(item),
             })
             for item, vector in zip(survivors, survivor_vectors)
         ])

@@ -557,8 +557,14 @@ def test_assemble_plan_still_writes_current_weekly_plan():
          patch("sunday.nodes.assemble_plan.record_plan_history"):
         assemble_plan(_sunday_state(items))
 
-    fake_store.put.assert_called_once()
-    namespace, key, value = fake_store.put.call_args[0]
+    # Two puts now: the existing ("companion",) write, plus the
+    # ("village",) event write added alongside it (2026-07-23,
+    # village-namespace event writes) -- checking the companion call
+    # specifically rather than assert_called_once.
+    assert fake_store.put.call_count == 2
+    companion_calls = [c for c in fake_store.put.call_args_list if c.args[0] == ("companion",)]
+    assert len(companion_calls) == 1
+    namespace, key, value = companion_calls[0].args
     assert namespace == ("companion",)
     assert key == "current_weekly_plan"
     assert value["run_id"] == RUN_ID
