@@ -4,6 +4,7 @@ import time
 import anthropic
 from core.state import DiscoverySubgraphState, ScoredItem, NodeCost
 from discovery.seen_items import mark_seen
+from discovery.scored_items_log import log_scored_items
 from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
@@ -165,6 +166,8 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         logger.info(f"dry_run=True -- skipping mark_seen() for {len(all_scored)} item(s)")
     else:
         mark_seen([item["url"] for item in all_scored])
+
+    log_scored_items(run_id, all_scored)
 
     kept_count = sum(1 for item in all_scored if item["keep"])
     record_node_summary(

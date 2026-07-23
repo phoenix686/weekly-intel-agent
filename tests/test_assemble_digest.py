@@ -100,7 +100,7 @@ def test_uncategorized_item_map_entry_carries_best_tag_and_score_in_reasoning():
 def test_footer_includes_uncategorized_count():
     kept = [_item(keep=True)]
     text, item_map = format_digest(kept, RUN_ID, uncategorized_items=[_uncategorized(), _uncategorized()])
-    assert "1 scored · 1 kept · 2 uncategorized" in text
+    assert "1 scored · 1/1 shown · 2 uncategorized" in text
 
 
 def test_no_uncategorized_items_omits_the_section_entirely():
@@ -167,7 +167,17 @@ def test_footer_counts_all_scored_not_just_kept():
     kept = [_item(keep=True) for _ in range(3)]
     dropped = [_item(keep=False) for _ in range(2)]
     text, item_map = format_digest(kept + dropped, RUN_ID)
-    assert "5 scored · 3 kept" in text
+    assert "5 scored · 3/3 shown" in text
+
+
+def test_footer_shown_count_reflects_max_digest_items_truncation():
+    """The real bug this session found: with more kept items than
+    MAX_DIGEST_ITEMS, the footer must show the TRUNCATED shown count, not
+    the full kept count -- previously the footer claimed the full kept
+    number even though only MAX_DIGEST_ITEMS were actually rendered."""
+    items = [_item(keep=True, title=f"Item {i}") for i in range(22)]
+    text, item_map = format_digest(items, RUN_ID)
+    assert f"22 scored · {MAX_DIGEST_ITEMS}/22 shown" in text
 
 
 def test_footer_uses_first_8_chars_of_run_id():

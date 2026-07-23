@@ -4,9 +4,11 @@ before this file (confirmed by grep last session). Covers the actual
 keep/drop judgment and tag validation, not just "it runs without
 crashing". All external dependencies mocked: the real Anthropic call
 (client.messages.create), mark_seen (real store write via
-discovery.seen_items), record_node_summary (real store write via
-core/observability.py), and the dropped-tag log file (real local file I/O)
-so this suite stays fully offline like the rest of this project's tests.
+discovery.seen_items), log_scored_items (real store write via
+discovery.scored_items_log, 2026-07-23), record_node_summary (real store
+write via core/observability.py), and the dropped-tag log file (real
+local file I/O) so this suite stays fully offline like the rest of this
+project's tests.
 """
 import sys
 import os
@@ -49,6 +51,7 @@ def _patched():
     return (
         patch.object(score_mod.client.messages, "create"),
         patch.object(score_mod, "mark_seen") ,
+        patch.object(score_mod, "log_scored_items"),
         patch.object(score_mod, "record_node_summary"),
         patch.object(score_mod, "_log_dropped_tag"),
     )
@@ -65,8 +68,8 @@ def test_keep_true_and_keep_false_items_both_appear_in_scored_items():
         {"index": 1, "keep": False, "reasoning": "off-topic hiking content", "tags": ["noise"]},
     ]
 
-    p_create, p_mark_seen, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_summary, p_dropped:
+    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_create as mock_create, p_mark_seen, p_log, p_summary, p_dropped:
         mock_create.return_value = _haiku_response(haiku_reply)
         result = score_node(_state(items))
 
@@ -84,8 +87,8 @@ def test_invalid_tag_is_filtered_out_and_logged():
         {"index": 0, "keep": True, "reasoning": "r", "tags": ["agentic-engineering", "not-a-real-tag"]},
     ]
 
-    p_create, p_mark_seen, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_summary, p_dropped as mock_log_dropped:
+    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_create as mock_create, p_mark_seen, p_log, p_summary, p_dropped as mock_log_dropped:
         mock_create.return_value = _haiku_response(haiku_reply)
         result = score_node(_state(items))
 
@@ -101,8 +104,8 @@ def test_mark_seen_called_with_every_scored_url_regardless_of_keep():
         {"index": 1, "keep": False, "reasoning": "r", "tags": ["noise"]},
     ]
 
-    p_create, p_mark_seen, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen as mock_mark_seen, p_summary, p_dropped:
+    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_create as mock_create, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
         mock_create.return_value = _haiku_response(haiku_reply)
         score_node(_state(items))
 
@@ -123,8 +126,8 @@ def test_dry_run_skips_mark_seen():
     state = _state(items)
     state["dry_run"] = True
 
-    p_create, p_mark_seen, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen as mock_mark_seen, p_summary, p_dropped:
+    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_create as mock_create, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
         mock_create.return_value = _haiku_response(haiku_reply)
         score_node(state)
 
@@ -139,8 +142,8 @@ def test_record_node_summary_reflects_kept_count_not_total():
         {"index": 2, "keep": False, "reasoning": "r", "tags": ["noise"]},
     ]
 
-    p_create, p_mark_seen, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_summary as mock_summary, p_dropped:
+    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_create as mock_create, p_mark_seen, p_log, p_summary as mock_summary, p_dropped:
         mock_create.return_value = _haiku_response(haiku_reply)
         score_node(_state(items))
 
@@ -165,8 +168,8 @@ def test_multiple_batches_when_over_batch_size():
         call_sizes.append(batch_size)
         return _haiku_response([{"index": i, "keep": True, "reasoning": "r", "tags": ["evals"]} for i in range(batch_size)])
 
-    p_create, p_mark_seen, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_summary, p_dropped:
+    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_create as mock_create, p_mark_seen, p_log, p_summary, p_dropped:
         mock_create.side_effect = _reply_for_batch
         result = score_node(_state(items))
 

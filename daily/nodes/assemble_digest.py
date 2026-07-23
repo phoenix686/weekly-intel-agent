@@ -86,8 +86,16 @@ def format_digest(
             }
             counter += 1
 
+    # shown must be the REAL rendered count, not total_kept -- total_kept
+    # alone silently lied here for months (confirmed real, 2026-07-23: a
+    # real run with 22 kept items rendered a footer claiming "22 kept"
+    # while only the first MAX_DIGEST_ITEMS=15 were actually visible
+    # above it). "shown/kept" makes the truncation itself visible in the
+    # message text instead of only discoverable by cross-referencing
+    # node_summary.
+    shown = min(total_kept, MAX_DIGEST_ITEMS)
     lines.append(
-        f"<i>{total_scored} scored · {total_kept} kept · "
+        f"<i>{total_scored} scored · {shown}/{total_kept} shown · "
         f"{len(uncategorized_items)} uncategorized · run: {run_id[:8]}</i>"
     )
 
