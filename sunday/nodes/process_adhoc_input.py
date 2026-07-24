@@ -41,4 +41,4 @@ def process_adhoc_input(state: DiscoverySubgraphState) -> dict:
         input_tokens=0, output_tokens=0, cost_usd=0.0,
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
     )
-    return {"raw_items": items, "costs": [cost], "stage": "sourced"}
+    return {"raw_items": items, "costs": [cost]}

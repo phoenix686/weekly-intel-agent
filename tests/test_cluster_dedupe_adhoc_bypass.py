@@ -28,7 +28,7 @@ def _raw_item(url, source, text="some content"):
 def _state(raw_items):
     return {
         "raw_items": raw_items, "clustered_items": [], "scored_items": [],
-        "run_id": "run-1", "stage": "start", "costs": [], "errors": [],
+        "run_id": "run-1", "costs": [], "errors": [],
         "source_context": "sunday",
     }
 

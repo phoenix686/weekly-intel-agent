@@ -93,5 +93,4 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
         "raw_items": items,
         "costs": costs,
         "errors": errors,
-        "stage": "sourced",
     }

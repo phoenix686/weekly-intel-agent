@@ -107,7 +107,6 @@ def make_initial_state(source_context: str = "daily", dry_run: bool = False) -> 
         clustered_items=[],
         scored_items=[],
         run_id=str(uuid.uuid4())[:8],
-        stage="start",
         costs=[],
         errors=[],
         source_context=source_context,

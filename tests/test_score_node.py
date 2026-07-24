@@ -32,7 +32,7 @@ def _clustered_item(url, title="T", text="some real body text"):
 def _state(clustered_items, run_id="run-1"):
     return {
         "raw_items": [], "clustered_items": clustered_items, "scored_items": [],
-        "run_id": run_id, "stage": "clustered", "costs": [], "errors": [], "source_context": "sunday",
+        "run_id": run_id, "costs": [], "errors": [], "source_context": "sunday",
     }
 
 

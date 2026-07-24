@@ -145,5 +145,4 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
         "clustered_items": clustered_items,
         "uncategorized_items": uncategorized,
         "costs": costs,
-        "stage": "clustered",
     }

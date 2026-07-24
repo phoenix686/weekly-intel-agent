@@ -58,17 +58,6 @@ def main():
     assert "score_node" in cost_node_names, f"Expected score_node in costs, got: {cost_node_names}"
     print(f"Assertions passed: {len(final_state['costs'])} cost record(s) total, node names present: {sorted(cost_node_names)}\n")
 
-    # final_state["stage"] now really advances: scrape_blogs/process_adhoc_input
-    # write "sourced", cluster_dedupe_node writes "clustered", score_node
-    # writes "scored" -- score_node's own "scored" is the natural terminal
-    # marker (no separate "done" value). "stage" uses a last-write-wins
-    # reducer (core/state.py's _last_write_wins) because on Sunday runs
-    # scrape_blogs and process_adhoc_input both write "sourced" in the same
-    # superstep -- a plain key would raise InvalidUpdateError on that
-    # concurrent write, the same class of bug operator.add fixed for 'errors'.
-    assert final_state["stage"] == "scored", f"Expected final stage 'scored', got: {final_state['stage']!r}"
-    print(f"Assertion passed: final_state['stage'] == {final_state['stage']!r}\n")
-
     # 4. Emit Mermaid source for rendering
     mermaid_src = graph.get_graph().draw_mermaid()
     print("=== Mermaid source (paste into renderer) ===")
