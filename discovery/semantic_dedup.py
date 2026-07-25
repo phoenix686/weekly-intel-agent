@@ -47,7 +47,10 @@ from datetime import datetime, timedelta, timezone
 
 from langgraph.store.base import PutOp
 
-from discovery.embeddings import embed_texts, cosine_similarity, COST_PER_TOKEN_USD
+from discovery.embeddings import (
+    embed_texts, cosine_similarity, COST_PER_TOKEN_USD,
+    MAX_EMBED_CHARS as _MAX_EMBED_CHARS, record_embedding_failure,
+)
 from sunday.memory_store_config import get_store
 from core.state import ClusteredItem, NodeCost
 
@@ -55,7 +58,6 @@ logger = logging.getLogger(__name__)
 
 _NAMESPACE = ("weekly_intel", "recent_item_embeddings")
 _DROPS_NAMESPACE = ("weekly_intel", "prefilter_drops")
-_FAILURES_NAMESPACE = ("weekly_intel", "embedding_failures")
 _WINDOW_DAYS = 7
 _THRESHOLD = 0.90
 
@@ -73,42 +75,10 @@ _THRESHOLD = 0.90
 # when either side is a roundup-style item -- see _is_roundup_item.
 _CONTENT_OVERLAP_THRESHOLD = 0.60
 
-# NVIDIA's /v1/embeddings endpoint hard-caps input at 65,536 characters
-# per text (confirmed live, 2026-07-23: a real 76,757-char MarkTechPost
-# article 400'd the entire batch call). Any single oversized item used to
-# silently take down semantic dedup for the WHOLE run -- the batch-wide
-# except below passed every item through unfiltered AND skipped writing
-# to recent_item_embeddings, so the window never rebuilt itself the way
-# this module's NVIDIA-swap docstring assumed it would. 8000 chars is
-# far under the real cap with room for many items per batch, and is
-# plenty for a similarity comparison -- a full 76K-char article doesn't
-# need to be embedded in full to detect topical overlap. Separate from
-# score_node's own 500-char truncation for its Claude prompt -- that's a
-# different call, different budget, different purpose.
-_MAX_EMBED_CHARS = 8000
-
-
-def _record_embedding_failure(run_id: str, item_count: int, error: str) -> None:
-    """Durable record of a batch embed failure -- so semantic dedup going
-    silently no-op for weeks (as it did after the 2026-07-19 NVIDIA swap,
-    undetected until this session's live calibration work stumbled into
-    the real 400) can't recur unnoticed again. A failed write here must
-    never block the graceful-degradation path it's describing, same
-    reliability requirement as every other observability write in this
-    project (approval_log, node_summary)."""
-    try:
-        get_store().put(
-            _FAILURES_NAMESPACE,
-            str(uuid.uuid4()),
-            {
-                "run_id": run_id,
-                "item_count": item_count,
-                "error": error,
-                "occurred_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-    except Exception as e:
-        logger.warning(f"semantic_dedup: embedding_failures write itself failed (run={run_id}): {e}")
+# MAX_EMBED_CHARS and record_embedding_failure() now live in
+# discovery/embeddings.py -- shared with discovery/taste_vectors.py,
+# which hit the exact same oversized-batch 400 (2026-07-25) and needed
+# the identical fix. See that module for the full rationale.
 
 
 def _load_window() -> list[dict]:
@@ -215,7 +185,7 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
     except Exception as e:
         error_msg = f"embed failed, item passed through unfiltered: {e}"
         logger.warning(f"semantic_dedup: batch embed failed, all {len(items)} item(s) passed through unfiltered: {e}")
-        _record_embedding_failure(run_id, len(items), str(e))
+        record_embedding_failure("semantic_dedup", run_id, len(items), str(e))
         return list(items), [
             NodeCost(
                 node_name="semantic_dedup", input_tokens=0, output_tokens=0,

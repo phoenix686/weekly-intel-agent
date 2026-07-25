@@ -12,8 +12,18 @@ deliberately permissive: this only cuts near-zero-relevance items before
 score_node's paid Haiku call, never replaces it. A false negative here
 (filtering out something genuinely good) is worse than a false positive
 (something mediocre reaches score_node and gets scored "drop" there, at
-trivial extra cost) -- so failures and edge cases always favor letting
-items through.
+trivial extra cost) -- so the THRESHOLD itself is calibrated permissive.
+
+That permissiveness does NOT extend to a hard embed failure (2026-07-25
+fix): a batch that 400s (e.g. a real 76,675-char MarkTechPost article
+exceeding the embedding API's input cap) used to return every item as if
+it had passed the filter -- a failure is not evidence of relevance, and
+that silent auto-pass is exactly how two apparently-good days
+(2026-07-23) turned out to be this filter never having run at all.
+Marking every item in a failed batch uncategorized instead -- same
+"flagged, not guessed" treatment as a genuine sub-threshold item -- keeps
+the "never silently drop" guarantee without disguising a failure as a
+real match.
 
 Every drop is logged to ("weekly_intel","prefilter_drops") per Section
 8's two-field audit schema, in addition to NodeCost.error.
@@ -50,7 +60,10 @@ from datetime import datetime, timezone
 
 from langgraph.store.base import PutOp
 
-from discovery.embeddings import embed_text, embed_texts, cosine_similarity, COST_PER_TOKEN_USD
+from discovery.embeddings import (
+    embed_text, embed_texts, cosine_similarity, COST_PER_TOKEN_USD,
+    MAX_EMBED_CHARS as _MAX_EMBED_CHARS, record_embedding_failure,
+)
 from discovery.nodes.score import ALLOWED_TAGS
 from sunday.memory_store_config import get_store
 from core.state import ClusteredItem, NodeCost, UncategorizedItem
@@ -197,15 +210,33 @@ def taste_prefilter(
     logger.debug(f"taste_vectors: BEFORE embed_texts() ({len(items)} item(s))")
     t0 = time.perf_counter()
     try:
-        all_vectors, all_tokens = embed_texts([f"{item['title']}\n\n{item['text']}" for item in items])
+        all_vectors, all_tokens = embed_texts(
+            [f"{item['title']}\n\n{item['text']}"[:_MAX_EMBED_CHARS] for item in items]
+        )
         logger.debug(f"taste_vectors: AFTER embed_texts() ({time.perf_counter() - t0:.3f}s)")
     except Exception as e:
-        logger.warning(f"taste_vectors: batch embed failed, all {len(items)} item(s) passed through unfiltered: {e}")
-        return list(items), [], [
+        # 2026-07-25 fix: this used to return every item as if it had
+        # PASSED the taste filter -- a hard embed failure is not evidence
+        # of relevance, and treating it as an automatic pass is how two
+        # apparently-good days (2026-07-23) turned out to be the filter
+        # silently never running at all (a 76,675-char MarkTechPost
+        # article 400'd the whole batch both times). Marking every item
+        # uncategorized instead is the same "flagged, not guessed"
+        # treatment sub-threshold items already get -- nothing is lost
+        # (uncategorized items still surface in the digest/plan trailing
+        # section), and nothing skips the taste check in disguise.
+        error_msg = f"embed failed, item(s) marked uncategorized rather than auto-passed: {e}"
+        logger.warning(f"taste_vectors: batch embed failed, all {len(items)} item(s) marked uncategorized (not auto-passed): {e}")
+        record_embedding_failure("taste_prefilter", run_id, len(items), str(e))
+        uncategorized_on_failure: list[UncategorizedItem] = [
+            {**item, "best_tag": "embed_failed", "similarity_score": 0.0}
+            for item in items
+        ]
+        return [], uncategorized_on_failure, [
             NodeCost(
                 node_name="taste_prefilter", input_tokens=0, output_tokens=0,
                 cost_usd=0.0, latency_ms=0.0,
-                error=f"embed failed, item passed through unfiltered: {e}",
+                error=error_msg,
             )
             for _ in items
         ]

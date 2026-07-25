@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 from langgraph.store.base import GetOp, PutOp
 
-from discovery.semantic_dedup import dedupe_semantic, _NAMESPACE, _FAILURES_NAMESPACE
+from discovery.semantic_dedup import dedupe_semantic, _NAMESPACE
+from discovery.embeddings import _FAILURES_NAMESPACE
 
 
 class _Item:
@@ -174,6 +175,7 @@ def test_failed_batch_embed_call_passes_all_items_through_unfiltered():
     fake_store = _FakeStore()
 
     with patch("discovery.semantic_dedup.get_store", return_value=fake_store), \
+         patch("discovery.embeddings.get_store", return_value=fake_store), \
          patch("discovery.semantic_dedup.embed_texts", side_effect=RuntimeError("model broken")):
         survivors, costs = dedupe_semantic([item_a, item_b], run_id="run-1")
 
@@ -189,6 +191,7 @@ def test_failed_batch_embed_call_passes_all_items_through_unfiltered():
     failure_puts = [p for p in fake_store.puts if p[0] == _FAILURES_NAMESPACE]
     assert len(failure_puts) == 1
     failure_record = failure_puts[0][2]
+    assert failure_record["module"] == "semantic_dedup"
     assert failure_record["run_id"] == "run-1"
     assert failure_record["item_count"] == 2
     assert failure_record["error"] == "model broken"

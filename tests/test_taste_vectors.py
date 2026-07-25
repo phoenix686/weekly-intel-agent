@@ -130,23 +130,34 @@ def test_empty_topic_vector_store_lets_everything_through():
     mock_embed.assert_not_called()  # never even tries to embed if there's nothing to compare against
 
 
-def test_failed_batch_embed_call_passes_all_items_through_unfiltered():
-    """embed_texts() is called once for the whole batch now (not once per
-    item) -- a failure degrades every item in the batch at once, not just
-    one, since a local-model failure realistically means the model itself
-    is broken."""
+def test_failed_batch_embed_call_marks_items_uncategorized_not_auto_passed():
+    """2026-07-25 fix: a hard embed failure used to return every item as
+    if it had PASSED the taste filter -- not evidence of relevance, and
+    the exact mechanism that let two apparently-good days (2026-07-23)
+    turn out to be the filter silently never running (a real 76,675-char
+    MarkTechPost article 400ing the whole batch). Failed items are now
+    marked uncategorized instead -- flagged, not silently auto-passed --
+    and the failure itself is durably recorded."""
     item_a = _item("https://a.com/1", "Item A", "text a")
     item_b = _item("https://b.com/1", "Item B", "text b")
     fake_store = _FakeStore(seed=_topic_vectors_seed())
 
     with patch("discovery.taste_vectors.get_store", return_value=fake_store), \
+         patch("discovery.embeddings.get_store", return_value=fake_store), \
          patch("discovery.taste_vectors.embed_texts", side_effect=RuntimeError("model broken")):
         survivors, uncategorized, costs = taste_prefilter([item_a, item_b], run_id="run-1")
 
-    assert survivors == [item_a, item_b]
-    assert uncategorized == []
+    assert survivors == []
+    assert {u["url"] for u in uncategorized} == {"https://a.com/1", "https://b.com/1"}
+    assert all(u["best_tag"] == "embed_failed" and u["similarity_score"] == 0.0 for u in uncategorized)
     assert len(costs) == 2
-    assert all("embed failed" in c["error"] and "passed through unfiltered" in c["error"] for c in costs)
+    assert all("embed failed" in c["error"] and "marked uncategorized" in c["error"] for c in costs)
+
+    failure_puts = [v for v in fake_store._data.values() if isinstance(v, dict) and v.get("module") == "taste_prefilter"]
+    assert len(failure_puts) == 1
+    assert failure_puts[0]["run_id"] == "run-1"
+    assert failure_puts[0]["item_count"] == 2
+    assert failure_puts[0]["error"] == "model broken"
 
 
 def test_recompute_topic_vectors_writes_one_entry_per_mapped_tag():

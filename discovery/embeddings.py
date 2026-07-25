@@ -82,6 +82,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+from datetime import datetime, timezone
+
+from sunday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +96,49 @@ INPUT_TYPE = "passage"  # see module docstring -- standardized for symmetric com
 
 # UNVERIFIED -- see module docstring. Not a confirmed free rate.
 COST_PER_TOKEN_USD = 0.0
+
+# NVIDIA's /v1/embeddings endpoint hard-caps input at 65,536 characters per
+# text (confirmed live, 2026-07-23: a real 76,675-char MarkTechPost article
+# 400'd the whole batch call). Shared by every caller that batch-embeds
+# real scraped article text -- discovery/semantic_dedup.py (fixed
+# 2026-07-23) and discovery/taste_vectors.py (fixed 2026-07-25, after the
+# same bug was found silently disabling the taste pre-filter on any day a
+# batch happened to include an oversized article: the failure was being
+# caught and treated as "let everything through unfiltered," which is how
+# two apparently-good days turned out to be the filter never having run at
+# all). 8000 chars is far under the real cap with headroom for a full
+# batch, and is plenty of signal for a similarity comparison -- a
+# 76K-char article doesn't need to be embedded in full to detect topical
+# fit. One shared constant, not two copies of the same magic number.
+MAX_EMBED_CHARS = 8000
+
+_FAILURES_NAMESPACE = ("weekly_intel", "embedding_failures")
+
+
+def record_embedding_failure(module: str, run_id: str, item_count: int, error: str) -> None:
+    """Durable record of a batch embed failure, shared by every caller of
+    embed_texts()/embed_text() in this project. `module` identifies which
+    caller hit it (e.g. "semantic_dedup", "taste_prefilter") -- this is
+    the second real call site to need this after semantic_dedup.py's
+    2026-07-23 fix, so the schema now records which one failed instead of
+    silently assuming there's only ever one. A failed write here must
+    never block the graceful-degradation path it's describing, same
+    reliability requirement as every other observability write in this
+    project (approval_log, node_summary)."""
+    try:
+        get_store().put(
+            _FAILURES_NAMESPACE,
+            str(uuid.uuid4()),
+            {
+                "module": module,
+                "run_id": run_id,
+                "item_count": item_count,
+                "error": error,
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as e:
+        logger.warning(f"embeddings: embedding_failures write itself failed (module={module}, run={run_id}): {e}")
 
 
 def _api_key() -> str:
