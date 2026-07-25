@@ -44,15 +44,29 @@ Real, live-verified 2026-07-19 against the actual endpoint (not assumed):
   quality, taste_vectors.py's topic-vs-item comparison is the more
   likely candidate to revisit first (topic description ~ query, item ~
   passage is the closer fit to typical retrieval framing).
-- Pricing: UNVERIFIED. Both live fetch attempts against NVIDIA's
-  pricing docs timed out, and the real API response carries no
-  cost/credit/billing header of any kind (checked all response headers
-  directly). COST_PER_TOKEN_USD is therefore NOT a confirmed rate the
-  way the old local-compute $0.0 was categorically true -- it's a
-  placeholder. NodeCost.cost_usd figures downstream of this module will
-  under-report real spend if build.nvidia.com's embeddings endpoint
-  turns out to be billed. Flagged here and in the swap's own commit/
-  report, not silently assumed free.
+- Pricing: VERIFIED 2026-07-26 (real cost-reporting work, not the
+  original swap's placeholder). NVIDIA does not meter this endpoint by
+  the token at all: integrate.api.nvidia.com's hosted catalog (what
+  MODEL_NAME/NVIDIA_API_BASE above actually call) is a free developer/
+  prototyping tier -- gated by a request-rate limit (~40 RPM,
+  community-observed, not a published SLA) and a finite signup credit
+  pool (1,000 credits on signup, up to 5,000 total), not a renewing
+  per-token dollar charge. Confirmed via NVIDIA's own model reference
+  docs (docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-embed-1b,
+  which discloses no per-token rate and cites the "NVIDIA API Trial
+  Terms of Service") and independently via OpenRouter's listing for the
+  same open-weight model, which shows "Price: Free" outright. Real
+  current spend on this endpoint genuinely IS $0.00 -- COST_PER_TOKEN_USD
+  = 0.0 is a verified fact about this tier, not an unverified
+  placeholder anymore. Two things this does NOT mean: (1) NVIDIA has
+  published no per-token rate for what a metered/production tier would
+  cost if trial terms end or credits run out -- if that happens, this
+  constant will need a real update, not a guess made now; (2) the real
+  constraint on this endpoint right now is the credit pool and rate
+  limit, not dollars -- a pure $-cost total will always read $0.00 for
+  this provider and will NOT surface a credit-exhaustion or rate-limit
+  failure mode, which needs its own signal if that ever matters
+  operationally.
 - Per-item token counts: the API returns one AGGREGATE usage.total_tokens
   per batch call, not real per-item counts the way the old model's
   attention_mask gave (exactly, per text). For a single-text call the
@@ -94,7 +108,8 @@ EMBEDDING_DIM = 2048  # live-verified 2026-07-19; see module docstring
 NVIDIA_API_BASE = "https://integrate.api.nvidia.com/v1/embeddings"
 INPUT_TYPE = "passage"  # see module docstring -- standardized for symmetric comparison
 
-# UNVERIFIED -- see module docstring. Not a confirmed free rate.
+# Verified 2026-07-26 -- see module docstring. Real $0.00 under the
+# current free/trial NVIDIA developer tier, not a guess.
 COST_PER_TOKEN_USD = 0.0
 
 # NVIDIA's /v1/embeddings endpoint hard-caps input at 65,536 characters per

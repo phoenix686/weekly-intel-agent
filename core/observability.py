@@ -50,11 +50,31 @@ import logging
 import time
 
 from sunday.memory_store_config import get_store
+from core.state import NodeCost
 
 logger = logging.getLogger(__name__)
 
 _NODE_SUMMARY_NAMESPACE = ("weekly_intel", "node_summary")
 _RUN_HISTORY_NAMESPACE = ("weekly_intel", "run_history")
+
+
+def cost_breakdown_by_provider(costs: list[NodeCost]) -> dict[str, float]:
+    """Real per-run $ cost, broken out by which paid API incurred it --
+    2026-07-26, added so a digest/plan footer (and a future model-provider
+    swap's cost impact) shows attributable numbers, not one lump sum.
+    Every real-cost NodeCost site sets provider ("anthropic" for every
+    Claude call, "nvidia" for every embedding call); the many zero-cost
+    sites (Telegram sends, Trello reads, formatting nodes) don't set it
+    and fall into "other" here, which is always $0.00 in practice since
+    none of those make a paid call. Always includes "total" as the sum
+    of every record regardless of provider, so callers never need to
+    re-derive it separately."""
+    breakdown: dict[str, float] = {}
+    for c in costs:
+        provider = c.get("provider") or "other"
+        breakdown[provider] = breakdown.get(provider, 0.0) + c["cost_usd"]
+    breakdown["total"] = sum(c["cost_usd"] for c in costs)
+    return breakdown
 
 
 def get_current_trace_url() -> str | None:

@@ -108,6 +108,7 @@ def correlate_trello(state: SundayGraphState) -> dict:
                 output_tokens=output_tokens,
                 cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
                 latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+                provider="anthropic",
             )
             record_node_summary(
                 run_id=state["run_id"], node_name="correlate_trello",
@@ -136,6 +137,7 @@ def correlate_trello(state: SundayGraphState) -> dict:
         output_tokens=output_tokens,
         cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+        provider="anthropic",
     )
 
     # items_out = matched count (not total correlated_items -- nothing is

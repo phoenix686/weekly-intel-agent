@@ -505,6 +505,7 @@ def _sunday_state(classified_items, trello_cards=None, prioritized_project_work=
         "run_id": run_id, "classified_items": classified_items,
         "trello_cards": trello_cards or [], "prioritized_project_work": prioritized_project_work or [],
         "pending_approvals": [], "uncategorized_items": uncategorized_items or [],
+        "costs": [],
     }
 
 

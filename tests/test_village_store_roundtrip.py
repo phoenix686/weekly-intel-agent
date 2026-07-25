@@ -36,7 +36,7 @@ def test_digest_ready_event() -> bool:
         "source": "test", "duplicate_count": 1,
         "keep": True, "reasoning": "test", "tags": ["test"],
     }]
-    state = {"scored_items": scored_items, "uncategorized_items": [], "run_id": "village-store-test-daily"}
+    state = {"scored_items": scored_items, "uncategorized_items": [], "run_id": "village-store-test-daily", "costs": []}
 
     before_keys = {item.key for item in get_store().search(VILLAGE_NAMESPACE)}
     assemble_digest(state)
@@ -79,6 +79,7 @@ def test_plan_ready_event() -> bool:
         "run_id": "village-store-test-sunday",
         "trello_cards": [],
         "prioritized_project_work": [],
+        "costs": [],
     }
 
     before_keys = {item.key for item in get_store().search(VILLAGE_NAMESPACE)}

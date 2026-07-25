@@ -2,14 +2,16 @@ import time
 from datetime import datetime, timezone
 
 from core.state import ScoredItem, DailyGraphState, NodeCost
+from core.observability import cost_breakdown_by_provider
 from sunday.memory_store_config import get_store
-from telegram.markdown import escape_html
+from telegram.markdown import escape_html, format_cost_line
 
 MAX_DIGEST_ITEMS = 15
 
 
 def format_digest(
-    scored_items: list[ScoredItem], run_id: str, uncategorized_items: list[dict] | None = None
+    scored_items: list[ScoredItem], run_id: str, uncategorized_items: list[dict] | None = None,
+    cost_breakdown: dict[str, float] | None = None,
 ) -> tuple[str, dict[int, dict]]:
     """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
     NOT Markdown. This function used to escape underscores with MarkdownV2
@@ -33,9 +35,13 @@ def format_digest(
     kept = [item for item in scored_items if item["keep"]]
     total_scored = len(scored_items)
     total_kept = len(kept)
+    cost_line = format_cost_line(cost_breakdown)
 
     if not kept and not uncategorized_items:
-        return "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>", {}
+        text = "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>"
+        if cost_line:
+            text += f"\n\n{cost_line}"
+        return text, {}
 
     lines = ["🤖 <b>Daily Digest</b>", ""]
     item_map: dict[int, dict] = {}
@@ -98,14 +104,23 @@ def format_digest(
         f"<i>{total_scored} scored · {shown}/{total_kept} shown · "
         f"{len(uncategorized_items)} uncategorized · run: {run_id[:8]}</i>"
     )
+    if cost_line:
+        lines.append(cost_line)
 
     return "\n".join(lines), item_map
 
 
 def assemble_digest(state: DailyGraphState) -> dict:
     t0 = time.monotonic()
+    # Real per-run $ cost, broken out by provider (2026-07-26) -- state["costs"]
+    # is already complete by this point in the daily graph (discovery_subgraph,
+    # the only cost-incurring stage, has already run; send_telegram_digest,
+    # the only node left, is free), so this is the true run total, not a
+    # partial figure.
+    cost_breakdown = cost_breakdown_by_provider(state["costs"])
     text, item_map = format_digest(
-        state["scored_items"], state["run_id"], uncategorized_items=state["uncategorized_items"]
+        state["scored_items"], state["run_id"], uncategorized_items=state["uncategorized_items"],
+        cost_breakdown=cost_breakdown,
     )
 
     generated_at = datetime.now(timezone.utc).isoformat()

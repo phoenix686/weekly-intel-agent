@@ -153,7 +153,7 @@ def _consolidated_rewrite(records: list[dict]) -> list[NodeCost]:
 
     costs = [NodeCost(
         node_name="update_profile", input_tokens=input_tokens, output_tokens=output_tokens,
-        cost_usd=cost_usd, latency_ms=0.0,
+        cost_usd=cost_usd, latency_ms=0.0, provider="anthropic",
     )]
 
     vector_costs = recompute_topic_vectors(updated_yaml)

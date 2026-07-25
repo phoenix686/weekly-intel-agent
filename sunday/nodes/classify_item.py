@@ -165,6 +165,7 @@ def classify_item(state: SundayGraphState) -> dict:
                 output_tokens=output_tokens,
                 cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
                 latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+                provider="anthropic",
             )
             fallback_items = [
                 {**item, "classification": "plan_item", "proposal_type": None,
@@ -210,6 +211,7 @@ def classify_item(state: SundayGraphState) -> dict:
         output_tokens=output_tokens,
         cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+        provider="anthropic",
     )
 
     # items_out = proposal count, not total classified_items -- nothing is

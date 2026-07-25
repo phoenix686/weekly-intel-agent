@@ -160,6 +160,7 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         output_tokens=total_output,
         latency_ms=round((time.perf_counter() - t0) * 1000, 4),
         cost_usd=round(cost_usd, 6),
+        provider="anthropic",
     )
 
     if state.get("dry_run", False):

@@ -3,10 +3,11 @@ import logging
 from datetime import datetime, timezone
 
 from core.state import SundayGraphState, NodeCost
+from core.observability import cost_breakdown_by_provider
 from sunday.memory_store_config import get_store
 from sunday.plan_history import record_plan_history
 from sunday.carry_forward import get_carry_forward_items
-from telegram.markdown import escape_html
+from telegram.markdown import escape_html, format_cost_line
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,13 @@ def assemble_plan(state: SundayGraphState) -> dict:
     carried_items = get_carry_forward_items(state["run_id"])
     plan_items_with_carryover = state["classified_items"] + carried_items
 
+    # Real per-run $ cost so far, broken out by provider (2026-07-26).
+    # Scoped to everything that ran BEFORE plan assembly (discovery,
+    # read_trello, correlate_trello, classify_item, prioritize_plan_items)
+    # -- NOT update_profile's weekly taste-profile rewrite, which runs
+    # later in this same graph execution but is a separate weekly
+    # maintenance cost, not something this specific plan message caused.
+    cost_breakdown = cost_breakdown_by_provider(state["costs"])
     text, item_map = format_plan(
         plan_items_with_carryover,
         len(state["pending_approvals"]),
@@ -29,6 +37,7 @@ def assemble_plan(state: SundayGraphState) -> dict:
         state["trello_cards"],
         state["prioritized_project_work"],
         state["uncategorized_items"],
+        cost_breakdown=cost_breakdown,
     )
 
     # plan_history must reflect what was ACTUALLY surfaced in Existing
@@ -140,7 +149,7 @@ def _truncate(text: str, max_len: int) -> str:
 def _render(
     reading: list[dict], courses: list[dict], project_entries: list[dict],
     pending_approvals_count: int, run_id: str, reasoning_budget: int | None = None,
-    uncategorized_items: list[dict] | None = None,
+    uncategorized_items: list[dict] | None = None, cost_breakdown: dict[str, float] | None = None,
 ) -> tuple[str, dict[int, dict]]:
     """One rendering pass. reasoning_budget, when set, caps each item's/
     entry's reasoning -- and, for Existing Project Work, the card_name
@@ -238,6 +247,10 @@ def _render(
     footer_parts.append(f"run: {run_id[:8]}")
     lines.append(f"<i>{' · '.join(footer_parts)}</i>")
 
+    cost_line = format_cost_line(cost_breakdown)
+    if cost_line:
+        lines.append(cost_line)
+
     return "\n".join(lines), item_map
 
 
@@ -248,6 +261,7 @@ def format_plan(
     trello_cards: list[dict],
     prioritized_project_work: list[dict] | None = None,
     uncategorized_items: list[dict] | None = None,
+    cost_breakdown: dict[str, float] | None = None,
 ) -> tuple[str, dict[int, dict]]:
     """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
     NOT Markdown. item_map keeps RAW (unescaped) title/text/reasoning --
@@ -291,11 +305,14 @@ def format_plan(
         if pending_approvals_count > 0:
             msg += f" {pending_approvals_count} proposals pending approval — check Telegram."
         msg += "</i>"
+        cost_line = format_cost_line(cost_breakdown)
+        if cost_line:
+            msg += f"\n\n{cost_line}"
         return msg, {}
 
     text, item_map = _render(
         reading, courses, project_entries, pending_approvals_count, run_id,
-        uncategorized_items=uncategorized_items,
+        uncategorized_items=uncategorized_items, cost_breakdown=cost_breakdown,
     )
 
     if len(text) > MAX_PLAN_TEXT_CHARS:
@@ -306,14 +323,14 @@ def format_plan(
         )
         text, item_map = _render(
             reading, courses, project_entries, pending_approvals_count, run_id,
-            reasoning_budget=budget, uncategorized_items=uncategorized_items,
+            reasoning_budget=budget, uncategorized_items=uncategorized_items, cost_breakdown=cost_breakdown,
         )
         while len(text) > MAX_PLAN_TEXT_CHARS and budget > 20:
             budget //= 2
             logger.warning(f"format_plan: still over budget at {len(text)} chars -- shrinking reasoning cap to {budget} (run={run_id})")
             text, item_map = _render(
                 reading, courses, project_entries, pending_approvals_count, run_id,
-                reasoning_budget=budget, uncategorized_items=uncategorized_items,
+                reasoning_budget=budget, uncategorized_items=uncategorized_items, cost_breakdown=cost_breakdown,
             )
 
     return text, item_map

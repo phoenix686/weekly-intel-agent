@@ -199,6 +199,7 @@ def prioritize_plan_items(state: SundayGraphState) -> dict:
                 output_tokens=output_tokens,
                 cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
                 latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+                provider="anthropic",
             )
             # Graceful degradation: fall back to this week's matched items,
             # unprioritized (original order), capped at the same bound --
@@ -238,6 +239,7 @@ def prioritize_plan_items(state: SundayGraphState) -> dict:
         output_tokens=output_tokens,
         cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+        provider="anthropic",
     )
 
     record_node_summary(

@@ -129,14 +129,15 @@ def recompute_topic_vectors(profile_text: str) -> list[NodeCost]:
             logger.warning(f"taste_vectors: recompute failed for tag {tag!r}: {e}")
             costs.append(NodeCost(
                 node_name="recompute_topic_vectors", input_tokens=0, output_tokens=0,
-                cost_usd=0.0, latency_ms=0.0, error=f"recompute failed for tag {tag!r}: {e}",
+                cost_usd=0.0, latency_ms=0.0, provider="nvidia",
+                error=f"recompute failed for tag {tag!r}: {e}",
             ))
             continue
 
         store.put(_NAMESPACE, tag, {"tag": tag, "embedding_vector": vector, "updated_at": now})
         costs.append(NodeCost(
             node_name="recompute_topic_vectors", input_tokens=tokens, output_tokens=0,
-            cost_usd=round(tokens * COST_PER_TOKEN_USD, 8), latency_ms=0.0,
+            cost_usd=round(tokens * COST_PER_TOKEN_USD, 8), latency_ms=0.0, provider="nvidia",
         ))
 
     mapped_count = sum(1 for tag in TOPIC_TAGS if _TAG_TO_BULLET.get(tag) is not None)
@@ -235,7 +236,7 @@ def taste_prefilter(
         return [], uncategorized_on_failure, [
             NodeCost(
                 node_name="taste_prefilter", input_tokens=0, output_tokens=0,
-                cost_usd=0.0, latency_ms=0.0,
+                cost_usd=0.0, latency_ms=0.0, provider="nvidia",
                 error=error_msg,
             )
             for _ in items
@@ -254,7 +255,7 @@ def taste_prefilter(
             survivors.append(item)
             costs.append(NodeCost(
                 node_name="taste_prefilter", input_tokens=tokens, output_tokens=0,
-                cost_usd=cost_usd, latency_ms=0.0,
+                cost_usd=cost_usd, latency_ms=0.0, provider="nvidia",
             ))
         else:
             drop_records.append(_drop_record(item["url"], best_sim, best_tag, run_id))
@@ -265,7 +266,7 @@ def taste_prefilter(
             })
             costs.append(NodeCost(
                 node_name="taste_prefilter", input_tokens=tokens, output_tokens=0,
-                cost_usd=cost_usd, latency_ms=0.0,
+                cost_usd=cost_usd, latency_ms=0.0, provider="nvidia",
                 error=f"uncategorized: best match {best_tag!r} cosine={best_sim:.3f} < {_THRESHOLD}",
             ))
 

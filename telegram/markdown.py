@@ -41,3 +41,19 @@ def escape_html(text: str) -> str:
     .replace() chain avoids by construction (each .replace() call scans
     the ALREADY-escaped-so-far string exactly once, left to right)."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def format_cost_line(cost_breakdown: dict[str, float] | None) -> str:
+    """Real $ cost, broken out by provider (2026-07-26) -- shared by
+    daily/nodes/assemble_digest.py and sunday/nodes/assemble_plan.py so a
+    future model-provider swap's cost impact is directly visible per
+    provider in both, not buried in one lump total. Returns "" (not
+    appended anywhere) when no breakdown is given, so existing callers/
+    tests that don't pass one see byte-identical output to before this
+    existed."""
+    if not cost_breakdown:
+        return ""
+    anthropic = cost_breakdown.get("anthropic", 0.0)
+    nvidia = cost_breakdown.get("nvidia", 0.0)
+    total = cost_breakdown.get("total", 0.0)
+    return f"<i>Cost: ${total:.4f} (Anthropic: ${anthropic:.4f}, NVIDIA embeddings: ${nvidia:.4f})</i>"

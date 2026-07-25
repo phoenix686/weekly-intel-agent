@@ -190,7 +190,7 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
             NodeCost(
                 node_name="semantic_dedup", input_tokens=0, output_tokens=0,
                 cost_usd=0.0, latency_ms=0.0,
-                error=error_msg,
+                error=error_msg, provider="nvidia",
             )
             for _ in items
         ]
@@ -219,7 +219,7 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
             tier_label = "near-verbatim" if match_type == "dedup" else "content-overlap"
             costs.append(NodeCost(
                 node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
-                cost_usd=cost_usd, latency_ms=0.0,
+                cost_usd=cost_usd, latency_ms=0.0, provider="nvidia",
                 error=f"dropped as {tier_label} duplicate of previously-seen {entry['url']} (cosine={sim:.3f})",
             ))
             continue
@@ -241,7 +241,7 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
             survivor_vectors.append(vector)
             costs.append(NodeCost(
                 node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
-                cost_usd=cost_usd, latency_ms=0.0,
+                cost_usd=cost_usd, latency_ms=0.0, provider="nvidia",
             ))
         else:
             idx, sim, match_type = within_run_match
@@ -261,14 +261,14 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
                 drop_records.append(_drop_record(dropped_url, sim, item["url"], run_id, filter_type=match_type))
                 costs.append(NodeCost(
                     node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
-                    cost_usd=cost_usd, latency_ms=0.0,
+                    cost_usd=cost_usd, latency_ms=0.0, provider="nvidia",
                     error=f"kept over {tier_label} duplicate {dropped_url} (cosine={sim:.3f}, published earlier)",
                 ))
             else:
                 drop_records.append(_drop_record(item["url"], sim, existing["url"], run_id, filter_type=match_type))
                 costs.append(NodeCost(
                     node_name="semantic_dedup", input_tokens=tokens, output_tokens=0,
-                    cost_usd=cost_usd, latency_ms=0.0,
+                    cost_usd=cost_usd, latency_ms=0.0, provider="nvidia",
                     error=f"dropped as {tier_label} duplicate of {existing['url']} (cosine={sim:.3f})",
                 ))
 

@@ -118,6 +118,14 @@ class NodeCost(TypedDict):
     error: NotRequired[str | None]  # non-user-facing failure/drop visibility --
                                      # optional so every existing NodeCost(...)
                                      # call site keeps constructing without it
+    provider: NotRequired[str]  # which paid API this cost is attributable to
+                                  # ("anthropic", "nvidia") -- 2026-07-26, real
+                                  # cost reporting. Optional (defaults to
+                                  # unattributed when summed) so the many
+                                  # existing zero-cost NodeCost(...) call sites
+                                  # (Telegram sends, Trello reads, formatting
+                                  # nodes) don't need updating just to keep
+                                  # constructing.
 
 
 class DiscoverySubgraphState(TypedDict):
