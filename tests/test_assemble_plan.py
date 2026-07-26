@@ -249,14 +249,37 @@ def test_all_three_sections_present_and_ordered():
 
 def test_stale_nudge_entry_renders_from_trello_card_not_scored_item():
     """A stale_nudge entry has no underlying classified item -- it renders
-    from the real Trello card's own name/url."""
+    from the real Trello card's own name/url, labeled as an idle-board
+    nudge rather than "continues card" (2026-07-26 relabel: the title IS
+    already the card name for a stale_nudge entry, so repeating it via
+    "continues card: ..." duplicated the same text with no new
+    information and made a legitimate idle-card nudge indistinguishable
+    from a raw Trello-card leak)."""
     priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None,
                                  priority_reasoning="Idle for weeks.")]
     text, item_map = format_plan([], 0, RUN_ID, [_card("card1", "My Stale Card", "https://trello.com/c/stale")], priority)
     assert "<b>Existing Project Work</b>" in text
     assert "My Stale Card" in text
-    assert 'continues card: "My Stale Card"' in text
+    assert "idle board item, no new content this week" in text
+    assert 'continues card: "My Stale Card"' not in text
     assert item_map[1]["url"] == "https://trello.com/c/stale"
+
+
+def test_new_item_and_stale_nudge_suffixes_are_visually_distinct():
+    """Direct regression test for the relabel: in the same rendered plan,
+    a new_item entry keeps "continues card" (it's genuinely new content
+    related to a card) while a stale_nudge entry gets the idle-board
+    marker instead -- so the two are never visually indistinguishable."""
+    items = [_plan_item(matched_card_id="card1", title="Fresh Article", url="https://a.com")]
+    priority = [
+        _priority_entry(matched_card_id="card1", source="new_item", item_url="https://a.com"),
+        _priority_entry(matched_card_id="card2", source="stale_nudge", item_url=None),
+    ]
+    cards = [_card("card1", "Active Card"), _card("card2", "Idle Card")]
+    text, item_map = format_plan(items, 0, RUN_ID, cards, priority)
+    assert 'continues card: "Active Card"' in text
+    assert 'continues card: "Idle Card"' not in text
+    assert "idle board item, no new content this week" in text
 
 
 def test_movement_note_appended_to_reasoning():
@@ -694,10 +717,10 @@ def test_over_budget_card_name_truncated_in_continues_card_suffix():
 def test_stale_nudge_title_truncated_to_80_chars():
     """Direct test of the always-on bug fix: card_name-derived TITLES now
     get the same [:80] truncation every other title path already had.
-    This is unconditional (unlike the "continues card" suffix's
-    card_name, which is only conditionally truncated when over budget --
-    covered separately above) -- so the long name legitimately still
-    appears once, in the suffix, just not as the link title."""
+    (2026-07-26: a stale_nudge entry's suffix no longer repeats card_name
+    at all -- see the idle-board-item relabel -- so the title's own [:80]
+    cap is now the only place a long card name is ever truncated for this
+    entry type.)"""
     long_card_name = "A" * 150
     priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None)]
     text, item_map = format_plan([], 0, RUN_ID, [_card("card1", long_card_name)], priority)

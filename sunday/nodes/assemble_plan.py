@@ -128,6 +128,7 @@ def _build_project_entries(prioritized_project_work: list[dict], trello_cards: l
         entries.append({
             "title": title, "url": url, "text": text, "tags": tags,
             "reasoning": reasoning, "card_name": card_name,
+            "source": entry.get("source"),
         })
     return entries
 
@@ -206,9 +207,21 @@ def _render(
         lines.append("<b>Existing Project Work</b>")
         for entry in project_entries:
             reasoning = _cap(entry["reasoning"])
-            card_name = _cap(entry["card_name"])
             lines.append(f'{counter}. <a href="{escape_html(entry["url"])}">{escape_html(entry["title"])}</a>')
-            lines.append(f'   <i>{escape_html(reasoning)}</i> — continues card: "{escape_html(card_name)}"')
+            if entry.get("source") == "stale_nudge":
+                # No underlying new content -- title IS already the card
+                # name (see _build_project_entries), so repeating it again
+                # via "continues card: ..." would just duplicate the same
+                # text twice with no new information. A distinct marker
+                # instead makes it immediately legible that this entry is
+                # an idle-board nudge, not new content that happens to
+                # relate to a card (2026-07-26, relabel per investigation
+                # of a real run where this looked indistinguishable from a
+                # raw Trello-card leak).
+                lines.append(f'   <i>{escape_html(reasoning)}</i> — ⏳ idle board item, no new content this week')
+            else:
+                card_name = _cap(entry["card_name"])
+                lines.append(f'   <i>{escape_html(reasoning)}</i> — continues card: "{escape_html(card_name)}"')
             lines.append("")
             item_map[counter] = {
                 "url": entry["url"], "title": entry["title"],
