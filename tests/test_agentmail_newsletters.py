@@ -219,15 +219,32 @@ def test_welcome_subject_pattern_is_case_insensitive_and_anchored_to_start():
     assert not _WELCOME_SUBJECT_PATTERN.search("You're welcome to join our next event")
 
 
+# ── "Thanks for subscribing" phrasing (2026-07-26, real 10-sender audit) ────
+# Ahead of AI's real subject wasn't caught by "^welcome" alone -- found by
+# pulling every real subject line across all 10 senders from every Sunday
+# run with per-message AgentMail data, not by guessing common confirmation
+# phrasings (see _WELCOME_SUBJECT_PATTERN's own docstring for the full
+# audit and what was deliberately NOT added as a result).
+
+def test_welcome_subject_pattern_matches_thanks_for_subscribing_phrasing():
+    assert _WELCOME_SUBJECT_PATTERN.search("Thanks for subscribing to Ahead of AI!")
+    assert _WELCOME_SUBJECT_PATTERN.search("THANKS FOR SUBSCRIBING to our list")
+
+
 def test_welcome_subject_pattern_does_not_match_unrelated_real_subjects():
-    """Real, non-welcome subjects from the same production logs -- must
-    not be caught by this narrower filter (including the known gap,
-    "Thanks for subscribing...", documented on the pattern itself)."""
+    """Real, non-onboarding subjects from the same production logs --
+    must not be caught by this filter. Includes the one real onboarding
+    subject confirmed to still slip through both phrasings: The AI
+    Merge's real welcome email subject is a slogan/tagline ("No Vibes,
+    Just Real AI/ML Engineering!"), not a confirmation phrase -- there is
+    no honest subject-text pattern for it without risking false
+    positives on real article titles (see _WELCOME_SUBJECT_PATTERN's
+    docstring)."""
     real_subjects = [
-        "Thanks for subscribing to Ahead of AI!",
         "Coding the KV Cache in LLMs",
         "What's Harness Engineering?",
         "Kimi K3 Redraws the Open Frontier, Muse Spark 1.1 Undercuts Competitors",
+        "No Vibes, Just Real AI/ML Engineering!",
     ]
     for subject in real_subjects:
         assert not _WELCOME_SUBJECT_PATTERN.search(subject), f"unexpected match for {subject!r}"
@@ -264,6 +281,37 @@ def test_welcome_subject_message_never_reaches_extraction_even_with_a_real_match
     assert result.errors[0][0] == "Decoding AI Magazine"
     assert "welcome/onboarding" in result.errors[0][1]
     assert fake_messages.update_calls == [("inbox-123", "msg-welcome", ["read"], ["unread"])]
+
+
+def test_thanks_for_subscribing_subject_message_never_reaches_extraction():
+    """Fetch-level regression test for the real gap this expansion
+    closes: Ahead of AI's real "Thanks for subscribing to Ahead of AI!"
+    subject, with a body that genuinely contains a matchable /p/{slug}
+    href -- must now be skipped before extraction, same as the "Welcome"
+    phrasing already was."""
+    now = datetime.now(timezone.utc)
+    html = '<a href="https://magazine.sebastianraschka.com/p/some-post">Read our latest</a>'
+    fake_messages = _FakeMessagesClient(
+        list_items=[_FakeMessageItem("msg-thanks", "Thanks for subscribing to Ahead of AI!")],
+        get_by_id={
+            "msg-thanks": _FakeMessage(
+                "msg-thanks", "Thanks for subscribing to Ahead of AI!", html,
+                "sebastianraschka@substack.com", now,
+            ),
+        },
+    )
+
+    with patch.object(agentmail_mod, "AgentMail", return_value=_FakeAgentMailClient(fake_messages)), \
+         patch.object(agentmail_mod, "_extract_article_url") as mock_extract, \
+         patch.dict(os.environ, {"AGENTMAIL_API_KEY": "fake-key-for-test"}):
+        result = fetch_agentmail_newsletters("inbox-123", _SENDER_TO_NAME, limit=20)
+
+    mock_extract.assert_not_called()
+    assert result.rows == []
+    assert len(result.errors) == 1
+    assert result.errors[0][0] == "Ahead of AI"
+    assert "welcome/onboarding" in result.errors[0][1]
+    assert fake_messages.update_calls == [("inbox-123", "msg-thanks", ["read"], ["unread"])]
 
 
 def test_non_welcome_subject_with_matchable_url_still_extracts_normally():
@@ -386,19 +434,20 @@ def test_fetch_agentmail_newsletters_confirmed_content_free_grouped_under_real_s
     this case is now marked read, since retrying it next run could never
     produce a different outcome.
 
-    Subject is a real, confirmed production subject (2026-07-26 audit)
-    that does NOT match the welcome/onboarding subject-pattern filter
-    (^welcome) -- "Thanks for subscribing to..." is a real gap that
-    filter deliberately doesn't cover (see _WELCOME_SUBJECT_PATTERN's
-    docstring), so this specific subject is what keeps this test actually
-    exercising the extraction-based content-free path rather than the
-    subject-pattern short-circuit."""
+    Subject is a real, confirmed production subject (The AI Merge's real
+    welcome email, per the 2026-07-26 10-sender audit) that does NOT
+    match the welcome/onboarding subject-pattern filter at all -- a
+    slogan/tagline, not a "Welcome..."/"Thanks for subscribing..."
+    phrase (see _WELCOME_SUBJECT_PATTERN's docstring for why this is a
+    confirmed, deliberately-uncovered gap) -- so this specific subject is
+    what keeps this test actually exercising the extraction-based
+    content-free path rather than the subject-pattern short-circuit."""
     now = datetime.now(timezone.utc)
     fake_messages = _FakeMessagesClient(
-        list_items=[_FakeMessageItem("msg-3", "Thanks for subscribing to Ahead of AI!")],
+        list_items=[_FakeMessageItem("msg-3", "No Vibes, Just Real AI/ML Engineering!")],
         get_by_id={
             "msg-3": _FakeMessage(
-                "msg-3", "Thanks for subscribing to Ahead of AI!", '<a href="https://email.mg-d0.substack.com/c/tokenX">Subscribe</a>',
+                "msg-3", "No Vibes, Just Real AI/ML Engineering!", '<a href="https://email.mg-d0.substack.com/c/tokenX">Subscribe</a>',
                 "sebastianraschka@substack.com", now,
             ),
         },

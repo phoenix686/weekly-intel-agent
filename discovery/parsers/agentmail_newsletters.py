@@ -113,9 +113,13 @@ sender's format shifts. fetch_agentmail_newsletters now logs a WARNing
 exceeds _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS -- visibility only, no new
 extraction/scoring path.
 
-WELCOME/ONBOARDING PRE-FILTER (2026-07-26, real production bug): see
-_WELCOME_SUBJECT_PATTERN's own docstring for the full rationale and real
-subjects that triggered it. Runs before _extract_article_url, once a
+WELCOME/ONBOARDING PRE-FILTER (2026-07-26, real production bug, expanded
+same day from a full 10-sender real-subject-line audit): see
+_WELCOME_SUBJECT_PATTERN's own docstring for the full rationale, the two
+real phrasings it covers ("Welcome to X"/"Welcome, ...", "Thanks for
+subscribing to X!"), and the one real subject confirmed to still slip
+through (The AI Merge's tagline-shaped welcome subject, which needs a
+different heuristic entirely). Runs before _extract_article_url, once a
 message's real sender is resolved -- a matched message is marked read
 immediately (it's definitionally confirmed content-free, so there's no
 reason to leave it unread for retry the way a genuine transient
@@ -312,27 +316,47 @@ def _visible_body_length(html: str) -> int:
 
 
 # WELCOME/ONBOARDING PRE-FILTER (2026-07-26, real production bug): a
-# welcome email has no real article at all -- it shouldn't reach
-# _extract_article_url or scoring/uncategorized-flagging regardless of
-# whether some /p/{slug} link happens to be findable in its body (e.g. a
-# "recommended posts" section or evergreen footer link). Real case: run
-# 08b5d13b's "Welcome to Decoding AI Magazine" email had no article of
-# its own, but tier 1 of _extract_article_url found an unrelated /p/
-# link anyway and it was ingested as real content (see the sibling
-# title-sourcing fix -- that fixed the DISPLAYED title, this stops the
-# email from being extracted/scored at all). Subject-pattern heuristic
-# only (not "sender's first message in thread" -- that would need new
-# persistent per-sender state to track, out of scope here); real
-# subjects confirmed across two Sunday runs (07-22, 07-26) all start
-# with "Welcome": "Welcome to AI Engineering!", "Welcome to the
-# DiamantAI Community!", "Welcome to The Neural Maze", "Welcome to The
-# Nuanced Perspective", "Welcome to AI with Aish", "Welcome to Jam with
-# AI", "Welcome, we're getting more technical" (Technically). NOT
-# covered: "Thanks for subscribing to Ahead of AI!" -- a real
-# confirmed-content-free subject seen in the same logs that doesn't
-# start with "Welcome" at all; flagged, not silently absorbed into this
-# pattern, since broadening it was not part of what was asked.
-_WELCOME_SUBJECT_PATTERN = re.compile(r"^welcome\b", re.IGNORECASE)
+# welcome/onboarding email has no real article at all -- it shouldn't
+# reach _extract_article_url or scoring/uncategorized-flagging
+# regardless of whether some /p/{slug} link happens to be findable in
+# its body (e.g. a "recommended posts" section or evergreen footer
+# link). Real case: run 08b5d13b's "Welcome to Decoding AI Magazine"
+# email had no article of its own, but tier 1 of _extract_article_url
+# found an unrelated /p/ link anyway and it was ingested as real content
+# (see the sibling title-sourcing fix -- that fixed the DISPLAYED title,
+# this stops the email from being extracted/scored at all).
+#
+# Built from real data, not guessed phrasing (2026-07-26 audit): pulled
+# every real subject line across all 10 configured senders from every
+# Sunday run with per-message AgentMail data (node_summary's
+# scrape_blogs error_summary, run_history-confirmed run_ids
+# 873db6a8/5d81e3ed/63b04873/5677ca1d/85e853f9/0e6328c7/c6c5624d/
+# 08b5d13b -- the first six predate a working AgentMail config or hit a
+# 403/config/API-key error before ever reaching per-message subjects, so
+# only c6c5624d (07-22) and 08b5d13b (07-26) contributed real subject
+# text). Two distinct onboarding phrasings actually found:
+#   1. "Welcome to X" / "Welcome, ..." -- AI Engineering, AI with Aish,
+#      DiamantAI, JamWithAI, The Neural Maze, The Nuanced Perspective,
+#      Technically.
+#   2. "Thanks for subscribing to X!" -- Ahead of AI. Added 2026-07-26 --
+#      previously NOT covered by tier 1 alone.
+# Considered and NOT added: "You're subscribed to X" / "You're in!" --
+# these do not appear anywhere in the real logs pulled for this audit;
+# adding them now would be exactly the "guessing common phrasings" this
+# audit was built to avoid. If either ever shows up for real, add it
+# then, from real evidence, the same way "Thanks for subscribing" was.
+# Confirmed NOT reachable by subject-pattern matching at all: The AI
+# Merge's real welcome message has the subject "No Vibes, Just Real
+# AI/ML Engineering!" -- a slogan/tagline, not a confirmation phrase, so
+# there is no honest textual pattern that would catch it without risking
+# false positives on real article titles later. This is exactly the case
+# "sender's first message in thread" (the other heuristic option,
+# needing new persistent per-sender state) would catch and subject-text
+# fundamentally cannot -- still out of scope here, now with a confirmed
+# real example motivating it if this gap needs closing later.
+_WELCOME_SUBJECT_PATTERN = re.compile(
+    r"^welcome\b|^thanks for subscribing\b", re.IGNORECASE
+)
 
 
 def _match_sender_name(from_address: str, sender_to_name: dict[str, str]) -> str | None:
