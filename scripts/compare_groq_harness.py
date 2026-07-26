@@ -289,6 +289,25 @@ def compare_classify_item(state: dict) -> None:
         cards_block=_classify_format_cards(cards),
         items_block=_classify_format_items(correlated_items),
     )
+    # Real finding (first attempt, unmodified prompt): gpt-oss-120b
+    # returned a bare JSON array here -- matching the production prompt's
+    # own literal "Return ONLY a JSON array..." instruction -- which
+    # failed schema validation against the required {"results": [...]}
+    # object wrapper even under strict:true. Same substitution already
+    # applied to score_node's prompt in this harness; correlate_trello's
+    # identical phrasing happened not to trigger this on its one real
+    # run, so left as-is there (already-captured real result, not
+    # retried). Swapping only the trailing instruction block -- the
+    # substantive task/persona/rules text above is untouched.
+    prompt = prompt.replace(
+        'Return ONLY a JSON array, one object per item, in this exact shape:\n'
+        '[\n'
+        '  {"item_id": "...", "classification": "plan_item" or "project_proposal", "proposal_type": "extend" or "new" or null, "classification_reasoning": "brief reason"}\n'
+        ']',
+        'Return one object per item, with: item_id, classification ("plan_item" or '
+        '"project_proposal"), proposal_type ("extend" or "new" or null), '
+        'classification_reasoning (brief reason).'
+    )
 
     parsed, in_tok, out_tok, latency_ms = _call_groq_structured(prompt, "classify_item", _CLASSIFY_JSON_SCHEMA)
     groq_by_id = {r["item_id"]: r for r in parsed["results"]}
