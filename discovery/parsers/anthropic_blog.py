@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 LISTING_URL = "https://www.anthropic.com/engineering"
 BASE_URL = "https://www.anthropic.com"
@@ -54,12 +54,30 @@ def _parse_date(raw: str) -> str:
         return datetime.now(timezone.utc).isoformat()
 
 
-def fetch_anthropic_engineering(url: str = LISTING_URL, limit: int = 30) -> ParseResult:
+def fetch_anthropic_engineering(
+    url: str = LISTING_URL, limit: int = 30, max_age_hours: int | None = None
+) -> ParseResult:
     """Fetch and parse Anthropic's engineering blog listing page.
 
     `url` defaults to LISTING_URL but is overridable so the caller can
     source it from discovery/config/blog_sources.yaml instead of this
     module's hardcoded constant.
+
+    max_age_hours (2026-07-26, real production bug: run 08b5d13b served
+    posts from 2026-02-05 and 2026-03-24/25 as if new, because this was
+    the only blog_sources.yaml entry with no recency cutoff at all --
+    every feed_url entry already gets one via
+    discovery/parsers/rss_common.py's fetch_rss_feed). Same contract as
+    fetch_rss_feed's own max_age_hours: when set, an entry whose parsed
+    date is older than this many hours is dropped before it's ever
+    returned. Only applied when a real date was actually parsed off the
+    page (see _parse_date) -- an entry with no matching _DATE_PATTERN
+    falls back to "now" and is always kept, since there's no real
+    timestamp to judge staleness against, same as rss_common's handling
+    of a missing/unparseable pubDate. A dormant source (nothing published
+    in months, real case: this blog has posted nothing since 2026-04-23)
+    now correctly yields zero fresh rows on a given run instead of
+    re-serving the same stale top-`limit` posts every time.
 
     Each successfully parsed entry produces a dict with keys matching
     RawItem's shape minus `source`: title, text (always "" -- the listing
@@ -69,6 +87,11 @@ def fetch_anthropic_engineering(url: str = LISTING_URL, limit: int = 30) -> Pars
     """
     rows: list[dict] = []
     errors: list[tuple[str, str]] = []
+
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        if max_age_hours is not None else None
+    )
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_USER_AGENT})
@@ -84,6 +107,9 @@ def fetch_anthropic_engineering(url: str = LISTING_URL, limit: int = 30) -> Pars
             date_match = _DATE_PATTERN.search(block)
             title = _TAG_PATTERN.sub("", title_match.group(1)).strip()
             fetched_at = _parse_date(date_match.group(1)) if date_match else datetime.now(timezone.utc).isoformat()
+
+            if cutoff is not None and date_match and datetime.fromisoformat(fetched_at) < cutoff:
+                continue
 
             rows.append({
                 "title": title,

@@ -68,7 +68,7 @@ def test_scrape_url_entry_passes_its_own_fetch_limit():
     with patch("discovery.parsers.scrape_blogs.fetch_anthropic_engineering", return_value=AnthropicParseResult(rows=[])) as mock_fetch:
         fetch_one_source(entry)
 
-    mock_fetch.assert_called_once_with(url="https://www.anthropic.com/engineering", limit=6)
+    mock_fetch.assert_called_once_with(url="https://www.anthropic.com/engineering", limit=6, max_age_hours=216)
 
 
 def test_scrape_url_entry_without_fetch_limit_falls_back_to_default():
@@ -77,7 +77,7 @@ def test_scrape_url_entry_without_fetch_limit_falls_back_to_default():
     with patch("discovery.parsers.scrape_blogs.fetch_anthropic_engineering", return_value=AnthropicParseResult(rows=[])) as mock_fetch:
         fetch_one_source(entry)
 
-    mock_fetch.assert_called_once_with(url="https://www.anthropic.com/engineering", limit=_DEFAULT_FETCH_LIMIT)
+    mock_fetch.assert_called_once_with(url="https://www.anthropic.com/engineering", limit=_DEFAULT_FETCH_LIMIT, max_age_hours=216)
 
 
 def test_real_blog_sources_yaml_daily_entries_all_have_fetch_limit_15():

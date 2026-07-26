@@ -52,8 +52,10 @@ _LANGCHAIN_CASE_STUDY_MARKERS = (
 _LANGCHAIN_FEED_URL = "https://blog.langchain.dev/rss.xml"
 
 # pubDate pre-filter window per bucket -- see discovery/parsers/rss_common.py's
-# max_age_hours. Not applied to scrape_url entries (fetch_anthropic_engineering
-# has no pubDate-cutoff support).
+# max_age_hours. Applied uniformly to every entry type, including scrape_url
+# (fetch_anthropic_engineering gained max_age_hours support 2026-07-26 --
+# it was the one entry silently exempt from this cutoff, which let a
+# dormant source re-serve the same stale top-N posts every run).
 _MAX_AGE_HOURS_BY_BUCKET = {"daily": 48, "sunday": 216}
 
 
@@ -118,7 +120,8 @@ def fetch_one_source(entry: dict) -> SourceResult:
         error = result.errors[0][1] if result.errors else None
         return SourceResult(name=entry["name"], rows=rows, error=error)
 
-    result = fetch_anthropic_engineering(url=entry["scrape_url"], limit=fetch_limit)
+    max_age = _MAX_AGE_HOURS_BY_BUCKET[entry["bucket"]]
+    result = fetch_anthropic_engineering(url=entry["scrape_url"], limit=fetch_limit, max_age_hours=max_age)
     rows = [row for row in result.rows if row["title"]]
     error = result.errors[0][1] if result.errors else None
     return SourceResult(name=entry["name"], rows=rows, error=error)

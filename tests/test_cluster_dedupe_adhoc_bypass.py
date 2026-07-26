@@ -71,7 +71,8 @@ def test_uncategorized_items_wired_from_taste_prefilter_into_state_not_clustered
     with patch.object(cluster_dedupe_mod, "filter_unseen", side_effect=lambda items: (items, [])), \
          patch.object(cluster_dedupe_mod, "dedupe_semantic", return_value=([blog_item, uncategorized_item], [])), \
          patch.object(cluster_dedupe_mod, "taste_prefilter", return_value=([blog_item], [uncategorized_item], [])), \
-         patch.object(cluster_dedupe_mod, "record_node_summary"):
+         patch.object(cluster_dedupe_mod, "record_node_summary"), \
+         patch.object(cluster_dedupe_mod, "mark_seen"):
         result = cluster_dedupe_node(_state([blog_item, uncategorized_item]))
 
     assert result["uncategorized_items"] == [uncategorized_item]

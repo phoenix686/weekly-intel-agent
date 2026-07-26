@@ -153,9 +153,11 @@ class DiscoverySubgraphState(TypedDict):
     source_context: Literal["daily", "sunday"]  # read by route_sources() to
                                                  # decide the active source
                                                  # node(s) for this invocation
-    dry_run: bool  # when True, score_node skips mark_seen() -- lets manual
-                    # testing exercise the pipeline without permanently
-                    # exhausting the real seen_items pool
+    dry_run: bool  # when True, score_node AND cluster_dedupe_node both skip
+                    # mark_seen() (scored items and uncategorized items,
+                    # respectively) -- lets manual testing exercise the
+                    # pipeline without permanently exhausting the real
+                    # seen_items pool
 
 
 class DailyGraphState(TypedDict):
