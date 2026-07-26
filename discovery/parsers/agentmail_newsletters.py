@@ -179,13 +179,34 @@ def _resolve_redirect(url: str, timeout: float = 10.0) -> str | None:
     """Follows a real HTTP redirect chain and returns the final resolved
     URL, or None on any failure. Real newsletter emails wrap every link
     in an opaque click-tracking redirect (Substack, beehiiv both
-    confirmed) -- the raw href is never the real destination."""
+    confirmed) -- the raw href is never the real destination.
+
+    Logged at INFO/WARNING, not DEBUG (2026-07-26 observability fix,
+    found investigating Issue 6): a real Sunday run's "AI Engineering"
+    (beehiiv) messages were failing here on every run with zero trace of
+    why -- the only place the real exception was ever logged was a
+    logger.debug() call, invisible in every real captured log/artifact
+    since core/logging_config.py's global level is INFO (left as-is
+    deliberately here -- that's a broader, separate tradeoff, not
+    reopened by this fix). httpx already logs every AgentMail API
+    request/response at INFO for free; urllib.request (used here, not
+    httpx) logs nothing on its own, so this adds the same visibility
+    explicitly -- one line for the attempt, one for the real outcome
+    (status code on success, real exception type/message on failure)."""
+    logger.info(f"agentmail_newsletters: resolving redirect for {url}")
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _BROWSER_USER_AGENT})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            logger.info(f"agentmail_newsletters: redirect resolved for {url} -> {resp.url} (status={resp.status})")
             return resp.url
     except Exception as e:
-        logger.debug(f"agentmail_newsletters: redirect resolution failed for {url}: {e}")
+        # WARNING, not DEBUG -- must survive the global INFO level. The
+        # aggregated per-message error recorded by the caller (fetch_
+        # agentmail_newsletters' errors list, e.g. "resolution error --
+        # left unread for retry") is unchanged and still the real
+        # per-message-outcome record; this is additive detail on WHY,
+        # not a replacement for that existing mechanism.
+        logger.warning(f"agentmail_newsletters: redirect resolution failed for {url}: {type(e).__name__}: {e}")
         return None
 
 

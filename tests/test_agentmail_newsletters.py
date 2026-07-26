@@ -3,29 +3,36 @@ discovery/parsers/agentmail_newsletters.py -- covers URL extraction,
 sender attribution, and the full fetch flow.
 
 _resolve_redirect (the real HTTP redirect-following call) is mocked in
-every test here -- its real behavior was verified directly against real
+most tests here -- its real behavior was verified directly against real
 received welcome emails from Ahead of AI (Substack) and "AI Engineering"
 (beehiiv) on 2026-07-18: both wrap every link in an opaque click-tracking
 redirect with the real destination only recoverable by actually
 resolving it (e.g. https://email.mg-d0.substack.com/c/{token} ->
-https://magazine.sebastianraschka.com/subscribe, confirmed live). These
+https://magazine.sebastianraschka.com/subscribe, confirmed live). Most
 tests cover the logic around that real, already-verified mechanism --
 routing, sender matching, error handling -- not re-prove the redirect
 resolution itself, which needs a real network call to verify and was
 already done by hand.
+
+Exception: the "_resolve_redirect observability" section below (2026-07-26,
+Issue 6 investigation) exercises the REAL _resolve_redirect (via
+urllib.request.urlopen mocked instead), since what's under test there is
+specifically what that function itself logs and at what level -- mocking
+the function away entirely would defeat the point.
 """
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import discovery.parsers.agentmail_newsletters as agentmail_mod
 from discovery.parsers.agentmail_newsletters import (
     fetch_agentmail_newsletters, _extract_article_url, _html_to_text, _match_sender_name,
-    _WELCOME_SUBJECT_PATTERN,
+    _WELCOME_SUBJECT_PATTERN, _resolve_redirect,
 )
 
 _SENDER_TO_NAME = {
@@ -173,6 +180,62 @@ def test_tier3_still_used_for_genuinely_opaque_tracking_links():
 
     assert result == ("https://aiengineering.beehiiv.com/p/hands-on-build-a-browser-automation-agent", False)
     mock_resolve.assert_called_once()
+
+
+# ── _resolve_redirect observability (2026-07-26, Issue 6 investigation) ────
+# Real bug: every real "AI Engineering" (beehiiv) resolution failure across
+# multiple Sunday runs left zero trace of the actual exception -- the only
+# place it was ever logged was a logger.debug() call, invisible in every
+# real captured log/artifact since core/logging_config.py's global level is
+# INFO. These exercise the REAL _resolve_redirect (not mocked, unlike every
+# other test in this file) via caplog, proving the real exception now
+# survives at INFO/WARNING regardless of the global level.
+
+def test_resolve_redirect_failure_logs_the_real_exception_at_warning_level(caplog):
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("simulated network timeout")), \
+         caplog.at_level(logging.INFO, logger="discovery.parsers.agentmail_newsletters"):
+        result = _resolve_redirect("https://link.mail.beehiiv.com/ss/c/faketoken")
+
+    assert result is None
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warning_records, f"expected a WARNING-or-above record, got levels: {[r.levelname for r in caplog.records]}"
+    assert any("simulated network timeout" in r.getMessage() for r in warning_records), \
+        "expected the real exception message in the log record"
+    assert any("TimeoutError" in r.getMessage() for r in warning_records), \
+        "expected the real exception TYPE in the log record, not just a generic failure notice"
+
+
+def test_resolve_redirect_logs_the_attempt_before_resolving(caplog):
+    """Request-attempt visibility (item 2): a log line must exist for the
+    attempt itself, not just the outcome -- matching what httpx already
+    logs for free on every AgentMail API call."""
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("simulated network timeout")), \
+         caplog.at_level(logging.INFO, logger="discovery.parsers.agentmail_newsletters"):
+        _resolve_redirect("https://link.mail.beehiiv.com/ss/c/faketoken")
+
+    info_records = [r for r in caplog.records if r.levelno == logging.INFO]
+    assert any("https://link.mail.beehiiv.com/ss/c/faketoken" in r.getMessage() for r in info_records), \
+        "expected an INFO-level log line naming the URL being resolved, before the outcome is known"
+
+
+def test_resolve_redirect_success_logs_the_resolved_url_and_status(caplog):
+    """Success path also gets real visibility -- status code and the
+    real resolved destination, not silence on the happy path."""
+    fake_resp = MagicMock()
+    fake_resp.url = "https://magazine.sebastianraschka.com/p/real-post"
+    fake_resp.status = 200
+    fake_resp.__enter__.return_value = fake_resp
+    fake_resp.__exit__.return_value = False
+
+    with patch("urllib.request.urlopen", return_value=fake_resp), \
+         caplog.at_level(logging.INFO, logger="discovery.parsers.agentmail_newsletters"):
+        result = _resolve_redirect("https://email.mg-d0.substack.com/c/tokenA")
+
+    assert result == "https://magazine.sebastianraschka.com/p/real-post"
+    assert any(
+        "https://magazine.sebastianraschka.com/p/real-post" in r.getMessage() and "200" in r.getMessage()
+        for r in caplog.records
+    ), f"expected an INFO record with the resolved URL and status code, got: {[r.getMessage() for r in caplog.records]}"
 
 
 def test_tier1_before_tier2_when_both_present():
