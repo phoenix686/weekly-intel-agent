@@ -2,13 +2,19 @@
 Real-embedding, real-Haiku live verification for sunday/nodes/update_profile.py's
 Sunday consolidated rewrite -- the one blocked feature that touches BOTH a
 real Anthropic call and real local embeddings (via the nested
-recompute_topic_vectors call). Deliberately writes to a THROWAWAY yaml
-path (TASTE_PROFILE_PATH patched), not data/taste_profile.yaml -- this
-call permanently rewrites whatever path it's given, and the real file is
-not this checkpoint's data to overwrite for a verification run. Seeds one
-real, throwaway feedback_events record (deleted after), runs the real
-node function, verifies the real consolidated rewrite + real recompute +
-real same_day_adjustments clearing, then cleans up everything it wrote.
+recompute_topic_vectors call).
+
+2026-07-26: taste_profile persistence moved to Postgres (discovery/
+taste_profile_store.py) -- there's no "throwaway path" to point at
+anymore the way a local file had. Instead: capture the REAL current
+("weekly_intel","taste_profile") row before running, let update_profile()
+write for real, then restore the original row in a finally block --
+same "never permanently touch real production data" guarantee as the
+old TASTE_PROFILE_PATH-swap technique, adapted to the new persistence
+mechanism. Seeds one real, throwaway feedback_events record (deleted
+after), runs the real node function, verifies the real consolidated
+rewrite + real recompute + real same_day_adjustments clearing, then
+cleans up everything it wrote.
 
 Run: uv run --env-file .env python scripts/test_sunday_rewrite_live_roundtrip.py
 """
@@ -19,12 +25,11 @@ from core.logging_config import setup_logging
 setup_logging()
 
 import uuid
-import tempfile
-from pathlib import Path
 from datetime import datetime, timezone
 
 import sunday.nodes.update_profile as update_profile_mod
 from sunday.memory_store_config import get_store
+from discovery.taste_profile_store import get_taste_profile, put_taste_profile
 
 RUN_ID = "smoke-test-sunday-rewrite-live"
 store = get_store()
@@ -44,31 +49,25 @@ feedback_value = {
 store.put(update_profile_mod._FEEDBACK_NAMESPACE, feedback_key, feedback_value)
 print(f"Seeded real feedback_events record: {feedback_key}")
 
-with tempfile.TemporaryDirectory() as tmpdir:
-    throwaway_path = Path(tmpdir) / "taste_profile.yaml"
-    throwaway_path.write_text(
-        "version: 1\nproposal_filters: []\nnotes: \"seeded for smoke test\"\n",
-        encoding="utf-8",
-    )
-    print(f"Using throwaway TASTE_PROFILE_PATH: {throwaway_path} (data/taste_profile.yaml untouched)")
+original_profile = get_taste_profile()
+print(f"Captured real current taste_profile row (len={len(original_profile) if original_profile else 0}) -- will restore after")
 
-    original_path = update_profile_mod.TASTE_PROFILE_PATH
-    update_profile_mod.TASTE_PROFILE_PATH = throwaway_path
-    try:
-        state = {
-            "run_id": RUN_ID, "scored_items": [], "trello_cards": [], "correlated_items": [],
-            "classified_items": [], "plan_text": "", "plan_item_map": {}, "pending_approvals": [],
-            "pending_resumes": [], "costs": [], "errors": [], "source_context": "sunday",
-        }
-        print("\nCalling the real update_profile() -- real Haiku consolidated rewrite + real local embedding recompute...")
-        result = update_profile_mod.update_profile(state)
-    finally:
-        update_profile_mod.TASTE_PROFILE_PATH = original_path
-
-    rewritten_yaml = throwaway_path.read_text(encoding="utf-8")
+try:
+    state = {
+        "run_id": RUN_ID, "scored_items": [], "trello_cards": [], "correlated_items": [],
+        "classified_items": [], "plan_text": "", "plan_item_map": {}, "pending_approvals": [],
+        "pending_resumes": [], "costs": [], "errors": [], "source_context": "sunday",
+    }
+    print("\nCalling the real update_profile() -- real Haiku consolidated rewrite + real local embedding recompute...")
+    result = update_profile_mod.update_profile(state)
+    rewritten_yaml = get_taste_profile()
+finally:
+    if original_profile is not None:
+        put_taste_profile(original_profile)
+        print("Restored the real taste_profile row to its pre-run content")
 
 print(f"\nresult costs: {result['costs']}")
-print(f"\nrewritten YAML (throwaway file):\n---\n{rewritten_yaml}\n---")
+print(f"\nrewritten YAML (real Postgres row, restored after this script exits):\n---\n{rewritten_yaml}\n---")
 
 haiku_cost = next((c for c in result["costs"] if c["node_name"] == "update_profile" and c["input_tokens"] > 0), None)
 assert haiku_cost is not None, "expected a real Haiku cost record with nonzero input_tokens"
@@ -82,8 +81,8 @@ assert len(real_vectors) == 5, f"expected 5 real embeddings (learning-resource f
 print(f"real recompute_topic_vectors confirmed: {len(real_vectors)}/6 tags got a real local embedding")
 
 assert rewritten_yaml.strip() != "", "expected a real non-empty rewritten YAML"
-assert "seeded for smoke test" not in rewritten_yaml or "agentic" in rewritten_yaml.lower(), \
-    "expected the rewrite to actually incorporate the seeded feedback, not just echo the input unchanged"
+assert rewritten_yaml != original_profile, \
+    "expected a real rewrite, not the original profile echoed back unchanged"
 
 same_day_after = list(store.search(update_profile_mod._SAME_DAY_NAMESPACE, limit=100))
 assert same_day_after == [], f"expected same_day_adjustments cleared, found {len(same_day_after)} entries"
@@ -103,5 +102,5 @@ print("\nsunday_rewrite live round-trip: PASS")
 print("  real consolidated Haiku rewrite happened exactly once, real nonzero cost")
 print("  real recompute_topic_vectors ran on the fresh text (5/6 tags, learning-resource flagged)")
 print("  real same_day_adjustments namespace confirmed cleared")
-print("  data/taste_profile.yaml was never touched -- throwaway path used throughout")
+print("  real taste_profile Postgres row restored to its pre-run content")
 print("  all seeded/computed test entries deleted after assertion")

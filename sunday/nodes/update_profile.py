@@ -25,6 +25,15 @@ as an interpretation, not the spec's literal text.
 
 Also still does the pre-existing cost_log.csv accounting for the whole
 Sunday run.
+
+TASTE PROFILE PERSISTENCE (2026-07-26 fix): the profile's real source of
+truth is now Postgres (discovery/taste_profile_store.py), not a local
+data/taste_profile.yaml file -- see that module's docstring for why the
+local file could never durably reflect a GitHub Actions run. This node
+reads/writes exclusively through get_taste_profile()/put_taste_profile()
+now; it no longer touches the local filesystem for the profile itself.
+scripts/sync_taste_profile.py is the only thing that ever writes the
+local file, and only for manual readability -- never the reverse.
 """
 
 import csv
@@ -38,12 +47,18 @@ import anthropic
 from core.state import SundayGraphState, NodeCost
 from sunday.memory_store_config import get_store
 from discovery.taste_vectors import recompute_topic_vectors
+from discovery.taste_profile_store import get_taste_profile, put_taste_profile
 
 logger = logging.getLogger(__name__)
 
 _client = anthropic.Anthropic()
 
-TASTE_PROFILE_PATH = Path("data/taste_profile.yaml")
+# Module-level (not inline in update_profile()) so tests can patch it the
+# same way TASTE_PROFILE_PATH already was -- 2026-07-26 fix: it wasn't
+# patchable before, so every local pytest run appended real rows to the
+# real data/cost_log.csv.
+COST_LOG_PATH = Path("data/cost_log.csv")
+
 _FEEDBACK_NAMESPACE = ("weekly_intel", "feedback_events")
 _SAME_DAY_NAMESPACE = ("weekly_intel", "same_day_adjustments")
 _LOOKBACK_DAYS = 7
@@ -121,11 +136,7 @@ def _consolidated_rewrite(records: list[dict]) -> list[NodeCost]:
     """One Haiku call over the whole week's feedback, writes
     taste_profile.yaml, then recomputes topic vectors from the fresh
     text. Returns the accumulated cost records."""
-    current_profile = (
-        TASTE_PROFILE_PATH.read_text(encoding="utf-8")
-        if TASTE_PROFILE_PATH.exists()
-        else _YAML_PLACEHOLDER
-    )
+    current_profile = get_taste_profile() or _YAML_PLACEHOLDER
 
     prompt = _REWRITE_PROMPT.format(
         current_profile=current_profile,
@@ -140,8 +151,7 @@ def _consolidated_rewrite(records: list[dict]) -> list[NodeCost]:
     )
 
     updated_yaml = response.content[0].text.strip()
-    TASTE_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    TASTE_PROFILE_PATH.write_text(updated_yaml, encoding="utf-8")
+    put_taste_profile(updated_yaml)
 
     input_tokens = response.usage.input_tokens
     output_tokens = response.usage.output_tokens
@@ -183,9 +193,9 @@ def update_profile(state: SundayGraphState) -> dict:
     plan_items = sum(1 for i in state["classified_items"] if i.get("classification") == "plan_item")
     proposals = len(state["pending_approvals"])
 
-    cost_log = Path("data/cost_log.csv")
-    write_header = not cost_log.exists()
-    with cost_log.open("a", newline="", encoding="utf-8") as f:
+    write_header = not COST_LOG_PATH.exists()
+    COST_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with COST_LOG_PATH.open("a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if write_header:
             writer.writerow(["run_id", "timestamp", "total_cost_usd", "plan_items", "proposals"])

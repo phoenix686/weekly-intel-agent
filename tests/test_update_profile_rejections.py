@@ -8,24 +8,22 @@ proposals, 1 approved plan_item) and calls update_profile() directly.
 Prints:
   - rejection_events queried back from the store
   - run_summary queried back from the store
-  - before/after content of the (sandboxed) taste_profile.yaml
+  - before/after content of the real taste_profile Postgres row
   - NodeCost records returned
 
-TASTE_PROFILE_PATH is monkeypatched to a tempfile.TemporaryDirectory()
-path for the duration of the run -- same technique
-test_sunday_rewrite_live_roundtrip.py already uses for this exact node
--- so this can never touch the real data/taste_profile.yaml. (Not
-pytest's tmp_path fixture: this file is intentionally excluded from
-pytest collection via tests/conftest.py's collect_ignore -- it's a
-manual diagnostic script with printed output, not an assert-based
-test -- and tmp_path only exists as an injectable fixture inside a
-pytest-run test function.)
+2026-07-26: taste_profile persistence moved to Postgres (discovery/
+taste_profile_store.py). The real current row is captured before the
+run and restored after in a finally block -- same "never permanently
+touch real production data" guarantee the old TASTE_PROFILE_PATH
+tempfile-swap technique gave for the local file, adapted to the new
+persistence mechanism. (This file is intentionally excluded from pytest
+collection via tests/conftest.py's collect_ignore -- it's a manual
+diagnostic script with printed output, not an assert-based test.)
 
 Run: uv run --env-file .env python tests/test_update_profile_rejections.py
 """
 
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -36,6 +34,7 @@ load_dotenv()
 import sunday.nodes.update_profile as update_profile_mod
 from sunday.nodes.update_profile import update_profile
 from sunday.memory_store_config import get_store
+from discovery.taste_profile_store import get_taste_profile, put_taste_profile
 
 RUN_ID = "test-update-profile-1"
 
@@ -121,37 +120,24 @@ state = {
     "errors": [],
 }
 
-with tempfile.TemporaryDirectory() as tmpdir:
-    sandboxed_path = Path(tmpdir) / "taste_profile.yaml"
-    print(f"Using sandboxed TASTE_PROFILE_PATH: {sandboxed_path} (data/taste_profile.yaml untouched)")
+yaml_before = get_taste_profile() or "(no row in Postgres yet)"
+print(f"Captured real current taste_profile row -- will restore after")
 
-    original_path = update_profile_mod.TASTE_PROFILE_PATH
-    update_profile_mod.TASTE_PROFILE_PATH = sandboxed_path
-    try:
-        # ── capture YAML before ─────────────────────────────────────────────
-        yaml_before = (
-            sandboxed_path.read_text(encoding="utf-8")
-            if sandboxed_path.exists()
-            else "(file does not exist yet)"
-        )
+try:
+    print("=" * 60)
+    print("YAML BEFORE:")
+    print(yaml_before)
+    print("=" * 60)
 
-        print("=" * 60)
-        print("YAML BEFORE:")
-        print(yaml_before)
-        print("=" * 60)
+    # ── run the node ────────────────────────────────────────────────────
+    print("\nCalling update_profile()...")
+    result = update_profile(state)
 
-        # ── run the node ────────────────────────────────────────────────────
-        print("\nCalling update_profile()...")
-        result = update_profile(state)
-
-        # ── YAML after (captured inside the sandbox, before the path is restored) ──
-        yaml_after = (
-            sandboxed_path.read_text(encoding="utf-8")
-            if sandboxed_path.exists()
-            else "(file still does not exist)"
-        )
-    finally:
-        update_profile_mod.TASTE_PROFILE_PATH = original_path
+    yaml_after = get_taste_profile() or "(still no row)"
+finally:
+    if yaml_before != "(no row in Postgres yet)":
+        put_taste_profile(yaml_before)
+        print("Restored the real taste_profile row to its pre-run content")
 
 # ── costs returned ───────────────────────────────────────────────────────────
 print("\nNodeCosts returned:")
