@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timedelta, timezone
@@ -243,9 +244,23 @@ def test_full_text_prefers_content_encoded_over_description_real_fixture():
     <description> is 51 chars ("Several new Cyber headlines make us
     observe a trend"), <content:encoded> is 29,368 chars of the real
     article. `text` must now be the long one, not the 51-char teaser
-    that produced a cosine=0.186 taste-prefilter drop on 2026-07-22."""
+    that produced a cosine=0.186 taste-prefilter drop on 2026-07-22.
+
+    pubDate is rewritten to 2 hours before whenever this test actually
+    runs (2026-07-26 fix) -- the fixture's real captured pubDate is a
+    fixed 2026-07-22 timestamp, which drifted past this call's own
+    max_age_hours=48 cutoff days ago and will keep drifting further out
+    of range every day this suite exists. What's under test here is the
+    content:encoded-vs-description preference, not the real pubDate
+    value itself, so relative-to-now is the honest fix rather than
+    re-editing a fixed date that would only buy another couple of days.
+    Everything else in the fixture (title, content:encoded, description)
+    stays exactly as captured."""
     fixture_path = Path(__file__).parent / "fixtures" / "latent_space_cybersecurity_item.xml"
-    body = fixture_path.read_bytes()
+    raw_xml = fixture_path.read_text(encoding="utf-8")
+    fresh_pubdate = format_datetime(datetime.now(timezone.utc) - timedelta(hours=2))
+    raw_xml = re.sub(r"<pubDate>.*?</pubDate>", f"<pubDate>{fresh_pubdate}</pubDate>", raw_xml)
+    body = raw_xml.encode("utf-8")
 
     with patch("urllib.request.urlopen", return_value=_mock_response(body, content_type="application/rss+xml")):
         result = fetch_rss_feed(
