@@ -2,8 +2,17 @@ name: Sunday Pipeline
 
 on:
   schedule:
-    # 05:30 UTC = 11:00 IST, Sunday.
-    - cron: "30 5 * * 0"
+    # 23:00 UTC Friday = 04:30 IST Saturday (2026-07-26 timing fix -- the
+    # prior 05:30 UTC (11:00 IST) Sunday trigger was observed actually
+    # delivering around 1:30 PM IST, a ~2.5h GitHub-side scheduling lag;
+    # retargeted for ~07:00 IST Saturday delivery). Day intentionally
+    # moved from Sunday-trigger/Sunday-delivery to Friday-trigger/
+    # Saturday-delivery as part of this same fix. File/module naming
+    # (this workflow's own filename, sunday/, run_sunday.py, docs, etc.)
+    # is deliberately NOT touched in this commit -- that's Phase 2 of
+    # the same fix, gated on explicit confirmation that this cron change
+    # is correct first.
+    - cron: "0 23 * * 5"
   workflow_dispatch:
 
 concurrency:
