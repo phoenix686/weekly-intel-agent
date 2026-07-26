@@ -32,6 +32,7 @@ collect_ignore = [
     "test_pending_resume_map_roundtrip.py",
     "test_per_proposal_thread.py",
     "test_prompt.py",
+    "test_resolve_redirect_live.py",
     "test_same_day_nudge_roundtrip.py",
     "test_semantic_dedup_live_roundtrip.py",
     "test_sunday_approval.py",
