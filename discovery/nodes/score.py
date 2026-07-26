@@ -6,6 +6,7 @@ from core.state import DiscoverySubgraphState, ScoredItem, NodeCost
 from discovery.seen_items import mark_seen
 from discovery.scored_items_log import log_scored_items
 from core.observability import record_node_summary
+from core.groq_client import get_groq_client, GROQ_MODEL, groq_cost
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,38 @@ ALLOWED_TAGS = {
 
 DROPPED_TAG_LOG = "data/dropped_tags.log"
 
+# Kept intact but unused -- rollback safety net for the 2026-07-26 Groq
+# swap (see core/groq_client.py's docstring). ANTHROPIC_API_KEY stays in
+# .env.example for the same reason. Not called anywhere; _score_batch_anthropic_legacy
+# below is the dead code path that used to call this.
 client = anthropic.Anthropic()
 
 BATCH_SIZE = 50
+
+_SCORE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "keep": {"type": "boolean"},
+                    "reasoning": {"type": "string"},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": sorted(ALLOWED_TAGS)},
+                    },
+                },
+                "required": ["index", "keep", "reasoning", "tags"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["results"],
+    "additionalProperties": False,
+}
 
 
 def _log_dropped_tag(tag: str, item_id: str, run_id: str) -> None:
@@ -82,7 +112,9 @@ def _validate_tags(item_tags: list[str], item_id: str, run_id: str) -> list[str]
     return [t for t in item_tags if t in ALLOWED_TAGS]
 
 
-def _score_batch(batch: list, offset: int, run_id: str = "unknown") -> tuple[list[ScoredItem], int, int]:
+def _score_batch_anthropic_legacy(batch: list, offset: int, run_id: str = "unknown") -> tuple[list[ScoredItem], int, int]:
+    """Pre-2026-07-26 Haiku implementation. Not called anywhere -- kept
+    verbatim for rollback safety, see core/groq_client.py's docstring."""
     items_text = "\n\n".join(
         f"[{i}] URL: {item['url']}\nTitle: {item['title']}\nText: {item['text'][:500]}"
         for i, item in enumerate(batch)
@@ -135,6 +167,63 @@ Return only valid JSON. No markdown, no explanation outside the array."""
     return scored, response.usage.input_tokens, response.usage.output_tokens
 
 
+def _score_batch(batch: list, offset: int, run_id: str = "unknown") -> tuple[list[ScoredItem], int, int]:
+    items_text = "\n\n".join(
+        f"[{i}] URL: {item['url']}\nTitle: {item['title']}\nText: {item['text'][:500]}"
+        for i, item in enumerate(batch)
+    )
+
+    # Phrased to describe fields rather than assert a bare-array shape
+    # (same object-wrapper conflict already hit and fixed for
+    # classify_item's prompt in scripts/compare_groq_harness.py -- this
+    # phrasing was the one already validated against a real Groq call in
+    # that harness, so reused verbatim rather than risking the same
+    # failure here).
+    prompt = f"""{TASTE_PROFILE}
+
+Assign 1-3 tags from EXACTLY this list — no other tags are permitted:
+agentic-engineering, memory-systems, llm-tooling, evals, learning-resource,
+distributed-systems, new-tool-launch, noise, course
+
+Score each bookmark below. Return one object per item, in the same order,
+with: index (the item's index number), keep (true/false), reasoning (one
+sentence explaining why this should rank higher or lower than other kept
+items today — reference urgency, depth, or how directly it applies to
+active work; do not just describe what the item covers), tags (1-3 tags
+from the permitted list above).
+
+Bookmarks to score:
+{items_text}"""
+
+    groq_client = get_groq_client()
+    response = groq_client.chat.completions.create(
+        model=GROQ_MODEL,
+        temperature=0,
+        max_completion_tokens=8192,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {"name": "score_batch", "strict": True, "schema": _SCORE_JSON_SCHEMA},
+        },
+    )
+
+    results = json.loads(response.choices[0].message.content)["results"]
+
+    _skip = {"keep", "reasoning", "tags"}
+    scored = []
+    for r in results:
+        item = batch[r["index"]]
+        validated_tags = _validate_tags(r["tags"], item["url"], run_id)
+        scored.append(ScoredItem(
+            **{k: item[k] for k in item if k not in _skip},
+            keep=r["keep"],
+            reasoning=r["reasoning"],
+            tags=validated_tags,
+        ))
+
+    return scored, response.usage.prompt_tokens, response.usage.completion_tokens
+
+
 def score_node(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
     items = state["clustered_items"]
@@ -152,15 +241,15 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         total_output += out
         logger.info(f"scored {offset + len(batch)}/{len(items)}")
 
-    cost_usd = (total_input * 0.00025 + total_output * 0.00125) / 1000
+    cost_usd = groq_cost(total_input, total_output)
 
     cost = NodeCost(
         node_name="score_node",
         input_tokens=total_input,
         output_tokens=total_output,
         latency_ms=round((time.perf_counter() - t0) * 1000, 4),
-        cost_usd=round(cost_usd, 6),
-        provider="anthropic",
+        cost_usd=cost_usd,
+        provider="groq",
     )
 
     if state.get("dry_run", False):

@@ -11,6 +11,7 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
     "langgraph-checkpoint-postgres>=3.1.0",
     "groq>=1.6.0",
+    "httpx>=0.28.1",
 ]
 
 [tool.uv]

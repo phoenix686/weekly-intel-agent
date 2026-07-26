@@ -2,13 +2,16 @@
 score_node (discovery/nodes/score.py) -- zero unit test coverage existed
 before this file (confirmed by grep last session). Covers the actual
 keep/drop judgment and tag validation, not just "it runs without
-crashing". All external dependencies mocked: the real Anthropic call
-(client.messages.create), mark_seen (real store write via
-discovery.seen_items), log_scored_items (real store write via
-discovery.scored_items_log, 2026-07-23), record_node_summary (real store
-write via core/observability.py), and the dropped-tag log file (real
-local file I/O) so this suite stays fully offline like the rest of this
-project's tests.
+crashing". All external dependencies mocked: the real Groq call
+(get_groq_client), mark_seen (real store write via discovery.seen_items),
+log_scored_items (real store write via discovery.scored_items_log,
+2026-07-23), record_node_summary (real store write via
+core/observability.py), and the dropped-tag log file (real local file
+I/O) so this suite stays fully offline like the rest of this project's
+tests.
+
+2026-07-26: switched from Anthropic/Haiku to Groq (openai/gpt-oss-120b)
+with native structured outputs.
 """
 import sys
 import os
@@ -36,11 +39,11 @@ def _state(clustered_items, run_id="run-1"):
     }
 
 
-def _haiku_response(results: list[dict]):
+def _groq_response(results: list[dict]):
     resp = MagicMock()
-    resp.content = [MagicMock(text=json.dumps(results))]
-    resp.usage.input_tokens = 100
-    resp.usage.output_tokens = 40
+    resp.choices = [MagicMock(message=MagicMock(content=json.dumps({"results": results})))]
+    resp.usage.prompt_tokens = 100
+    resp.usage.completion_tokens = 40
     return resp
 
 
@@ -49,12 +52,19 @@ def _patched():
     dependency stubbed so nothing here touches the network, the live
     Postgres store, or a real local file."""
     return (
-        patch.object(score_mod.client.messages, "create"),
-        patch.object(score_mod, "mark_seen") ,
+        patch.object(score_mod, "get_groq_client"),
+        patch.object(score_mod, "mark_seen"),
         patch.object(score_mod, "log_scored_items"),
         patch.object(score_mod, "record_node_summary"),
         patch.object(score_mod, "_log_dropped_tag"),
     )
+
+
+def _set_groq_reply(mock_get_client, results):
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = _groq_response(results)
+    mock_get_client.return_value = fake_client
+    return fake_client
 
 
 def test_keep_true_and_keep_false_items_both_appear_in_scored_items():
@@ -63,14 +73,14 @@ def test_keep_true_and_keep_false_items_both_appear_in_scored_items():
     (correlate_trello). Both must survive into scored_items with the
     real model's decision intact."""
     items = [_clustered_item("https://a.com/1"), _clustered_item("https://b.com/1")]
-    haiku_reply = [
+    groq_reply = [
         {"index": 0, "keep": True, "reasoning": "directly relevant", "tags": ["agentic-engineering"]},
         {"index": 1, "keep": False, "reasoning": "off-topic hiking content", "tags": ["noise"]},
     ]
 
-    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_log, p_summary, p_dropped:
-        mock_create.return_value = _haiku_response(haiku_reply)
+    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary, p_dropped:
+        _set_groq_reply(mock_get_client, groq_reply)
         result = score_node(_state(items))
 
     assert len(result["scored_items"]) == 2
@@ -79,17 +89,18 @@ def test_keep_true_and_keep_false_items_both_appear_in_scored_items():
     assert by_url["https://a.com/1"]["tags"] == ["agentic-engineering"]
     assert by_url["https://b.com/1"]["keep"] is False
     assert by_url["https://b.com/1"]["reasoning"] == "off-topic hiking content"
+    assert result["costs"][0]["provider"] == "groq"
 
 
 def test_invalid_tag_is_filtered_out_and_logged():
     items = [_clustered_item("https://a.com/1")]
-    haiku_reply = [
+    groq_reply = [
         {"index": 0, "keep": True, "reasoning": "r", "tags": ["agentic-engineering", "not-a-real-tag"]},
     ]
 
-    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_log, p_summary, p_dropped as mock_log_dropped:
-        mock_create.return_value = _haiku_response(haiku_reply)
+    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary, p_dropped as mock_log_dropped:
+        _set_groq_reply(mock_get_client, groq_reply)
         result = score_node(_state(items))
 
     scored = result["scored_items"][0]
@@ -99,14 +110,14 @@ def test_invalid_tag_is_filtered_out_and_logged():
 
 def test_mark_seen_called_with_every_scored_url_regardless_of_keep():
     items = [_clustered_item("https://a.com/1"), _clustered_item("https://b.com/1")]
-    haiku_reply = [
+    groq_reply = [
         {"index": 0, "keep": True, "reasoning": "r", "tags": ["evals"]},
         {"index": 1, "keep": False, "reasoning": "r", "tags": ["noise"]},
     ]
 
-    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
-        mock_create.return_value = _haiku_response(haiku_reply)
+    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
+        _set_groq_reply(mock_get_client, groq_reply)
         score_node(_state(items))
 
     mock_mark_seen.assert_called_once()
@@ -119,16 +130,16 @@ def test_dry_run_skips_mark_seen():
     permanently exhausting the real seen_items pool -- mark_seen() must not
     be called at all when the flag is set, regardless of keep/drop."""
     items = [_clustered_item("https://a.com/1")]
-    haiku_reply = [
+    groq_reply = [
         {"index": 0, "keep": True, "reasoning": "r", "tags": ["evals"]},
     ]
 
     state = _state(items)
     state["dry_run"] = True
 
-    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
-        mock_create.return_value = _haiku_response(haiku_reply)
+    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
+        _set_groq_reply(mock_get_client, groq_reply)
         score_node(state)
 
     mock_mark_seen.assert_not_called()
@@ -136,15 +147,15 @@ def test_dry_run_skips_mark_seen():
 
 def test_record_node_summary_reflects_kept_count_not_total():
     items = [_clustered_item("https://a.com/1"), _clustered_item("https://b.com/1"), _clustered_item("https://c.com/1")]
-    haiku_reply = [
+    groq_reply = [
         {"index": 0, "keep": True, "reasoning": "r", "tags": ["evals"]},
         {"index": 1, "keep": True, "reasoning": "r", "tags": ["evals"]},
         {"index": 2, "keep": False, "reasoning": "r", "tags": ["noise"]},
     ]
 
-    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_log, p_summary as mock_summary, p_dropped:
-        mock_create.return_value = _haiku_response(haiku_reply)
+    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary as mock_summary, p_dropped:
+        _set_groq_reply(mock_get_client, groq_reply)
         score_node(_state(items))
 
     mock_summary.assert_called_once()
@@ -155,7 +166,7 @@ def test_record_node_summary_reflects_kept_count_not_total():
 
 def test_multiple_batches_when_over_batch_size():
     """BATCH_SIZE is 50 -- confirms items beyond one batch still all get
-    scored, via multiple real (mocked) Haiku calls, not silently dropped."""
+    scored, via multiple real (mocked) Groq calls, not silently dropped."""
     items = [_clustered_item(f"https://example.com/{i}") for i in range(60)]
     call_sizes = []
 
@@ -166,13 +177,15 @@ def test_multiple_batches_when_over_batch_size():
         # know how many items THIS specific batch call contains.
         batch_size = prompt.count("URL:")
         call_sizes.append(batch_size)
-        return _haiku_response([{"index": i, "keep": True, "reasoning": "r", "tags": ["evals"]} for i in range(batch_size)])
+        return _groq_response([{"index": i, "keep": True, "reasoning": "r", "tags": ["evals"]} for i in range(batch_size)])
 
-    p_create, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_create as mock_create, p_mark_seen, p_log, p_summary, p_dropped:
-        mock_create.side_effect = _reply_for_batch
+    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary, p_dropped:
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.side_effect = _reply_for_batch
+        mock_get_client.return_value = fake_client
         result = score_node(_state(items))
 
     assert len(result["scored_items"]) == 60
-    assert mock_create.call_count == 2  # 50 + 10 -- two real batches, not one giant call
+    assert fake_client.chat.completions.create.call_count == 2  # 50 + 10 -- two real batches, not one giant call
     assert call_sizes == [50, 10]

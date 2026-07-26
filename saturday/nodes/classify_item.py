@@ -4,12 +4,20 @@ import json
 import logging
 import uuid
 import anthropic
+import groq
 
 from core.state import SaturdayGraphState, NodeCost
 from saturday.memory_store_config import get_store
 from core.observability import record_node_summary
+from core.groq_client import get_groq_client, GROQ_MODEL, groq_cost
 
 logger = logging.getLogger(__name__)
+
+# Kept intact but unused -- rollback safety net for the 2026-07-26 Groq
+# swap (see core/groq_client.py's docstring). ANTHROPIC_API_KEY stays in
+# .env.example for the same reason. Not called anywhere;
+# _classify_item_anthropic_legacy below is the dead code path that used
+# to call this.
 client = anthropic.Anthropic()
 
 _CLASSIFICATION_LOG_NAMESPACE = ("weekly_intel", "classification_log")
@@ -69,6 +77,46 @@ Return ONLY a JSON array, one object per item, in this exact shape:
   {{"item_id": "...", "classification": "plan_item" or "project_proposal", "proposal_type": "extend" or "new" or null, "classification_reasoning": "brief reason"}}
 ]"""
 
+# Real bug hit running scripts/compare_groq_harness.py for real: gpt-oss-120b's
+# first classify_item attempt returned a bare JSON array instead of the
+# required {"results": [...]} object wrapper, failing schema validation
+# even under strict:true -- root cause was the prompt's own trailing
+# "Return ONLY a JSON array..." instruction with a bare-array example.
+# Same substitution applied here, production-side.
+_GROQ_TRAILING_INSTRUCTION_OLD = (
+    'Return ONLY a JSON array, one object per item, in this exact shape:\n'
+    '[\n'
+    '  {"item_id": "...", "classification": "plan_item" or "project_proposal", "proposal_type": "extend" or "new" or null, "classification_reasoning": "brief reason"}\n'
+    ']'
+)
+_GROQ_TRAILING_INSTRUCTION_NEW = (
+    'Return one object per item, with: item_id, classification ("plan_item" or '
+    '"project_proposal"), proposal_type ("extend" or "new" or null), '
+    'classification_reasoning (brief reason).'
+)
+
+_CLASSIFY_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item_id": {"type": "string"},
+                    "classification": {"type": "string", "enum": ["plan_item", "project_proposal"]},
+                    "proposal_type": {"type": ["string", "null"], "enum": ["extend", "new", None]},
+                    "classification_reasoning": {"type": "string"},
+                },
+                "required": ["item_id", "classification", "proposal_type", "classification_reasoning"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["results"],
+    "additionalProperties": False,
+}
+
 
 def _format_cards(cards: list[dict]) -> str:
     return "\n".join(
@@ -123,7 +171,9 @@ def _validate_classification(entry: dict, item_id: str, run_id: str) -> dict:
     }
 
 
-def classify_item(state: SaturdayGraphState) -> dict:
+def _classify_item_anthropic_legacy(state: SaturdayGraphState) -> dict:
+    """Pre-2026-07-26 Haiku implementation. Not called anywhere -- kept
+    verbatim for rollback safety, see core/groq_client.py's docstring."""
     t0 = time.perf_counter()
 
     prompt = CLASSIFY_PROMPT.format(
@@ -212,6 +262,130 @@ def classify_item(state: SaturdayGraphState) -> dict:
         cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
         provider="anthropic",
+    )
+
+    record_node_summary(
+        run_id=state["run_id"], node_name="classify_item",
+        items_in=len(state["correlated_items"]), items_out=len(pending_approvals), cost_usd=cost["cost_usd"],
+        duration_seconds=round(time.perf_counter() - t0, 3),
+    )
+
+    return {
+        "classified_items": classified_items,
+        "pending_approvals": pending_approvals,
+        "costs": [cost],
+    }
+
+
+def classify_item(state: SaturdayGraphState) -> dict:
+    t0 = time.perf_counter()
+
+    prompt = CLASSIFY_PROMPT.format(
+        cards_block=_format_cards(state["trello_cards"]),
+        items_block=_format_items(state["correlated_items"]),
+    ).replace(_GROQ_TRAILING_INSTRUCTION_OLD, _GROQ_TRAILING_INSTRUCTION_NEW)
+
+    groq_client = get_groq_client()
+
+    try:
+        response = groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            temperature=0,
+            max_completion_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "classify_item", "strict": True, "schema": _CLASSIFY_JSON_SCHEMA},
+            },
+        )
+    except groq.APIError as e:
+        logger.error(f"classify_item: Groq call failed after retries (run_id={state['run_id']}): {e}")
+        cost = NodeCost(
+            node_name="classify_item",
+            input_tokens=0, output_tokens=0,
+            cost_usd=0.0,
+            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+            provider="groq",
+            error=str(e),
+        )
+        fallback_items = [
+            {**item, "classification": "plan_item", "proposal_type": None,
+             "classification_reasoning": "fallback: Groq call failed after retries"}
+            for item in state["correlated_items"]
+        ]
+        _log_classifications(fallback_items, state["run_id"])
+        record_node_summary(
+            run_id=state["run_id"], node_name="classify_item",
+            items_in=len(state["correlated_items"]), items_out=0, cost_usd=0.0,
+            duration_seconds=round(time.perf_counter() - t0, 3),
+            error_summary="Groq API call failed after retries",
+        )
+        return {
+            "classified_items": fallback_items,
+            "pending_approvals": [],
+            "costs": [cost],
+            "errors": state["errors"] + [f"classify_item Groq call failed after retries (run_id={state['run_id']}): {e}"],
+        }
+
+    input_tokens = response.usage.prompt_tokens
+    output_tokens = response.usage.completion_tokens
+
+    try:
+        classifications = json.loads(response.choices[0].message.content)["results"]
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.error(f"classify_item: malformed structured-output response (run_id={state['run_id']}): {e}")
+        cost = NodeCost(
+            node_name="classify_item",
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cost_usd=groq_cost(input_tokens, output_tokens),
+            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+            provider="groq",
+        )
+        fallback_items = [
+            {**item, "classification": "plan_item", "proposal_type": None,
+             "classification_reasoning": "fallback: malformed structured-output response"}
+            for item in state["correlated_items"]
+        ]
+        _log_classifications(fallback_items, state["run_id"])
+        record_node_summary(
+            run_id=state["run_id"], node_name="classify_item",
+            items_in=len(state["correlated_items"]), items_out=0, cost_usd=cost["cost_usd"],
+            duration_seconds=round(time.perf_counter() - t0, 3),
+            error_summary="malformed structured-output response",
+        )
+        return {
+            "classified_items": fallback_items,
+            "pending_approvals": [],
+            "costs": [cost],
+            "errors": state["errors"] + [f"classify_item malformed structured-output response (run_id={state['run_id']}): {e}"],
+        }
+
+    class_by_id = {c["item_id"]: c for c in classifications}
+
+    classified_items = []
+    pending_approvals = []
+    for item in state["correlated_items"]:
+        entry = class_by_id.get(item["url"], {})
+        validated = _validate_classification(entry, item["url"], state["run_id"])
+        classified_item = {**item, **validated}
+        classified_items.append(classified_item)
+        if validated["classification"] == "project_proposal":
+            pending_approvals.append(classified_item)
+
+    logger.info(
+        f"classify_item: {len(classified_items) - len(pending_approvals)} plan_items, "
+        f"{len(pending_approvals)} proposals (run_id={state['run_id']})"
+    )
+
+    _log_classifications(classified_items, state["run_id"])
+
+    cost = NodeCost(
+        node_name="classify_item",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=groq_cost(input_tokens, output_tokens),
+        latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+        provider="groq",
     )
 
     # items_out = proposal count, not total classified_items -- nothing is

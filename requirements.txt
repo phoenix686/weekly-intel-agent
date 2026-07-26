@@ -8,3 +8,4 @@ psycopg-pool>=3.1.0
 python-dotenv>=1.2.2
 agentmail>=0.5.8
 groq>=1.6.0
+httpx>=0.28.1
