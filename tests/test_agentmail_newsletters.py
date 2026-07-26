@@ -472,7 +472,14 @@ def test_fetch_agentmail_newsletters_parses_and_attributes_a_real_shaped_message
     assert fake_messages.update_calls == [("inbox-123", "msg-1", ["read"], ["unread"])]
 
 
-def test_fetch_agentmail_newsletters_unrecognized_sender_grouped_under_stable_key_and_not_marked_read():
+def test_fetch_agentmail_newsletters_unrecognized_sender_grouped_under_stable_key_and_marked_read():
+    """2026-07-26 fix: an unrecognized sender is now marked read, not left
+    unread -- otherwise it's the exact same error every single run,
+    forever, since no config change can ever "fix" a message from a
+    sender that by definition isn't in config. Still unconditionally
+    logged under the stable _UNRECOGNIZED_SENDER key (distinct from any
+    real source's own errors) -- marking it read doesn't mean it
+    vanishes without a trace, just that it stops being weekly noise."""
     now = datetime.now(timezone.utc)
     fake_messages = _FakeMessagesClient(
         list_items=[_FakeMessageItem("msg-2", "Random newsletter")],
@@ -488,7 +495,8 @@ def test_fetch_agentmail_newsletters_unrecognized_sender_grouped_under_stable_ke
     assert result.rows == []
     assert len(result.errors) == 1
     assert result.errors[0][0] == "AgentMail Newsletters (unrecognized sender)"
-    assert fake_messages.update_calls == []
+    assert "unrecognized sender" in result.errors[0][1]
+    assert fake_messages.update_calls == [("inbox-123", "msg-2", ["read"], ["unread"])]
 
 
 def test_fetch_agentmail_newsletters_confirmed_content_free_grouped_under_real_source_name_and_marked_read():

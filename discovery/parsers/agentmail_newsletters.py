@@ -421,6 +421,17 @@ def fetch_agentmail_newsletters(
     failure (bad API key, network error) is caught the same way: rows
     stays empty, errors gets one entry, never raises.
 
+    Unrecognized sender (2026-07-26 fix): marked read, not left unread --
+    otherwise it resurfaces as the identical error every single run,
+    forever, since no config change can ever "fix" a message from a
+    sender that isn't in config by definition. Still unconditionally
+    logged under the _UNRECOGNIZED_SENDER sentinel (distinct from any
+    real source's own errors), so a real misconfiguration -- a sender
+    worth adding -- is still visible once, just not repeated weekly
+    noise. Tradeoff, not free: if that sender is added to config later,
+    this specific already-marked-read message won't be retried (its
+    future messages will process normally either way).
+
     errors' first tuple element is always a real source_name (matching a
     row's own author_name) or _UNRECOGNIZED_SENDER -- never a raw email
     subject or message_id -- so callers can group errors by source the
@@ -444,7 +455,35 @@ def fetch_agentmail_newsletters(
 
             source_name = _match_sender_name(message.from_, sender_to_name)
             if source_name is None:
-                errors.append((_UNRECOGNIZED_SENDER, f"{label} (from {message.from_!r}): unrecognized sender"))
+                # Marked read, not left unread (2026-07-26 fix -- real gap
+                # found removing "AI Engineering" from config: an
+                # unrecognized-sender message previously hit `continue`
+                # before ANY messages.update() call, so it could never be
+                # marked read and would resurface as the exact same error
+                # every single Sunday run, indefinitely -- a general gap,
+                # not specific to any one sender, since by definition an
+                # unrecognized sender is never in config and no config
+                # change fixes it. Decision (tradeoff, flagged not
+                # silently made): mark read so it stops making weekly
+                # noise, accepting that a real sender not yet added to
+                # config would have this specific message silently
+                # skipped rather than retried -- but it's still LOGGED
+                # (this errors.append is unconditional, distinct from a
+                # normal per-source processing error via the
+                # _UNRECOGNIZED_SENDER sentinel name), so it's never lost
+                # without a trace, just no longer retried forever. If a
+                # sender is added to config later, its FUTURE messages
+                # process normally either way; this specific past message
+                # simply isn't replayed.
+                errors.append((
+                    _UNRECOGNIZED_SENDER,
+                    f"{label} (from {message.from_!r}): unrecognized sender -- marking read so it "
+                    f"doesn't resurface every run (add to agentmail_sources.yaml if this should be "
+                    f"a real configured source)",
+                ))
+                client.inboxes.messages.update(
+                    inbox_id, item.message_id, add_labels=["read"], remove_labels=["unread"]
+                )
                 continue
 
             html = message.extracted_html or message.html or ""
