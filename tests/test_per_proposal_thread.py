@@ -14,7 +14,7 @@ allows:
    proposal's thread only ever has ONE pending interrupt.
 3. The pause to genuinely survive across SEPARATE script invocations (not
    just separate .invoke() calls in the same process) -- simulating the
-   real gap between "Sunday run sends proposal" and "poller resumes it,
+   real gap between "Saturday run sends proposal" and "poller resumes it,
    possibly hours later, in a completely different process."
 
 Run first: uv run --env-file .env python scripts/test_per_proposal_thread.py send

@@ -32,9 +32,9 @@ Ad-hoc items never reach this function at all -- cluster_dedupe_node
 splits them out before calling in, per Section 10.
 
 Topic vectors are recomputed by recompute_topic_vectors(), called from
-sunday/nodes/update_profile.py's Sunday consolidated rewrite, immediately
+saturday/nodes/update_profile.py's Saturday consolidated rewrite, immediately
 after the fresh taste_profile.yaml is written (Section 7) -- NOT
-sunday/approval_actions.py, which was the call site under this
+saturday/approval_actions.py, which was the call site under this
 checkpoint's earlier (superseded) design; approval_actions.py now only
 logs feedback and stops (item-feedback-logging).
 
@@ -43,7 +43,7 @@ constant, mapped best-effort to the 6 fixed tags (Section 0 item 1,
 Section 6) -- 'learning-resource' has no clearly corresponding bullet in
 TASTE_PROFILE and is flagged rather than guessed: no vector is computed
 for it until a real mapping is confirmed. 'course' (added for the
-Courses digest section, Checkpoint: Sunday plan LLM prioritization,
+Courses digest section, Checkpoint: Saturday plan LLM prioritization,
 sub-phase 1) is deliberately unmapped for the same reason -- it's a
 format tag (structured course vs. single article), not a topic, so it
 has no corresponding topic bullet either.
@@ -65,7 +65,7 @@ from discovery.embeddings import (
     MAX_EMBED_CHARS as _MAX_EMBED_CHARS, record_embedding_failure,
 )
 from discovery.nodes.score import ALLOWED_TAGS
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 from core.state import ClusteredItem, NodeCost, UncategorizedItem
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ def recompute_topic_vectors(profile_text: str) -> list[NodeCost]:
     bullet, anchored by that bullet plus the current full taste-profile
     text -- keeps every vector distinct (different leading bullet) while
     staying in sync with whatever the profile currently says (re-embeds
-    the live text every call, same call as the Sunday YAML regen it
+    the live text every call, same call as the Saturday YAML regen it
     follows). Tags with no mapped bullet are flagged, not embedded from
     guessed text -- no vector is written for them."""
     store = get_store()

@@ -1,10 +1,10 @@
 import time
 from telegram.bot_client import send_message
-from sunday.memory_store_config import get_store
-from core.state import SundayGraphState, NodeCost
+from saturday.memory_store_config import get_store
+from core.state import SaturdayGraphState, NodeCost
 
 
-def send_telegram_plan(state: SundayGraphState) -> dict:
+def send_telegram_plan(state: SaturdayGraphState) -> dict:
     t0 = time.monotonic()
     response = send_message(state["plan_text"])
 

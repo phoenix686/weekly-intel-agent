@@ -1,5 +1,5 @@
 """
-Real-store, real-Haiku live verification for sunday/nodes/classify_item.py's
+Real-store, real-Haiku live verification for saturday/nodes/classify_item.py's
 classification_log writes (closeout-spec.md Section 4 point 1). Feeds two
 throwaway correlated_items -- one clearly routine reading material
 (expected plan_item), one clearly a structurally-new idea with no
@@ -16,8 +16,8 @@ load_dotenv()
 from core.logging_config import setup_logging
 setup_logging()
 
-from sunday.nodes.classify_item import classify_item, _CLASSIFICATION_LOG_NAMESPACE
-from sunday.memory_store_config import get_store
+from saturday.nodes.classify_item import classify_item, _CLASSIFICATION_LOG_NAMESPACE
+from saturday.memory_store_config import get_store
 
 RUN_ID = "smoke-test-classification-log-live"
 
@@ -41,7 +41,7 @@ state = {
         },
     ],
     "classified_items": [], "plan_text": "", "plan_item_map": {}, "pending_approvals": [],
-    "costs": [], "errors": [], "source_context": "sunday",
+    "costs": [], "errors": [], "source_context": "saturday",
 }
 
 print("Calling the real classify_item() -- real Haiku classification call...")

@@ -6,7 +6,7 @@ on:
     # fix). Restores the original intent flagged when the day-of-week
     # restriction was first dropped: skip the one day the weekly
     # pipeline's own discovery subgraph already covers -- that used to be
-    # Sunday, but the weekly pipeline (sunday.yml) now fires 23:00 UTC
+    # Saturday, but the weekly pipeline (saturday.yml) now fires 23:00 UTC
     # Friday, delivering 04:30 IST Saturday.
     #
     # The exclusion must target the UTC day-of-week whose 22:00 UTC firing
@@ -21,7 +21,7 @@ on:
     #                                        pipeline's Sat 04:30 IST delivery
     #   Sat 22:00 UTC -> Sun 03:30 IST   Sun 22:00 UTC -> Mon 03:30 IST
     # Confirms it's UTC-Friday (cron day-of-week 5) that must be excluded
-    # -- a Saturday-UTC firing actually delivers on IST Sunday, not
+    # -- a Saturday-UTC firing actually delivers on IST Saturday, not
     # Saturday, so excluding UTC-Saturday instead would have been wrong.
     - cron: "0 22 * * 0-4,6"
   workflow_dispatch:
@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Same fix as sunday.yml, same underlying reason: actions/cache@v4's
+      # Same fix as saturday.yml, same underlying reason: actions/cache@v4's
       # save only runs as a POST step, which is skipped entirely if the job
       # is cancelled by timeout-minutes rather than reaching a normal
       # completion. Explicit restore/save sub-actions instead, with save
@@ -76,13 +76,13 @@ jobs:
 
       - name: Run daily digest
         # Output tee'd to a file (2026-07-19) so it can be uploaded as a
-        # real downloadable artifact below -- see sunday.yml for the full
+        # real downloadable artifact below -- see saturday.yml for the full
         # reasoning (pipefail is on by default for GH Actions bash steps,
         # so a real failure still fails this step despite the pipe).
         run: python scripts/run_daily.py 2>&1 | tee daily_run.log
 
       - name: Upload daily run log
-        # if: always() -- see sunday.yml for the full reasoning (a real
+        # if: always() -- see saturday.yml for the full reasoning (a real
         # ~5-minute cancellation grace period should let this still
         # capture a partial log from a timed-out run, unlike
         # actions/cache's save POST-step) -- NOT YET independently
@@ -94,10 +94,10 @@ jobs:
           path: daily_run.log
           retention-days: 14
 
-      # Same mechanism as sunday.yml: discovery/parsers/rss_common.py's
+      # Same mechanism as saturday.yml: discovery/parsers/rss_common.py's
       # fetch_rss_feed() dumps the raw response body to logs/parse_errors/
-      # on an XML ParseError (shared code, used by both daily and Sunday
-      # runs) -- this was added to sunday.yml but not here, and the first
+      # on an XML ParseError (shared code, used by both daily and Saturday
+      # runs) -- this was added to saturday.yml but not here, and the first
       # real occurrence since (MarkTechPost, 2026-07-20 daily run) was
       # missed as a result: the dump happened on the runner but was never
       # uploaded, so it was lost when the runner was destroyed. Backfilling

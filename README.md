@@ -1,23 +1,23 @@
 # LangGraph Weekly Intelligence Agent
 
-A content intelligence agent built on [LangGraph](https://github.com/langchain-ai/langgraph) that monitors AI/ML engineering content throughout the day, scores it against a learned taste profile using Claude, and delivers a curated digest over Telegram. On Sundays it goes further: correlating new content against a real Trello project board, routing genuinely new project ideas through a human-in-the-loop approval step, and producing a short, priority-ordered weekly plan rather than a list of everything that happened to be technically relevant that week. It runs unattended on a schedule via GitHub Actions, with all durable state — checkpoints, taste profile history, dedup history, cost accounting — backed by Postgres.
+A content intelligence agent built on [LangGraph](https://github.com/langchain-ai/langgraph) that monitors AI/ML engineering content throughout the day, scores it against a learned taste profile using Claude, and delivers a curated digest over Telegram. On Saturdays it goes further: correlating new content against a real Trello project board, routing genuinely new project ideas through a human-in-the-loop approval step, and producing a short, priority-ordered weekly plan rather than a list of everything that happened to be technically relevant that week. It runs unattended on a schedule via GitHub Actions, with all durable state — checkpoints, taste profile history, dedup history, cost accounting — backed by Postgres.
 
 ## What it does
 
-**Daily runs (Monday–Saturday):** discover new content from RSS feeds, newsletters, and Hacker News; score it against a taste profile using Claude; filter near-duplicates (both within the run and against the last several days); send a short Telegram digest.
+**Daily runs (every day except Friday):** discover new content from RSS feeds, newsletters, and Hacker News; score it against a taste profile using Claude; filter near-duplicates (both within the run and against the last several days); send a short Telegram digest. Friday is skipped since the weekly pipeline's own discovery subgraph already covers the day it delivers on (Saturday).
 
-**Sunday runs** do all of the above, plus:
+**Saturday runs** do all of the above, plus:
 - Correlate each kept item against a connected Trello board to see if it relates to existing tracked work.
 - Classify each item as routine reading material vs. a genuinely new project idea. New ideas are sent to Telegram for a real approve/reject decision before anything touches Trello, using LangGraph's `interrupt()`, resumed later by a separate polling job that checks for a reply.
 - Re-check the current state of every Trello card surfaced the previous week — did it move lists, get archived, or ship — as ground truth from Trello's own API, not a self-reported flag.
 - Run one dedicated LLM call that weighs this week's new content against that board state (including cards that have simply gone idle, with no new content prompting them) to select a short, honestly-prioritized "Existing Project Work" list, bounded to a handful of items rather than everything that technically matched.
 - Assemble and send the full weekly plan — Reading & Learning, Courses, and that curated Existing Project Work section — over Telegram.
 
-**Nightly polling:** a lightweight job checks Telegram for replies to any pending approval and resumes the paused Sunday run accordingly.
+**Nightly polling:** a lightweight job checks Telegram for replies to any pending approval and resumes the paused Saturday run accordingly.
 
 ## Architecture
 
-Both entry points share one **discovery subgraph** (search/scrape → cluster & dedupe → score) with a runtime-routed conditional entry point that decides which sources fire based on whether it's a daily or Sunday invocation.
+Both entry points share one **discovery subgraph** (search/scrape → cluster & dedupe → score) with a runtime-routed conditional entry point that decides which sources fire based on whether it's a daily or Saturday invocation.
 
 **Daily graph** — generated directly from the real compiled graph (`build_daily_graph().compile().get_graph().draw_mermaid()`):
 
@@ -34,7 +34,7 @@ graph TD
     send_telegram_digest --> __end__
 ```
 
-**Sunday graph** — same source, `build_sunday_graph().get_graph().draw_mermaid()`. LangGraph's drawer can't resolve the `Send()`-based dynamic fan-out out of `classify_item` (it renders those two branches as a single dead-end edge to `__end__`), so those two edges are labeled manually to reflect what the real code does; every other node and edge below is exactly what the tool generated:
+**Saturday graph** — same source, `build_saturday_graph().get_graph().draw_mermaid()`. LangGraph's drawer can't resolve the `Send()`-based dynamic fan-out out of `classify_item` (it renders those two branches as a single dead-end edge to `__end__`), so those two edges are labeled manually to reflect what the real code does; every other node and edge below is exactly what the tool generated:
 
 ```mermaid
 graph TD
@@ -55,7 +55,7 @@ graph TD
 Key architectural pieces:
 
 - **Postgres-backed checkpointing.** All checkpoints, human-in-the-loop interrupts, and durable state (taste profile history, seen-item dedup history, Trello correlation history, run/node observability) live in a real Postgres database via `langgraph-checkpoint-postgres` — not in-memory or on-disk state — so a paused approval survives across separate GitHub Actions runs.
-- **Human-in-the-loop approval via `interrupt()`.** Each new project-idea candidate is dispatched to its own child graph on a dedicated checkpointer thread, which sends a Telegram message and pauses on `interrupt()`. The parent Sunday run completes normally; the approval is resumed hours later, from a completely separate process, by the nightly polling job.
+- **Human-in-the-loop approval via `interrupt()`.** Each new project-idea candidate is dispatched to its own child graph on a dedicated checkpointer thread, which sends a Telegram message and pauses on `interrupt()`. The parent Saturday run completes normally; the approval is resumed hours later, from a completely separate process, by the nightly polling job.
 - **LangSmith tracing.** Every node execution traces through to a LangSmith project when tracing is configured, with a pointer to the real trace URL recorded alongside each node's durable summary.
 - **Per-run cost and latency accounting.** Every node records token counts, cost, and latency as a first-class part of its output, not a side effect bolted on after the fact.
 - **One shared Telegram bot** for both paths — digest/plan delivery, project-proposal approval, and ad-hoc message intake all route through the same bot and the same reply-parsing logic.
@@ -72,7 +72,7 @@ Key architectural pieces:
 | **Telegram Bot API** | Digest/plan delivery, and the approval channel for new project proposals |
 | **Trello REST API** | Project-board correlation, staleness, and cross-week movement tracking (no third-party SDK — a thin stdlib `urllib` client) |
 | **[AgentMail](https://agentmail.to/)** | Reads a handful of Substack newsletters over email, for sources GitHub Actions runners can't reach directly via RSS |
-| **GitHub Actions** | Scheduling (daily, Sunday, and a nightly approval-poll job) and secrets |
+| **GitHub Actions** | Scheduling (daily, Saturday, and a nightly approval-poll job) and secrets |
 
 ## Setup
 
@@ -103,11 +103,11 @@ Run any of the three entry points directly:
 
 ```
 python scripts/run_daily.py    # one daily discovery + digest run
-python scripts/run_sunday.py   # one Sunday run (prints pending-approval instructions if any proposals come up)
+python scripts/run_saturday.py   # one Saturday run (prints pending-approval instructions if any proposals come up)
 python scripts/run_poll.py     # checks Telegram once for approval replies and resumes any paused run
 ```
 
-In production this runs unattended via the three workflows in `.github/workflows/`: `daily.yml` (Monday–Saturday mornings), `sunday.yml` (Sunday), and `poll.yml` (nightly, to resume any paused approval). All three also support manual `workflow_dispatch` triggering from the Actions tab.
+In production this runs unattended via the three workflows in `.github/workflows/`: `daily.yml` (every day except Friday, early morning IST), `saturday.yml` (Friday-triggered, delivering Saturday morning IST), and `poll.yml` (nightly, to resume any paused approval). All three also support manual `workflow_dispatch` triggering from the Actions tab.
 
 ```
 pytest tests/
@@ -119,7 +119,7 @@ Unit coverage spans the Trello client, dedup, the taste-vector pre-filter, plan 
 
 **Postgres over SQLite for checkpointing.** This repository is public. A local SQLite checkpoint file would either vanish between GitHub Actions runs (ephemeral runners, no persistent disk) or, if committed to survive between runs, leak Trello and taste-profile content into public commit history. A real external Postgres instance is the only option that's both durable across runs and never touches the repo itself.
 
-**Per-proposal child graphs instead of one long-lived run.** A naive design would hold the Sunday run open waiting for a Telegram reply. Instead, each project-idea candidate gets its own child graph on its own checkpointer thread, pauses on `interrupt()`, and the parent run exits normally once every proposal has been dispatched. Resuming happens later, from an entirely separate scheduled process, keyed off the paused thread — so a human decision that takes hours (or days) never holds a compute job open.
+**Per-proposal child graphs instead of one long-lived run.** A naive design would hold the Saturday run open waiting for a Telegram reply. Instead, each project-idea candidate gets its own child graph on its own checkpointer thread, pauses on `interrupt()`, and the parent run exits normally once every proposal has been dispatched. Resuming happens later, from an entirely separate scheduled process, keyed off the paused thread — so a human decision that takes hours (or days) never holds a compute job open.
 
 **A hard recursion-limit ceiling, not dollar-based cost tooling.** The only runaway-loop guardrail is a fixed `recursion_limit` set at graph-invoke time. At this project's scale — a handful of scheduled runs a day, not a multi-tenant or high-throughput system — a step ceiling is a sufficient backstop against an infinite loop, without the operational overhead of a dollar-based circuit breaker built for a different class of problem.
 

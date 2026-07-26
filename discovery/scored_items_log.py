@@ -26,7 +26,7 @@ import logging
 from datetime import datetime, timezone
 
 from core.state import ScoredItem
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 

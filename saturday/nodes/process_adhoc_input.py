@@ -2,7 +2,7 @@ import time
 from datetime import datetime, timezone
 
 from core.state import DiscoverySubgraphState, RawItem, NodeCost
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 
 def process_adhoc_input(state: DiscoverySubgraphState) -> dict:

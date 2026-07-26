@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from core.state import ScoredItem, DailyGraphState, NodeCost
 from core.observability import cost_breakdown_by_provider
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 from telegram.markdown import escape_html, format_cost_line
 
 MAX_DIGEST_ITEMS = 15
@@ -18,7 +18,7 @@ def format_digest(
     syntax (`\\_`) while bot_client.py sent with legacy v1 "Markdown",
     which has no escape mechanism at all -- real LLM-generated reasoning
     text containing a literal "_" could 400 the whole send (same root
-    cause found and fixed in sunday/nodes/assemble_plan.py, 2026-07-19;
+    cause found and fixed in saturday/nodes/assemble_plan.py, 2026-07-19;
     see docs/WORKFLOW.md for the full investigation). item_map keeps RAW
     (unescaped) title/text/reasoning -- only the rendered `lines` strings
     are HTML-escaped, at the point of interpolation.

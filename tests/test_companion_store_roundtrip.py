@@ -18,8 +18,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from daily.nodes.assemble_digest import assemble_digest
-from sunday.nodes.assemble_plan import assemble_plan
-from sunday.memory_store_config import get_store
+from saturday.nodes.assemble_plan import assemble_plan
+from saturday.memory_store_config import get_store
 
 COMPANION_NAMESPACE = ("companion",)
 
@@ -64,7 +64,7 @@ def test_weekly_plan_roundtrip() -> bool:
         "classified_items": classified_items,
         "uncategorized_items": [],
         "pending_approvals": [],
-        "run_id": "companion-store-test-sunday",
+        "run_id": "companion-store-test-saturday",
         "trello_cards": [],
     }
 
@@ -74,7 +74,7 @@ def test_weekly_plan_roundtrip() -> bool:
     stored = get_store().get(COMPANION_NAMESPACE, "current_weekly_plan")
     ok = (
         stored is not None
-        and stored.value.get("run_id") == "companion-store-test-sunday"
+        and stored.value.get("run_id") == "companion-store-test-saturday"
         and stored.value.get("plan_text") == result["plan_text"]
         and "generated_at" in stored.value
     )

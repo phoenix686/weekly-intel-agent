@@ -1,12 +1,12 @@
-# sunday/nodes/classify_item.py
+# saturday/nodes/classify_item.py
 import time
 import json
 import logging
 import uuid
 import anthropic
 
-from core.state import SundayGraphState, NodeCost
-from sunday.memory_store_config import get_store
+from core.state import SaturdayGraphState, NodeCost
+from saturday.memory_store_config import get_store
 from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ def _validate_classification(entry: dict, item_id: str, run_id: str) -> dict:
     }
 
 
-def classify_item(state: SundayGraphState) -> dict:
+def classify_item(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
 
     prompt = CLASSIFY_PROMPT.format(

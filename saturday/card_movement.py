@@ -1,5 +1,5 @@
 """
-Cross-week Trello card movement detection (Sunday plan LLM prioritization
+Cross-week Trello card movement detection (Saturday plan LLM prioritization
 checkpoint, sub-phase 4). Compares the most recent prior plan_history
 entry's cards against their REAL current Trello state -- ground truth
 from Trello's actual API, not a self-reported flag -- to tell whether
@@ -18,16 +18,16 @@ from __future__ import annotations
 
 import logging
 
-from sunday.plan_history import get_most_recent_prior_entry
-from sunday.trello_client import DONE_LIST_NAME, fetch_card_current_state, fetch_list_id_to_name_map
+from saturday.plan_history import get_most_recent_prior_entry
+from saturday.trello_client import DONE_LIST_NAME, fetch_card_current_state, fetch_list_id_to_name_map
 
 logger = logging.getLogger(__name__)
 
 
 def detect_card_movement(run_id: str) -> list[dict]:
-    """Real movement, per card, since the most recent prior Sunday run's
+    """Real movement, per card, since the most recent prior Saturday run's
     plan. Returns [] if there's no prior plan_history entry to compare
-    against (e.g. the first-ever Sunday run) -- permissive, nothing to
+    against (e.g. the first-ever Saturday run) -- permissive, nothing to
     compare yet is not an error.
 
     Each result: {"card_id", "previous_list_name", "current_list_name",

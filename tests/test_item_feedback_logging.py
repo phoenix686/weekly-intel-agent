@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, MagicMock
 
-import sunday.approval_actions as approval_actions
+import saturday.approval_actions as approval_actions
 
 
 class _Item:

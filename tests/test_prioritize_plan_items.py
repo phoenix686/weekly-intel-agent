@@ -1,6 +1,6 @@
 """
-prioritize_plan_items (sunday/nodes/prioritize_plan_items.py) -- new node,
-Sunday plan LLM prioritization checkpoint, sub-phase 5. Covers: bounding
+prioritize_plan_items (saturday/nodes/prioritize_plan_items.py) -- new node,
+Saturday plan LLM prioritization checkpoint, sub-phase 5. Covers: bounding
 at MAX_PROJECT_WORK_ITEMS regardless of what the model returns, dropping
 hallucinated card_ids/item_urls, the new_item/stale_nudge distinction,
 and the JSON-parse-failure fallback. Real Anthropic call and
@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 from unittest.mock import patch, MagicMock
 
-import sunday.nodes.prioritize_plan_items as prioritize_mod
-from sunday.nodes.prioritize_plan_items import prioritize_plan_items, MAX_PROJECT_WORK_ITEMS
+import saturday.nodes.prioritize_plan_items as prioritize_mod
+from saturday.nodes.prioritize_plan_items import prioritize_plan_items, MAX_PROJECT_WORK_ITEMS
 
 
 def _matched_item(url, card_id, tags=None, reasoning="r"):

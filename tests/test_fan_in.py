@@ -3,7 +3,7 @@ Isolated test — does a downstream node with multiple incoming edges
 (one static edge + N dynamic Send-dispatched edges) fire ONCE after all
 branches complete, or once PER branch?
 
-This directly answers the update_profile question for sunday/graph.py
+This directly answers the update_profile question for saturday/graph.py
 before it gets built for real.
 
 Run: uv run --env-file .env python scripts/test_fan_in.py

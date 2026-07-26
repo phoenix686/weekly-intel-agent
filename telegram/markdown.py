@@ -5,7 +5,7 @@ escape_markdown_v2: extracted out of await_approval.py so any node
 sending a Telegram message with LLM-generated variable text can reuse it
 -- unescaped underscores/asterisks/etc. 400 under Telegram's MarkdownV2
 parse mode if not escaped. Used only where parse_mode="MarkdownV2" is
-passed explicitly (sunday/nodes/await_approval.py) -- NOT the project's
+passed explicitly (saturday/nodes/await_approval.py) -- NOT the project's
 default parse_mode (see bot_client.py).
 
 escape_html: added 2026-07-19, root-causing a real send_telegram_plan
@@ -45,7 +45,7 @@ def escape_html(text: str) -> str:
 
 def format_cost_line(cost_breakdown: dict[str, float] | None) -> str:
     """Real $ cost, broken out by provider (2026-07-26) -- shared by
-    daily/nodes/assemble_digest.py and sunday/nodes/assemble_plan.py so a
+    daily/nodes/assemble_digest.py and saturday/nodes/assemble_plan.py so a
     future model-provider swap's cost impact is directly visible per
     provider in both, not buried in one lump total. Returns "" (not
     appended anywhere) when no breakdown is given, so existing callers/

@@ -1,7 +1,7 @@
 """
 discovery/seen_items.py -- zero unit test coverage existed before this
 file. Covers the batched store.batch() rewrite (2026-07-17, real 45-minute
-Sunday timeout investigation): filter_unseen/mark_seen now issue ONE
+Saturday timeout investigation): filter_unseen/mark_seen now issue ONE
 store.batch() call covering every item instead of one store.get()/
 store.put() per item (measured 12.1x faster on a real 10-key benchmark
 against the live store). Confirms correctness of the batched rewrite,

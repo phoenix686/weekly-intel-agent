@@ -1,5 +1,5 @@
 """
-sunday-consolidated-taste-rewrite: sunday/nodes/update_profile.py's
+saturday-consolidated-taste-rewrite: saturday/nodes/update_profile.py's
 restored real rewrite logic, per batch2-dedup-taste-spec.md Section 7,
 item 2 (confirmed file-layout: this file, not approval_actions.py).
 
@@ -24,8 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
 
-import sunday.nodes.update_profile as update_profile_mod
-from sunday.nodes.update_profile import update_profile
+import saturday.nodes.update_profile as update_profile_mod
+from saturday.nodes.update_profile import update_profile
 
 
 class _Item:
@@ -69,11 +69,11 @@ def _haiku_response(yaml_text: str):
     return resp
 
 
-def _state(run_id="sunday-run-1"):
+def _state(run_id="saturday-run-1"):
     return {
         "run_id": run_id, "scored_items": [], "trello_cards": [], "correlated_items": [],
         "classified_items": [], "plan_text": "", "plan_item_map": {}, "pending_approvals": [],
-        "pending_resumes": [], "costs": [], "errors": [], "source_context": "sunday",
+        "pending_resumes": [], "costs": [], "errors": [], "source_context": "saturday",
     }
 
 
@@ -165,7 +165,7 @@ def test_record_from_prior_week_excluded_from_prompt(tmp_path):
     assert "old.com" not in prompt_text
 
 
-def test_no_feedback_since_last_sunday_skips_rewrite_entirely(tmp_path):
+def test_no_feedback_since_last_saturday_skips_rewrite_entirely(tmp_path):
     fake_store = _FakeStore(feedback_seed={})
 
     with patch.object(update_profile_mod, "COST_LOG_PATH", tmp_path / "cost_log.csv"), \

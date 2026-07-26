@@ -102,7 +102,7 @@ def test_extract_article_url_reports_transient_error_when_a_resolution_fails_and
 
 
 # ── Three-tier extraction fix (2026-07-22, real production bug) ────────────
-# A real Sunday Pipeline run (c6c5624d, 2026-07-22) failed to extract an
+# A real Saturday Pipeline run (c6c5624d, 2026-07-22) failed to extract an
 # article URL for 3 messages that genuinely had one -- confirmed by
 # re-running this exact code against the exact real HTML from an unblocked
 # machine, which found a match every time. Real hrefs below are captured
@@ -184,7 +184,7 @@ def test_tier3_still_used_for_genuinely_opaque_tracking_links():
 
 # ── _resolve_redirect observability (2026-07-26, Issue 6 investigation) ────
 # Real bug: every real "AI Engineering" (beehiiv) resolution failure across
-# multiple Sunday runs left zero trace of the actual exception -- the only
+# multiple Saturday runs left zero trace of the actual exception -- the only
 # place it was ever logged was a logger.debug() call, invisible in every
 # real captured log/artifact since core/logging_config.py's global level is
 # INFO. These exercise the REAL _resolve_redirect (not mocked, unlike every
@@ -261,7 +261,7 @@ def test_tier1_before_tier2_when_both_present():
 # extraction ever runs, regardless of what's findable in its body.
 
 def test_welcome_subject_pattern_matches_real_confirmed_subjects():
-    """Every one of these is a real subject seen across two Sunday runs
+    """Every one of these is a real subject seen across two Saturday runs
     (07-22, 07-26) that should be filtered."""
     real_subjects = [
         "Welcome to Decoding AI Magazine \U0001F680",
@@ -284,7 +284,7 @@ def test_welcome_subject_pattern_is_case_insensitive_and_anchored_to_start():
 
 # ── "Thanks for subscribing" phrasing (2026-07-26, real 10-sender audit) ────
 # Ahead of AI's real subject wasn't caught by "^welcome" alone -- found by
-# pulling every real subject line across all 10 senders from every Sunday
+# pulling every real subject line across all 10 senders from every Saturday
 # run with per-message AgentMail data, not by guessing common confirmation
 # phrasings (see _WELCOME_SUBJECT_PATTERN's own docstring for the full
 # audit and what was deliberately NOT added as a result).

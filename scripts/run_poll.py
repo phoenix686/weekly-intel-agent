@@ -16,7 +16,7 @@ from core.observability import record_run_started, record_run_history
 # handle_rejection/apply_nudge, already attributed to their own call
 # sites, not re-summed here) and no natural run_id of its own the way a
 # graph invocation does -- minted fresh here, same pattern as
-# run_daily.py/run_sunday.py, just to give this run_history entry
+# run_daily.py/run_saturday.py, just to give this run_history entry
 # something to key on.
 run_id = str(uuid.uuid4())
 started_at = datetime.now(timezone.utc)

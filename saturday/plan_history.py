@@ -1,7 +1,7 @@
 """
 Store namespace ("weekly_intel", "plan_history"): records which real
 Trello cards got surfaced as "Existing Project Work" plan items in a
-given Sunday run, tied to run_id. Sunday plan LLM prioritization
+given Saturday run, tied to run_id. Saturday plan LLM prioritization
 checkpoint, sub-phase 3; schema revised in sub-phase 4.
 
 One entry per run, keyed by run_id (same keying pattern as
@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ _NAMESPACE = ("weekly_intel", "plan_history")
 
 def record_plan_history(run_id: str, cards: list[dict]) -> None:
     """Record which Trello cards were surfaced as Existing Project Work
-    plan items in this Sunday run. Each card is {"card_id", "list_name"}
+    plan items in this Saturday run. Each card is {"card_id", "list_name"}
     (the list it was actually rendered under). One entry per run_id;
     duplicate card_ids (multiple plan items can match the same card) are
     collapsed, keeping the first occurrence's list_name."""
@@ -69,7 +69,7 @@ def get_most_recent_prior_entry(current_run_id: str | None = None) -> dict | Non
     current_run_id (defensive -- normally the current run hasn't written its
     own entry yet by the time this is called, since assemble_plan writes
     plan_history and always runs after read_trello). Returns None if no
-    entry exists yet (e.g. the very first Sunday run) -- permissive, same
+    entry exists yet (e.g. the very first Saturday run) -- permissive, same
     "nothing to compare against yet" default as taste_vectors.py's
     taste_prefilter when no topic vectors exist."""
     store = get_store()

@@ -42,5 +42,5 @@ def test_escape_html_plain_text_unchanged():
 def test_escape_markdown_v2_still_escapes_underscore():
     """Confirms the pre-existing MarkdownV2 helper (used only where
     parse_mode="MarkdownV2" is passed explicitly, e.g.
-    sunday/nodes/await_approval.py) is unaffected by adding escape_html."""
+    saturday/nodes/await_approval.py) is unaffected by adding escape_html."""
     assert escape_markdown_v2("last_activity") == "last\\_activity"

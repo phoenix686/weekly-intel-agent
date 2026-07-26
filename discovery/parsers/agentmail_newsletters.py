@@ -53,7 +53,7 @@ this was caught before it shipped by inspecting real received messages,
 not assumed to work from the synthetic fixture alone.
 
 URL EXTRACTION -- THREE-TIER FIX (2026-07-22, real production bug): a
-real Sunday Pipeline run (2026-07-22, run c6c5624d) failed to extract an
+real Saturday Pipeline run (2026-07-22, run c6c5624d) failed to extract an
 article URL for EVERY message it processed, including 3 with genuinely
 real, present article links (Decoding AI Magazine "What's Harness
 Engineering?", The Neural Maze "The SLM OCR Course...", AI Engineering
@@ -182,7 +182,7 @@ def _resolve_redirect(url: str, timeout: float = 10.0) -> str | None:
     confirmed) -- the raw href is never the real destination.
 
     Logged at INFO/WARNING, not DEBUG (2026-07-26 observability fix,
-    found investigating Issue 6): a real Sunday run's "AI Engineering"
+    found investigating Issue 6): a real Saturday run's "AI Engineering"
     (beehiiv) messages were failing here on every run with zero trace of
     why -- the only place the real exception was ever logged was a
     logger.debug() call, invisible in every real captured log/artifact
@@ -349,7 +349,7 @@ def _visible_body_length(html: str) -> int:
 #
 # Built from real data, not guessed phrasing (2026-07-26 audit): pulled
 # every real subject line across all 10 configured senders from every
-# Sunday run with per-message AgentMail data (node_summary's
+# Saturday run with per-message AgentMail data (node_summary's
 # scrape_blogs error_summary, run_history-confirmed run_ids
 # 873db6a8/5d81e3ed/63b04873/5677ca1d/85e853f9/0e6328c7/c6c5624d/
 # 08b5d13b -- the first six predate a working AgentMail config or hit a
@@ -460,7 +460,7 @@ def fetch_agentmail_newsletters(
                 # unrecognized-sender message previously hit `continue`
                 # before ANY messages.update() call, so it could never be
                 # marked read and would resurface as the exact same error
-                # every single Sunday run, indefinitely -- a general gap,
+                # every single Saturday run, indefinitely -- a general gap,
                 # not specific to any one sender, since by definition an
                 # unrecognized sender is never in config and no config
                 # change fixes it. Decision (tradeoff, flagged not

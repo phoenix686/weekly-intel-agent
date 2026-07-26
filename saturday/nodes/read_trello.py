@@ -1,12 +1,12 @@
 import time
 import logging
-from core.state import SundayGraphState, NodeCost
-from sunday.trello_client import fetch_board_cards
-from sunday.card_movement import detect_card_movement
+from core.state import SaturdayGraphState, NodeCost
+from saturday.trello_client import fetch_board_cards
+from saturday.card_movement import detect_card_movement
 
 logger = logging.getLogger(__name__)
 
-def read_trello(state: SundayGraphState) -> dict:
+def read_trello(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
     cards = fetch_board_cards()
     logger.info(f"read_trello fetched {len(cards)} cards (run_id={state['run_id']})")

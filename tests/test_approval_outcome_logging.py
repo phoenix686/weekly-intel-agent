@@ -1,6 +1,6 @@
 """
 approval-outcome-logging (Checkpoint 4, closeout-spec.md Section 4 point 2):
-sunday/approval_actions.py logs BOTH approved and rejected proposal
+saturday/approval_actions.py logs BOTH approved and rejected proposal
 outcomes to the store under namespace=("weekly_intel","approval_log") --
 previously only rejections were recorded (rejection_event, since
 superseded/renamed feedback_events).
@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, MagicMock
 
-import sunday.approval_actions as approval_actions
+import saturday.approval_actions as approval_actions
 
 
 class _FakeStore:

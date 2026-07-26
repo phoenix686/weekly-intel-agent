@@ -15,8 +15,8 @@ import os
 # of the ~260 real offline unit tests get a chance to run.
 #
 # Ignored from default collection, not deleted -- still runnable
-# explicitly and intentionally: `pytest tests/test_sunday_approval.py`
-# or `uv run --env-file .env python tests/test_sunday_approval.py`.
+# explicitly and intentionally: `pytest tests/test_saturday_approval.py`
+# or `uv run --env-file .env python tests/test_saturday_approval.py`.
 collect_ignore = [
     "test_approval_outcome_log_live_roundtrip.py",
     "test_checkpointer.py",
@@ -35,8 +35,8 @@ collect_ignore = [
     "test_resolve_redirect_live.py",
     "test_same_day_nudge_roundtrip.py",
     "test_semantic_dedup_live_roundtrip.py",
-    "test_sunday_approval.py",
-    "test_sunday_rewrite_live_roundtrip.py",
+    "test_saturday_approval.py",
+    "test_saturday_rewrite_live_roundtrip.py",
     "test_taste_prefilter_live_roundtrip.py",
     "test_trello_checklist.py",
     "test_trello_write.py",

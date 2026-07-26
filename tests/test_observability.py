@@ -72,7 +72,7 @@ def test_record_run_history_writes_correct_shape():
     fake_store = _FakeStore()
     with patch.object(observability, "get_store", return_value=fake_store):
         observability.record_run_history(
-            path="sunday", run_id="run-2", started_at="2026-07-17T00:00:00+00:00",
+            path="saturday", run_id="run-2", started_at="2026-07-17T00:00:00+00:00",
             finished_at="2026-07-17T00:05:00+00:00", status="success",
             total_cost_usd=0.0123, items_in=40, items_out=9,
             duration_seconds=300.0, error_summary=None,
@@ -82,7 +82,7 @@ def test_record_run_history_writes_correct_shape():
     assert len(puts) == 1
     _, key, value = puts[0]
     assert key == "run-2"
-    assert value["path"] == "sunday"
+    assert value["path"] == "saturday"
     assert value["status"] == "success"
     assert value["items_in"] == 40
     assert value["items_out"] == 9
@@ -106,7 +106,7 @@ def test_record_run_started_writes_in_progress_marker():
     block deep in the same process might never get to run for."""
     fake_store = _FakeStore()
     with patch.object(observability, "get_store", return_value=fake_store):
-        observability.record_run_started(path="sunday", run_id="run-4", started_at="2026-07-17T00:00:00+00:00")
+        observability.record_run_started(path="saturday", run_id="run-4", started_at="2026-07-17T00:00:00+00:00")
 
     puts = [p for p in fake_store.puts if p[0] == observability._RUN_HISTORY_NAMESPACE]
     assert len(puts) == 1
@@ -125,9 +125,9 @@ def test_record_run_started_is_overwritten_by_record_run_history_same_key():
     in_progress marker as the last word."""
     fake_store = _FakeStore()
     with patch.object(observability, "get_store", return_value=fake_store):
-        observability.record_run_started(path="sunday", run_id="run-5", started_at="t0")
+        observability.record_run_started(path="saturday", run_id="run-5", started_at="t0")
         observability.record_run_history(
-            path="sunday", run_id="run-5", started_at="t0", finished_at="t1", status="success",
+            path="saturday", run_id="run-5", started_at="t0", finished_at="t1", status="success",
             total_cost_usd=0.01, items_in=10, items_out=3, duration_seconds=5.0,
         )
 

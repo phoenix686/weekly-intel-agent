@@ -1,15 +1,15 @@
 """
-Sunday consolidated taste-profile rewrite (batch2-dedup-taste-spec.md
+Saturday consolidated taste-profile rewrite (batch2-dedup-taste-spec.md
 Section 7, item 2 -- file-layout decision: this file, not
 approval_actions.py. approval_actions.py's handlers are live per-reply
 functions called from telegram/polling.py outside any graph invocation,
-with no natural "Sunday path" signal reachable there; this node is
-already invoked exactly once per Sunday graph run, which is exactly the
+with no natural "Saturday path" signal reachable there; this node is
+already invoked exactly once per Saturday graph run, which is exactly the
 cadence this mechanism needs).
 
 Reads every ("weekly_intel","feedback_events") record from the last
 _LOOKBACK_DAYS, joins each against the content captured on it at
-log-time (item-feedback-logging, sunday/approval_actions.py), and
+log-time (item-feedback-logging, saturday/approval_actions.py), and
 produces ONE consolidated taste_profile.yaml rewrite via a single Haiku
 call -- not one call per reply, considering the whole week's pattern
 together (three positive reactions to one topic and one negative
@@ -18,13 +18,13 @@ recomputes topic vectors from the fresh text (discovery/taste_vectors.py)
 and clears same_day_adjustments for the new week, since the full week's
 feedback has now been properly absorbed into the batch rewrite.
 
-_LOOKBACK_DAYS=7 approximates "since the last Sunday run": no separate
+_LOOKBACK_DAYS=7 approximates "since the last Saturday run": no separate
 last-run marker exists in the store, so this reuses the same rolling-
 window pattern already established for recent_item_embeddings. Flagged
 as an interpretation, not the spec's literal text.
 
 Also still does the pre-existing cost_log.csv accounting for the whole
-Sunday run.
+Saturday run.
 
 TASTE PROFILE PERSISTENCE (2026-07-26 fix): the profile's real source of
 truth is now Postgres (discovery/taste_profile_store.py), not a local
@@ -44,8 +44,8 @@ from pathlib import Path
 
 import anthropic
 
-from core.state import SundayGraphState, NodeCost
-from sunday.memory_store_config import get_store
+from core.state import SaturdayGraphState, NodeCost
+from saturday.memory_store_config import get_store
 from discovery.taste_vectors import recompute_topic_vectors
 from discovery.taste_profile_store import get_taste_profile, put_taste_profile
 
@@ -174,7 +174,7 @@ def _consolidated_rewrite(records: list[dict]) -> list[NodeCost]:
     return costs
 
 
-def update_profile(state: SundayGraphState) -> dict:
+def update_profile(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
     costs: list[NodeCost] = []
 
@@ -184,7 +184,7 @@ def update_profile(state: SundayGraphState) -> dict:
     if records:
         costs.extend(_consolidated_rewrite(records))
     else:
-        logger.info("update_profile: no feedback_events since last Sunday, profile left unchanged")
+        logger.info("update_profile: no feedback_events since last Saturday, profile left unchanged")
 
     cleared = _clear_same_day_adjustments()
     logger.info(f"update_profile: cleared {cleared} same_day_adjustments entr(y/ies) for the new week")

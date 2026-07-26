@@ -2,7 +2,7 @@
 Pulls the real current taste_profile.yaml content from Postgres (the real
 source of truth, see discovery/taste_profile_store.py) and writes it to
 the local data/taste_profile.yaml path -- for readability/manual
-inspection ONLY. update_profile() (sunday/nodes/update_profile.py) is the
+inspection ONLY. update_profile() (saturday/nodes/update_profile.py) is the
 only writer of the real profile; this script never reads the local file
 and never writes to Postgres -- one direction, always Postgres -> local.
 

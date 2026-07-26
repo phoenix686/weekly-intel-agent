@@ -1,4 +1,4 @@
-from sunday.trello_client import fetch_board_cards
+from saturday.trello_client import fetch_board_cards
 
 cards = fetch_board_cards()
 website_card = next((c for c in cards if "personal website" in c["name"].lower()), None)

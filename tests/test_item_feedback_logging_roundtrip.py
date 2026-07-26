@@ -1,5 +1,5 @@
 """
-Real-store smoke test for sunday/approval_actions.py's handle_feedback,
+Real-store smoke test for saturday/approval_actions.py's handle_feedback,
 same pattern as scripts/test_same_day_nudge_roundtrip.py: no embedding
 dependency (handle_feedback no longer touches YAML/Haiku-rewrite/Gemini
 at all -- that's the whole point of this checkpoint's change), so this
@@ -16,9 +16,9 @@ load_dotenv()
 from core.logging_config import setup_logging
 setup_logging()
 
-from sunday.approval_actions import handle_feedback, _FEEDBACK_NAMESPACE
-from sunday.same_day_nudge import _NAMESPACE as _SAME_DAY_NAMESPACE, _week_key
-from sunday.memory_store_config import get_store
+from saturday.approval_actions import handle_feedback, _FEEDBACK_NAMESPACE
+from saturday.same_day_nudge import _NAMESPACE as _SAME_DAY_NAMESPACE, _week_key
+from saturday.memory_store_config import get_store
 from datetime import datetime, timezone
 
 TEST_URL = "https://example.com/smoke-test-item-feedback-logging"

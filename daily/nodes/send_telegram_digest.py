@@ -1,6 +1,6 @@
 import time
 from telegram.bot_client import send_message
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 from core.state import DailyGraphState, NodeCost
 
 

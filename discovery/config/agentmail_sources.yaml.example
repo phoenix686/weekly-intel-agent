@@ -10,8 +10,8 @@ fetch_limit: 20  # per run, across every sender sharing this one inbox
 sources:
   - name: "Example Newsletter One"
     sender: "sender-one@example.substack.com"
-    bucket: sunday
+    bucket: saturday
 
   - name: "Example Newsletter Two"
     sender: "sender-two@example.substack.com"
-    bucket: sunday
+    bucket: saturday

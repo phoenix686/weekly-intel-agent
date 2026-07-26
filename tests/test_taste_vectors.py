@@ -163,7 +163,7 @@ def test_failed_batch_embed_call_marks_items_uncategorized_not_auto_passed():
 def test_recompute_topic_vectors_writes_one_entry_per_mapped_tag():
     """learning-resource and course have no clearly corresponding
     TASTE_PROFILE bullet (Section 0 item 1 / Section 6; course added for
-    the Courses digest section, Checkpoint: Sunday plan LLM
+    the Courses digest section, Checkpoint: Saturday plan LLM
     prioritization, sub-phase 1 -- same "format, not topic" reasoning) --
     flagged, not guessed, no vector computed for either. The other 6 tags
     all have a mapped bullet and get a real vector."""

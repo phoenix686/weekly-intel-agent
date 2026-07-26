@@ -2,16 +2,16 @@ import time
 import logging
 from datetime import datetime, timezone
 
-from core.state import SundayGraphState, NodeCost
+from core.state import SaturdayGraphState, NodeCost
 from core.observability import cost_breakdown_by_provider
-from sunday.memory_store_config import get_store
-from sunday.plan_history import record_plan_history
-from sunday.carry_forward import get_carry_forward_items
+from saturday.memory_store_config import get_store
+from saturday.plan_history import record_plan_history
+from saturday.carry_forward import get_carry_forward_items
 from telegram.markdown import escape_html, format_cost_line
 
 logger = logging.getLogger(__name__)
 
-def assemble_plan(state: SundayGraphState) -> dict:
+def assemble_plan(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
 
     # Carried items are injected here, at the very end of the graph --
@@ -19,7 +19,7 @@ def assemble_plan(state: SundayGraphState) -> dict:
     # prioritize_plan_items (both already run by this point anyway) never
     # see them. Built directly from last week's already-scored data, so
     # this can never trigger a re-score or get blocked by seen_items --
-    # see sunday/carry_forward.py's module docstring for why.
+    # see saturday/carry_forward.py's module docstring for why.
     carried_items = get_carry_forward_items(state["run_id"])
     plan_items_with_carryover = state["classified_items"] + carried_items
 
@@ -158,7 +158,7 @@ def _render(
     (see format_plan()'s length-safety docstring for why). item_map
     always stores the FULL, untruncated original text regardless of
     reasoning_budget: truncation is a rendering-time concern only, so a
-    carried-forward item (sunday/carry_forward.py) that gets reused next
+    carried-forward item (saturday/carry_forward.py) that gets reused next
     week isn't permanently stuck with a truncated blurb just because
     this week's message happened to be near the length limit.
 
@@ -279,7 +279,7 @@ def format_plan(
     """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
     NOT Markdown. item_map keeps RAW (unescaped) title/text/reasoning --
     only the rendered `lines` strings are HTML-escaped, at the point of
-    interpolation. This matters for sunday/carry_forward.py, which reads
+    interpolation. This matters for saturday/carry_forward.py, which reads
     item_map's stored fields back out next week and feeds them through
     format_plan() again as a fresh classified_item -- if item_map stored
     already-escaped text, a carried item would get double-escaped

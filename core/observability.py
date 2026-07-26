@@ -13,7 +13,7 @@ Two namespaces:
   {run_id, node_name, items_in, items_out, dropped, cost_usd, duration_seconds,
   langsmith_url, error_summary}.
 - ("weekly_intel","run_history") -- one entry per entrypoint invocation
-  (daily/sunday/poll): {run_id, started_at, finished_at, path, status,
+  (daily/saturday/poll): {run_id, started_at, finished_at, path, status,
   total_cost_usd, items_in, items_out, error_summary, duration_seconds}.
 
 Every write here is wrapped in try/except and logged, never raised -- a
@@ -21,7 +21,7 @@ failed observability write must never mask or block the real run/node
 outcome it's describing, same pattern already established for
 classification_log/approval_log.
 
-CRASH DURABILITY (2026-07-17, real 45-minute Sunday timeout): a
+CRASH DURABILITY (2026-07-17, real 45-minute Saturday timeout): a
 try/finally in the entrypoint script is NOT enough on its own. GitHub
 Actions cancels a timed-out job via an external termination, not a
 Python exception -- confirmed the run_history/node_summary namespaces
@@ -49,7 +49,7 @@ from __future__ import annotations
 import logging
 import time
 
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 from core.state import NodeCost
 
 logger = logging.getLogger(__name__)
@@ -183,7 +183,7 @@ def record_run_history(
     duration_seconds: float,
     error_summary: str | None = None,
 ) -> None:
-    """One record per entrypoint invocation (path: 'daily'|'sunday'|'poll').
+    """One record per entrypoint invocation (path: 'daily'|'saturday'|'poll').
     Written once, at the very end of the entrypoint script -- callers are
     responsible for wrapping their real work in try/except/finally so this
     still gets called (with status='failed' and a real error_summary) even

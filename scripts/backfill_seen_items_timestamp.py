@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from langgraph.store.base import PutOp
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 from discovery.seen_items import _NAMESPACE
 
 store = get_store()

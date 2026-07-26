@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 _pool = None
 
-# Real hang found 2026-07-17: two Sunday runs died silently (zero
+# Real hang found 2026-07-17: two Saturday runs died silently (zero
 # traceback, zero exception) right after cluster_dedupe's log line.
 # Read psycopg_pool 3.3.1's actual source (pool.py _add_connection/
 # _connect): the pool's own `timeout=30.0` only bounds how long a caller

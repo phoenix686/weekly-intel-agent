@@ -8,24 +8,24 @@ signal, but that function's body changed (see below).
 
 handle_feedback: per Section 7 item 1 (item-feedback-logging), this now
 ONLY logs a discrete feedback_events record and triggers the same-day
-capped nudge (sunday/same_day_nudge.py) -- it no longer calls Haiku to
+capped nudge (saturday/same_day_nudge.py) -- it no longer calls Haiku to
 rewrite taste_profile.yaml, and no longer touches the YAML file at all.
 That REPLACES the prior Part-7-era behavior (a full, uncapped, immediate
 profile rewrite on every single reply, confirmed still running as of
 this checkpoint's Section 0 investigation) -- restoring the intended
-weekly-batch cadence. The consolidated Sunday rewrite now lives in
-sunday/nodes/update_profile.py, which reads every feedback_events record
-accumulated here since the last Sunday run.
+weekly-batch cadence. The consolidated Saturday rewrite now lives in
+saturday/nodes/update_profile.py, which reads every feedback_events record
+accumulated here since the last Saturday run.
 """
 
 import logging
 import uuid
 from datetime import datetime, timezone
 
-from sunday.trello_client import create_trello_card, update_trello_card, get_dump_list_id
+from saturday.trello_client import create_trello_card, update_trello_card, get_dump_list_id
 from telegram.bot_client import send_message
-from sunday.memory_store_config import get_store
-from sunday.same_day_nudge import apply_nudge
+from saturday.memory_store_config import get_store
+from saturday.same_day_nudge import apply_nudge
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def handle_feedback(item: dict, feedback_text: str, sentiment: str, run_id: str)
         "feedback_text": feedback_text,
         "replied_at": datetime.now(timezone.utc).isoformat(),
         "run_id": run_id,
-        # Beyond the spec's literal 4-field list: kept so the Sunday
+        # Beyond the spec's literal 4-field list: kept so the Saturday
         # consolidated rewrite (update_profile.py) can join each record
         # against the item's original content without a separate lookup
         # store (none exists -- seen_items only records a bare url->seen

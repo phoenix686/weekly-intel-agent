@@ -3,7 +3,7 @@ One-off diagnostic (NOT a permanent test): calls the real _resolve_redirect()
 directly against the real, currently-failing beehiiv URLs from the three
 stuck "AI Engineering" emails (Issue 6 investigation), to get the actual
 exception (timeout / connection refused / non-2xx / something else)
-without waiting for another scheduled Sunday run.
+without waiting for another scheduled Saturday run.
 
 Read-only: fetches messages via messages.list()/messages.get() only --
 NEVER calls messages.update(), so this cannot mark anything read or

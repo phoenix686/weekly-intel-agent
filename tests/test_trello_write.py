@@ -10,7 +10,7 @@ Run:
     uv run --env-file .env python scripts/test_trello_write.py
 """
 import sys
-from sunday.trello_client import get_dump_list_id, create_trello_card, update_trello_card, _trello_put
+from saturday.trello_client import get_dump_list_id, create_trello_card, update_trello_card, _trello_put
 
 TEST_CARD_NAME = "[TEST] weekly-intel write smoke test — safe to archive"
 

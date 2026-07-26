@@ -2,8 +2,8 @@
 One-time manual bootstrap: computes the initial taste_topic_vectors from
 the current data/taste_profile.yaml, so discovery/taste_vectors.py's
 pre-filter has something to compare against from day one, rather than
-being permanently permissive until the first real Sunday consolidated
-rewrite recomputes them via sunday/nodes/update_profile.py.
+being permanently permissive until the first real Saturday consolidated
+rewrite recomputes them via saturday/nodes/update_profile.py.
 
 Run: uv run --env-file .env python scripts/bootstrap_topic_vectors.py
 """

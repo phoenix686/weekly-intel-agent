@@ -2,7 +2,7 @@
 Cadence detection for candidate sources (Part C step 2): given a feed URL,
 determine whether it's an ongoing publication at all, and if so whether it
 posts daily/weekday or sporadically -- this decides which bucket (Part B's
-daily or Sunday list) an approved source would join.
+daily or Saturday list) an approved source would join.
 
 No langgraph imports, no LLM calls.
 """

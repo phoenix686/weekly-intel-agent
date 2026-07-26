@@ -1,10 +1,10 @@
-# sunday/nodes/prioritize_plan_items.py
+# saturday/nodes/prioritize_plan_items.py
 import time
 import json
 import logging
 import anthropic
 
-from core.state import SundayGraphState, NodeCost
+from core.state import SaturdayGraphState, NodeCost
 from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ def _validate_selection(raw_selection: list, valid_card_ids: set[str], valid_ite
     return validated
 
 
-def prioritize_plan_items(state: SundayGraphState) -> dict:
+def prioritize_plan_items(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
 
     matched_items = [

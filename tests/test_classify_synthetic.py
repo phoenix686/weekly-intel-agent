@@ -39,15 +39,15 @@ https://twitter.com/synthetic/status/1000000000000000010 | plan_item | None | Sc
 _5 plan items · 5 proposals pending approval · run: test-syn_
 """
 import json
-from core.state import make_sunday_initial_state
-from sunday.nodes.read_trello import read_trello
-from sunday.nodes.correlate_trello import correlate_trello
-from sunday.nodes.classify_item import classify_item
+from core.state import make_saturday_initial_state
+from saturday.nodes.read_trello import read_trello
+from saturday.nodes.correlate_trello import correlate_trello
+from saturday.nodes.classify_item import classify_item
 
 with open("data/scored_items_synthetic.json") as f:
     synthetic_items = json.load(f)
 
-state = make_sunday_initial_state(run_id="test-synthetic-1")
+state = make_saturday_initial_state(run_id="test-synthetic-1")
 state["scored_items"] = synthetic_items
 
 state.update(read_trello(state))
@@ -67,7 +67,7 @@ for item in result["classified_items"]:
     print(f"{item['item_id']} | {item['classification']} | {item.get('proposal_type')} | {item['classification_reasoning'][:100]}")
 
 # add to the bottom of scripts/test_classify_synthetic.py
-from sunday.nodes.assemble_plan import assemble_plan
+from saturday.nodes.assemble_plan import assemble_plan
 
 state.update(result)  # result is classify_item's output from before
 plan_result = assemble_plan(state)

@@ -216,20 +216,20 @@ def test_real_xml_content_type_never_misclassified_as_bot_challenge():
     assert len(result.rows) == 1
 
 
-def test_sunday_bucket_sources_use_216h_cutoff():
+def test_saturday_bucket_sources_use_216h_cutoff():
     """scrape_blogs.py passes max_age_hours=216 (9 days) to fetch_rss_feed
-    for bucket=sunday entries."""
+    for bucket=saturday entries."""
     within = _NOW - timedelta(hours=200)   # within 216h, kept
     outside = _NOW - timedelta(hours=300)  # outside 216h, dropped
     body = _rss([
         ("Within 9 days", "https://example.com/a", within),
         ("Outside 9 days", "https://example.com/b", outside),
     ])
-    sunday_entry = [{"name": "LangChain Blog", "feed_url": "https://example.com/feed", "bucket": "sunday"}]
+    saturday_entry = [{"name": "LangChain Blog", "feed_url": "https://example.com/feed", "bucket": "saturday"}]
     with patch("urllib.request.urlopen", return_value=_mock_response(body)), \
-         patch("discovery.parsers.scrape_blogs.entries_for_context", return_value=sunday_entry):
+         patch("discovery.parsers.scrape_blogs.entries_for_context", return_value=saturday_entry):
         from discovery.parsers.scrape_blogs import fetch_blog_entries
-        result = fetch_blog_entries("sunday")
+        result = fetch_blog_entries("saturday")
 
     titles = [r["title"] for r in result.rows]
     assert titles == ["Within 9 days"]

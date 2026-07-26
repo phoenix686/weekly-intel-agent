@@ -1,4 +1,4 @@
-name: Sunday Pipeline
+name: Saturday Pipeline
 
 on:
   schedule:
@@ -7,20 +7,20 @@ on:
     # delivering around 1:30 PM IST, a ~2.5h GitHub-side scheduling lag;
     # retargeted for ~07:00 IST Saturday delivery). Day intentionally
     # moved from Sunday-trigger/Sunday-delivery to Friday-trigger/
-    # Saturday-delivery as part of this same fix. File/module naming
-    # (this workflow's own filename, sunday/, run_sunday.py, docs, etc.)
-    # is deliberately NOT touched in this commit -- that's Phase 2 of
-    # the same fix, gated on explicit confirmation that this cron change
-    # is correct first.
+    # Saturday-delivery as part of this same fix. This workflow's own
+    # filename, sunday/ -> saturday/, run_sunday.py -> run_saturday.py,
+    # and docs were all renamed in a separate, explicitly-confirmed
+    # follow-up commit (Phase 2) once this cron change itself was
+    # verified correct -- this file's rename is part of that same commit.
     - cron: "0 23 * * 5"
   workflow_dispatch:
 
 concurrency:
-  group: sunday-pipeline
+  group: saturday-pipeline
   cancel-in-progress: false
 
 jobs:
-  run-sunday:
+  run-saturday:
     runs-on: ubuntu-latest
     # The interrupt() approval gate does NOT keep this job running -- each
     # proposal pauses on its own dedicated checkpointer thread in Postgres,
@@ -38,7 +38,7 @@ jobs:
     # swap (2026-07-19) removes that specific cost entirely -- embeddings
     # are now real API calls (live-measured: a 50-item batch in ~1.4s),
     # not a local model load -- but 45 is left as-is rather than lowered
-    # on a guess: no real post-swap Sunday run has completed yet to
+    # on a guess: no real post-swap Saturday run has completed yet to
     # measure the new real duration against. Revisit with real evidence
     # once one has.
     timeout-minutes: 45
@@ -68,7 +68,7 @@ jobs:
       # cancelled by timeout-minutes is an external termination, not a
       # completion, so the save is silently skipped (confirmed via GitHub's
       # own community discussions on this exact behavior -- 2026-07-17,
-      # after a real Sunday run timeout gave the cold-cache cost no chance
+      # after a real Saturday run timeout gave the cold-cache cost no chance
       # to ever get paid off). Explicit restore/save sub-actions instead,
       # with save placed right after the cache is actually populated (pip
       # install), well before the long, timeout-risking main step -- so a
@@ -97,23 +97,23 @@ jobs:
       # pattern as every other credential in this workflow (secret ->
       # env/file, never committed). Set as a step-scoped env var rather than
       # interpolated directly into the run: string, so YAML content
-      # containing quotes/colons/etc. can't break shell parsing. Sunday-only
+      # containing quotes/colons/etc. can't break shell parsing. Saturday-only
       # step -- fetch_agentmail_sources() early-returns for source_context !=
-      # "sunday", so daily.yml/poll.yml have no use for this file.
+      # "saturday", so daily.yml/poll.yml have no use for this file.
       - name: Write AgentMail sources config
         env:
           AGENTMAIL_SOURCES_YAML: ${{ secrets.AGENTMAIL_SOURCES_YAML }}
         run: printf '%s\n' "$AGENTMAIL_SOURCES_YAML" > discovery/config/agentmail_sources.yaml
 
-      - name: Run Sunday pipeline
+      - name: Run Saturday pipeline
         # Output tee'd to a file (2026-07-19) so it can be uploaded as a
         # real downloadable artifact below -- GH Actions' bash steps
         # already run with pipefail on by default, so a real pipeline
         # failure still fails this step even though the output is piped
         # through tee, not just captured in the live/in-browser log.
-        run: python scripts/run_sunday.py 2>&1 | tee sunday_run.log
+        run: python scripts/run_saturday.py 2>&1 | tee saturday_run.log
 
-      - name: Upload Sunday run log
+      - name: Upload Saturday run log
         # if: always() -- not just on success -- since a real timeout-
         # cancelled run is exactly the case this exists for. Real, sourced
         # finding (2026-07-19): unlike actions/cache's save step (a POST
@@ -132,8 +132,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sunday-run-log-${{ github.run_id }}
-          path: sunday_run.log
+          name: saturday-run-log-${{ github.run_id }}
+          path: saturday_run.log
           retention-days: 14
 
       # discovery/parsers/rss_common.py's fetch_rss_feed() dumps the raw

@@ -1,5 +1,5 @@
 """
-Real-store live verification for sunday/approval_actions.py's approval_log
+Real-store live verification for saturday/approval_actions.py's approval_log
 writes (closeout-spec.md Section 4 point 2). Same pattern as
 scripts/test_pending_resume_map_roundtrip.py: mocks only the external,
 visible-side-effect calls (Trello card creation, Telegram send -- creating
@@ -19,8 +19,8 @@ setup_logging()
 
 from unittest.mock import patch
 
-import sunday.approval_actions as approval_actions
-from sunday.memory_store_config import get_store
+import saturday.approval_actions as approval_actions
+from saturday.memory_store_config import get_store
 
 RUN_ID = "smoke-test-approval-outcome-log-live"
 

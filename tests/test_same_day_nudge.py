@@ -5,8 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 from unittest.mock import patch, MagicMock
 
-import sunday.same_day_nudge as same_day_nudge
-from sunday.same_day_nudge import apply_nudge
+import saturday.same_day_nudge as same_day_nudge
+from saturday.same_day_nudge import apply_nudge
 
 
 class _Item:

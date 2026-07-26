@@ -18,11 +18,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-from sunday.nodes.read_trello import read_trello
-from sunday.nodes.correlate_trello import correlate_trello
+from saturday.nodes.read_trello import read_trello
+from saturday.nodes.correlate_trello import correlate_trello
 
-from sunday.nodes.classify_item import classify_item
-from core.state import make_sunday_initial_state
+from saturday.nodes.classify_item import classify_item
+from core.state import make_saturday_initial_state
 
 SCORED_ITEMS_PATH = Path("data/scored_items.json")
 TEST_FIXTURE_PATH = "data/test_fixture.json"
@@ -73,7 +73,7 @@ SYNTHETIC_PROPOSALS = [
         "url": "https://github.com/example/telegram-resume-bot",
         "title": "Wire a Telegram polling loop to resume interrupted LangGraph runs",
         "text": (
-            "Right now when the Sunday graph pauses at await_approval, someone has to manually "
+            "Right now when the Saturday graph pauses at await_approval, someone has to manually "
             "call graph.invoke(Command(resume=...)) with the right thread_id and decision. "
             "I want to build a lightweight Telegram polling bot that watches for 'approve'/'reject' "
             "replies in the chat, looks up the pending thread_id from Postgres, and automatically "
@@ -89,12 +89,12 @@ SYNTHETIC_PROPOSALS = [
         "source": "synthetic_test",
         "duplicate_count": 0,
         "keep": True,
-        "reasoning": "Directly unblocks the Sunday pipeline approval loop — clear next engineering step.",
+        "reasoning": "Directly unblocks the Saturday pipeline approval loop — clear next engineering step.",
         "tags": ["agentic-engineering", "llm-tooling"],
     },
 ]
 
-state = make_sunday_initial_state(run_id="test-classify-1")
+state = make_saturday_initial_state(run_id="test-classify-1")
 state["scored_items"] = scored_items + SYNTHETIC_PROPOSALS
 print(f"Injected {len(SYNTHETIC_PROPOSALS)} synthetic proposal items")
 

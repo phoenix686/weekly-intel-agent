@@ -37,7 +37,7 @@ def test_every_entry_has_name_and_exactly_one_url_key():
 def test_every_entry_has_a_bucket():
     entries = load_blog_sources()
     for entry in entries:
-        assert entry.get("bucket") in ("daily", "sunday"), f"bad/missing bucket: {entry}"
+        assert entry.get("bucket") in ("daily", "saturday"), f"bad/missing bucket: {entry}"
 
 
 def test_at_least_two_entries_present():

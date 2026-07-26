@@ -20,7 +20,7 @@ _CONTENT_ENCODED = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
 # Real browser UA, not a bot-identifying string (was "weekly-intel-bot/1.0"
 # -- 2026-07-17, real production 403s from 4 Substack-hosted sources on a
-# real Sunday run). Matches discovery/parsers/anthropic_blog.py's already-
+# real Saturday run). Matches discovery/parsers/anthropic_blog.py's already-
 # working UA. Honest caveat: re-tested all four blocked sources from this
 # machine afterward and every one succeeded with BOTH the old bot UA and
 # this one -- the block did not reproduce here, so this could not be

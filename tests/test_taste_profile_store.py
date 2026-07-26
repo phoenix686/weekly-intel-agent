@@ -1,6 +1,6 @@
 """
 discovery/taste_profile_store.py -- the real fix for taste_profile.yaml's
-persistence gap (2026-07-26 investigation): every GitHub Actions Sunday
+persistence gap (2026-07-26 investigation): every GitHub Actions Saturday
 run wrote its rewrite to a local data/ path that's gitignored, has no
 commit-back step, and no artifact upload -- so the runner's disk
 (including that write) was destroyed at job end, regardless of whether
@@ -91,7 +91,7 @@ def test_round_trip_survives_a_simulated_fresh_runner_with_no_local_file():
     fake_store = _FakeStore()
     rewritten_yaml = "version: 5\nproposal_filters: [{tag: evals, weight: 0.9}]\nnotes: 'fresh runner test'"
 
-    # "Runner 1": a Sunday run's update_profile() writes a fresh rewrite,
+    # "Runner 1": a Saturday run's update_profile() writes a fresh rewrite,
     # then the runner (and everything on its local disk) is destroyed.
     with patch.object(taste_profile_store_mod, "get_store", return_value=fake_store):
         put_taste_profile(rewritten_yaml)

@@ -1,6 +1,6 @@
 """
 Fetch every source configured in discovery/config/blog_sources.yaml that's
-active for the current invocation context (daily/sunday), and parse
+active for the current invocation context (daily/saturday), and parse
 entries into plain Python dicts. This is the single generic source
 fetcher -- TLDR AI, Smol AI News, and Anthropic's dev blog used to each
 have their own dedicated node file; now that blog_sources.yaml exists as
@@ -56,7 +56,7 @@ _LANGCHAIN_FEED_URL = "https://blog.langchain.dev/rss.xml"
 # (fetch_anthropic_engineering gained max_age_hours support 2026-07-26 --
 # it was the one entry silently exempt from this cutoff, which let a
 # dormant source re-serve the same stale top-N posts every run).
-_MAX_AGE_HOURS_BY_BUCKET = {"daily": 48, "sunday": 216}
+_MAX_AGE_HOURS_BY_BUCKET = {"daily": 48, "saturday": 216}
 
 
 def _is_langchain_case_study(row: dict) -> bool:
@@ -135,14 +135,14 @@ def fetch_agentmail_sources(source_context: str) -> list[SourceResult]:
     AgentMail-sourced sender at once, then split into one SourceResult
     PER REAL SENDER (not one generic "AgentMail Newsletters" bucket) --
     source attribution is critical with this many distinct publications
-    sharing one inbox. Sunday-only, matching every AgentMail source's
+    sharing one inbox. Saturday-only, matching every AgentMail source's
     bucket in discovery/config/agentmail_sources.yaml today.
 
     Gracefully degrades to a single informative SourceResult (zero rows,
     a clear error) if the gitignored real config doesn't exist on this
     machine yet -- never crashes the rest of the pipeline over a missing
     optional file, same reliability contract as every other source."""
-    if source_context != "sunday":
+    if source_context != "saturday":
         return []
 
     try:
@@ -178,7 +178,7 @@ def fetch_agentmail_sources(source_context: str) -> list[SourceResult]:
 
 def fetch_blog_entries_per_source(source_context: str) -> list[SourceResult]:
     """One SourceResult per blog_sources.yaml entry active for
-    source_context ("daily" or "sunday" -- sunday is a superset, see
+    source_context ("daily" or "saturday" -- saturday is a superset, see
     blog_sources_config.entries_for_context). A single failing source
     never affects another's result -- each entry is fetched and handled
     independently."""

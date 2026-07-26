@@ -3,7 +3,7 @@ Shared state schema(s) for the LangGraph Weekly Intelligence Agent.
 
 Phase 0 scope: define the DiscoverySubgraphState only — the schema for the
 shared discovery subgraph (search/scrape -> cluster/dedupe -> score), per
-spec section 3. Daily/Sunday path-level state (Trello correlation, plan
+spec section 3. Daily/Saturday path-level state (Trello correlation, plan
 assembly, approval interrupts) is explicitly NOT defined here yet; that
 belongs to later phases once the discovery subgraph itself is validated.
 
@@ -150,7 +150,7 @@ class DiscoverySubgraphState(TypedDict):
     run_id: str
     costs: Annotated[list[NodeCost], operator.add]
     errors: Annotated[list[str], operator.add]
-    source_context: Literal["daily", "sunday"]  # read by route_sources() to
+    source_context: Literal["daily", "saturday"]  # read by route_sources() to
                                                  # decide the active source
                                                  # node(s) for this invocation
     dry_run: bool  # when True, score_node AND cluster_dedupe_node both skip
@@ -176,7 +176,7 @@ class DailyGraphState(TypedDict):
                                                     # trailing "didn't match any existing topic" section
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
-    source_context: Literal["daily", "sunday"]
+    source_context: Literal["daily", "saturday"]
     digest_text: str        # populated by assemble_digest, consumed by send_telegram_digest
     digest_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
                                        # assemble_digest, persisted by send_telegram_digest keyed
@@ -198,8 +198,8 @@ def make_daily_initial_state(run_id: str) -> DailyGraphState:
     )
 
 
-class SundayGraphState(TypedDict):
-    """State for the Sunday parent graph.
+class SaturdayGraphState(TypedDict):
+    """State for the Saturday parent graph.
 
     Pipeline: read_trello -> correlate_trello -> classify_item -> assemble_plan
               -> await_approval (Part B) -> write_outputs -> update_profile
@@ -218,7 +218,7 @@ class SundayGraphState(TypedDict):
     trello_cards: list[dict]        # raw card data from read_trello: card_id, name,
                                     #   desc, list_id, list_name, url, checklist_items,
                                     #   last_activity (Trello dateLastActivity, ISO string)
-    card_movements: list[dict]      # populated by read_trello (sunday/card_movement.py):
+    card_movements: list[dict]      # populated by read_trello (saturday/card_movement.py):
                                     #   {card_id, previous_list_name, current_list_name,
                                     #   status: "archived"|"not_found"|"completed"|"moved"|"unchanged"}
                                     #   -- real movement since the most recent prior plan_history
@@ -241,13 +241,13 @@ class SundayGraphState(TypedDict):
     pending_resumes: Annotated[list[dict], operator.add]   # one entry per proposal_worker Send: {proposal_id, thread_id, message_id}
     costs: Annotated[list[NodeCost], operator.add]
     errors: list[str]
-    source_context: Literal["daily", "sunday"]
+    source_context: Literal["daily", "saturday"]
     dry_run: bool  # passed through by name intersection into the nested
                     # discovery subgraph; see DiscoverySubgraphState.dry_run
 
 
-def make_sunday_initial_state(run_id: str, dry_run: bool = False) -> SundayGraphState:
-    return SundayGraphState(
+def make_saturday_initial_state(run_id: str, dry_run: bool = False) -> SaturdayGraphState:
+    return SaturdayGraphState(
         run_id=run_id,
         scored_items=[],
         uncategorized_items=[],
@@ -262,6 +262,6 @@ def make_sunday_initial_state(run_id: str, dry_run: bool = False) -> SundayGraph
         pending_resumes=[],
         costs=[],
         errors=[],
-        source_context="sunday",
+        source_context="saturday",
         dry_run=dry_run,
     )

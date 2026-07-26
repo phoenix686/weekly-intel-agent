@@ -29,7 +29,7 @@ def _state(raw_items):
     return {
         "raw_items": raw_items, "clustered_items": [], "scored_items": [],
         "run_id": "run-1", "costs": [], "errors": [],
-        "source_context": "sunday",
+        "source_context": "saturday",
     }
 
 

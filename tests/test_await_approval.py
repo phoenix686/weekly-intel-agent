@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, MagicMock
 
-from sunday.nodes.await_approval import proposal_worker, thread_id_for
+from saturday.nodes.await_approval import proposal_worker, thread_id_for
 
 
 class _FakeStore:
@@ -44,8 +44,8 @@ def test_proposal_worker_writes_pending_resume_map_with_real_message_id():
     state = _proposal_state()
     expected_thread_id = thread_id_for(state["proposal_id"])
 
-    with patch("sunday.nodes.await_approval.get_proposal_graph", return_value=fake_child), \
-         patch("sunday.nodes.await_approval.get_store", return_value=fake_store):
+    with patch("saturday.nodes.await_approval.get_proposal_graph", return_value=fake_child), \
+         patch("saturday.nodes.await_approval.get_store", return_value=fake_store):
         result = proposal_worker(state)
 
     assert len(fake_store.puts) == 1
@@ -72,8 +72,8 @@ def test_proposal_worker_invokes_child_graph_on_dedicated_thread():
     state = _proposal_state()
     expected_thread_id = thread_id_for(state["proposal_id"])
 
-    with patch("sunday.nodes.await_approval.get_proposal_graph", return_value=fake_child), \
-         patch("sunday.nodes.await_approval.get_store", return_value=fake_store):
+    with patch("saturday.nodes.await_approval.get_proposal_graph", return_value=fake_child), \
+         patch("saturday.nodes.await_approval.get_store", return_value=fake_store):
         proposal_worker(state)
 
     fake_child.invoke.assert_called_once()

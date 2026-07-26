@@ -1,6 +1,6 @@
 # Blog/newsletter/RSS source list for scrape_blogs, the single generic
 # source-fetching node. Each entry has a `name`, a `bucket` (daily |
-# sunday), exactly one of `feed_url` (RSS/Atom, fetched via
+# saturday), exactly one of `feed_url` (RSS/Atom, fetched via
 # discovery/parsers/rss_common.py) or `scrape_url` (HTML fallback, only
 # used by the Anthropic entry via discovery/parsers/anthropic_blog.py),
 # and an optional `fetch_limit` (max items fetched per run -- falls back
@@ -14,13 +14,13 @@
 # discovery/parsers/tldr_ai.py's fetch_tldr_roundup() instead of the
 # plain fetch_rss_feed() path -- see that module's docstring.
 #
-# bucket=daily entries fire on both daily and sunday invocations.
-# bucket=sunday entries fire on sunday only. See
+# bucket=daily entries fire on both daily and saturday invocations.
+# bucket=saturday entries fire on saturday only. See
 # discovery/parsers/scrape_blogs.py's fetch_blog_entries().
 #
 # fetch_limit is set per-bucket: daily-bucket sources get 15 (fire on
-# both daily and sunday invocations, so a higher cap there costs more
-# twice); sunday-only sources get 6 (weekly-or-slower cadence -- these
+# both daily and saturday invocations, so a higher cap there costs more
+# twice); saturday-only sources get 6 (weekly-or-slower cadence -- these
 # publications rarely post more than a handful of new items in a week).
 #
 # deeplearning.ai / The Batch is intentionally excluded -- no public RSS
@@ -55,7 +55,7 @@
 
 - name: "LangChain Blog"
   feed_url: "https://blog.langchain.dev/rss.xml"
-  bucket: sunday
+  bucket: saturday
   fetch_limit: 6
 
 - name: "Latent Space"
@@ -65,7 +65,7 @@
 
 - name: "Anthropic Engineering Blog"
   scrape_url: "https://www.anthropic.com/engineering"
-  bucket: sunday
+  bucket: saturday
   fetch_limit: 6
 
 - name: "MarkTechPost"
@@ -80,17 +80,17 @@
 
 - name: "Technically"
   feed_url: "https://read.technically.dev/feed"
-  bucket: sunday
+  bucket: saturday
   fetch_limit: 6
-  # Moved from daily to sunday, 2026-07-22: publishes weekly (Tuesdays),
+  # Moved from daily to saturday, 2026-07-22: publishes weekly (Tuesdays),
   # so a 48h daily cutoff structurally returns ~0-1 items most days --
-  # fits the weekly Sunday digest's cadence, not daily's. fetch_limit
-  # dropped from 15 to 6 to match every other sunday-only source's
+  # fits the weekly Saturday digest's cadence, not daily's. fetch_limit
+  # dropped from 15 to 6 to match every other saturday-only source's
   # weekly-or-slower convention (see this file's header comment).
 
 - name: "Hacker News (Show HN)"
   feed_url: "https://hnrss.org/show"
-  bucket: sunday
+  bucket: saturday
   fetch_limit: 8
   # Deliberately NO keyword query filter on the fetch
   # itself (hnrss.org supports one, e.g. hnrss.org/show?q=agent, but using

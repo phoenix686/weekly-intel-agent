@@ -1,5 +1,5 @@
 """
-correlate_trello (sunday/nodes/correlate_trello.py) -- zero unit test
+correlate_trello (saturday/nodes/correlate_trello.py) -- zero unit test
 coverage existed before this file (confirmed by grep last session).
 Covers the actual match/no-match judgment, the keep-filter (only
 keep=True scored_items get correlated), and the JSON-parse-failure
@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 from unittest.mock import patch, MagicMock
 
-import sunday.nodes.correlate_trello as correlate_mod
-from sunday.nodes.correlate_trello import correlate_trello
+import saturday.nodes.correlate_trello as correlate_mod
+from saturday.nodes.correlate_trello import correlate_trello
 
 
 def _scored_item(url, keep=True, tags=None, reasoning="r"):
@@ -29,7 +29,7 @@ def _state(scored_items, trello_cards, run_id="run-1"):
     return {
         "run_id": run_id, "scored_items": scored_items, "trello_cards": trello_cards,
         "correlated_items": [], "classified_items": [], "plan_text": "", "plan_item_map": {},
-        "pending_approvals": [], "pending_resumes": [], "costs": [], "errors": [], "source_context": "sunday",
+        "pending_approvals": [], "pending_resumes": [], "costs": [], "errors": [], "source_context": "saturday",
     }
 
 

@@ -2,7 +2,7 @@
 Synthetic test for update_profile's rejection_event writes, YAML preference
 update, and run_summary persistence.
 
-Constructs a fake SundayGraphState with 3 classified items (2 rejected
+Constructs a fake SaturdayGraphState with 3 classified items (2 rejected
 proposals, 1 approved plan_item) and calls update_profile() directly.
 
 Prints:
@@ -31,9 +31,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-import sunday.nodes.update_profile as update_profile_mod
-from sunday.nodes.update_profile import update_profile
-from sunday.memory_store_config import get_store
+import saturday.nodes.update_profile as update_profile_mod
+from saturday.nodes.update_profile import update_profile
+from saturday.memory_store_config import get_store
 from discovery.taste_profile_store import get_taste_profile, put_taste_profile
 
 RUN_ID = "test-update-profile-1"

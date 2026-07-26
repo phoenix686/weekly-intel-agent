@@ -6,7 +6,7 @@ route_sources is a real LangGraph conditional entry point
 2's locked design: ONE subgraph, not two variants -- adding a future
 source means adding one node + one routing-list entry, not touching two
 separate graph builders. This replaces an earlier, undocumented
-build_discovery_subgraph(include_sunday_only) two-graph-shape pattern
+build_discovery_subgraph(include_saturday_only) two-graph-shape pattern
 that predated (and diverged from) that locked design; see phase-5b-spec.md
 Section 10 for the reconciliation.
 
@@ -26,7 +26,7 @@ sources cover the same ground with better signal and lower cost -- no
 distinct remaining job for it.
 
 scrape_blogs is now the ONLY source node routed here (besides
-process_adhoc_input, sunday-only) -- TLDR AI, Smol AI News, and
+process_adhoc_input, saturday-only) -- TLDR AI, Smol AI News, and
 Anthropic's dev blog used to be separate dedicated node files
 (tldr_ai.py, smol_ai_news.py, anthropic_blog.py); now that
 discovery/config/blog_sources.yaml exists as the single source-of-truth
@@ -44,7 +44,7 @@ from core.state import DiscoverySubgraphState
 from discovery.nodes.cluster_dedupe import cluster_dedupe_node
 from discovery.nodes.score import score_node
 from discovery.nodes.scrape_blogs import scrape_blogs
-from sunday.nodes.process_adhoc_input import process_adhoc_input
+from saturday.nodes.process_adhoc_input import process_adhoc_input
 
 # Every source node that's part of the scheduled discovery subgraph.
 # ingest_bookmarks deliberately excluded -- see module docstring.
@@ -57,20 +57,20 @@ _ALL_SOURCE_NODES = {
 # route_sources reads from -- a new source means one new row in
 # discovery/config/blog_sources.yaml, not a new node here.
 _DAILY_ACTIVE = ["scrape_blogs"]
-_SUNDAY_ACTIVE = ["scrape_blogs", "process_adhoc_input"]
+_SATURDAY_ACTIVE = ["scrape_blogs", "process_adhoc_input"]
 
 
 def route_sources(state: DiscoverySubgraphState) -> list[str]:
     """Conditional entry point: returns the active source node(s) for this
-    invocation, read from state["source_context"] ("daily" or "sunday",
-    set by make_daily_initial_state()/make_sunday_initial_state() and
+    invocation, read from state["source_context"] ("daily" or "saturday",
+    set by make_daily_initial_state()/make_saturday_initial_state() and
     passed through to this subgraph by name intersection)."""
     context = state["source_context"]
     if context == "daily":
         return _DAILY_ACTIVE
-    if context == "sunday":
-        return _SUNDAY_ACTIVE
-    raise ValueError(f"Unknown source_context: {context!r} (expected 'daily' or 'sunday')")
+    if context == "saturday":
+        return _SATURDAY_ACTIVE
+    raise ValueError(f"Unknown source_context: {context!r} (expected 'daily' or 'saturday')")
 
 
 def build_discovery_subgraph():
@@ -78,7 +78,7 @@ def build_discovery_subgraph():
     point) -> [active source nodes for this invocation] -> cluster_dedupe
     -> score.
 
-    daily/graph.py and sunday/graph.py both invoke this SAME compiled
+    daily/graph.py and saturday/graph.py both invoke this SAME compiled
     subgraph -- which source nodes actually run is decided entirely at
     runtime by route_sources reading state["source_context"], not by
     building two different graphs.

@@ -23,7 +23,7 @@ Lifecycle, per url:
 
 Why a carried item can never incur a duplicate Haiku charge or get
 blocked by seen_items: get_carry_forward_items() is called from
-sunday/nodes/assemble_plan.py, the LAST real node before the plan is
+saturday/nodes/assemble_plan.py, the LAST real node before the plan is
 rendered. A carried item is built directly from last week's
 digest_item_map entry (already-scored title/text/tags/reasoning) and
 injected straight into this run's classified_items -- it never becomes
@@ -33,9 +33,9 @@ discovery/nodes/score.py's score_node() at all, this run or any run.
 There is no code path connecting this module to either.
 
 "Last week's Reading/Courses items" is resolved via run_history (finding
-the most recent completed Sunday run before this one) and that run's
+the most recent completed Saturday run before this one) and that run's
 digest_item_map entry, filtered by the "section" field added to
-item_map entries (sunday/nodes/assemble_plan.py's format_plan()) --
+item_map entries (saturday/nodes/assemble_plan.py's format_plan()) --
 without it, Existing Project Work items (Trello-tracked separately via
 plan_history/card_movements, entirely out of scope here) couldn't be
 reliably excluded from digest_item_map's otherwise-identically-shaped
@@ -50,7 +50,7 @@ import logging
 from datetime import datetime, timezone
 
 from core.connection_pool import get_connection_pool
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -58,25 +58,25 @@ _CARRY_LOG_NAMESPACE = ("weekly_intel", "carry_forward_log")
 _CARRYABLE_SECTIONS = {"reading", "courses"}
 
 
-def _find_prior_sunday_run_id(current_run_id: str) -> str | None:
-    """Most recent COMPLETED ("success") Sunday run before this one, per
+def _find_prior_saturday_run_id(current_run_id: str) -> str | None:
+    """Most recent COMPLETED ("success") Saturday run before this one, per
     run_history -- excludes the current run defensively (mirrors
     plan_history.get_most_recent_prior_entry's same precaution) and
     excludes anything not yet finished (a failed/in-progress run has no
     real digest_item_map entry worth trusting)."""
     store = get_store()
     entries = [item.value for item in store.search(("weekly_intel", "run_history"), limit=1000)]
-    sunday_runs = [
+    saturday_runs = [
         e for e in entries
-        if e.get("path") == "sunday" and e.get("run_id") != current_run_id and e.get("status") == "success"
+        if e.get("path") == "saturday" and e.get("run_id") != current_run_id and e.get("status") == "success"
     ]
-    if not sunday_runs:
+    if not saturday_runs:
         return None
-    return max(sunday_runs, key=lambda e: e.get("finished_at") or "")["run_id"]
+    return max(saturday_runs, key=lambda e: e.get("finished_at") or "")["run_id"]
 
 
 def _load_prior_reading_and_course_items(prior_run_id: str) -> list[dict]:
-    """Reading & Learning + Courses items only, from the prior Sunday
+    """Reading & Learning + Courses items only, from the prior Saturday
     run's digest_item_map entry -- Existing Project Work items (section
     == "existing_project_work") are Trello-tracked separately and
     excluded here entirely."""
@@ -128,14 +128,14 @@ def get_carry_forward_items(current_run_id: str) -> list[dict]:
     every eligible carry-forward item. Records each returned url to
     carry_forward_log in the same call, so it can never be carried a
     second time regardless of what happens to it this week."""
-    prior_run_id = _find_prior_sunday_run_id(current_run_id)
+    prior_run_id = _find_prior_saturday_run_id(current_run_id)
     if prior_run_id is None:
-        logger.info(f"carry_forward: no prior completed Sunday run found (run={current_run_id})")
+        logger.info(f"carry_forward: no prior completed Saturday run found (run={current_run_id})")
         return []
 
     candidates = _load_prior_reading_and_course_items(prior_run_id)
     if not candidates:
-        logger.info(f"carry_forward: prior Sunday run {prior_run_id} had no Reading/Courses items (run={current_run_id})")
+        logger.info(f"carry_forward: prior Saturday run {prior_run_id} had no Reading/Courses items (run={current_run_id})")
         return []
 
     urls = [c["url"] for c in candidates]

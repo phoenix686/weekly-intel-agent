@@ -2,9 +2,9 @@
 Same-day capped taste-profile nudge (batch2-dedup-taste-spec.md Section
 7). Runs immediately after item-feedback-logging writes a new
 ("weekly_intel","feedback_events") record (called from
-sunday/approval_actions.py's handle_feedback) -- a fast, cheap, bounded
-patch that sits on top of, and is cleared by, the slow, thorough Sunday
-consolidated rewrite (sunday/nodes/update_profile.py). Never a
+saturday/approval_actions.py's handle_feedback) -- a fast, cheap, bounded
+patch that sits on top of, and is cleared by, the slow, thorough Saturday
+consolidated rewrite (saturday/nodes/update_profile.py). Never a
 replacement for it.
 
 A Haiku call classifies the reply's feedback_text into a direction
@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 
 import anthropic
 
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 from core.state import NodeCost
 
 logger = logging.getLogger(__name__)

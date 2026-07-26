@@ -11,7 +11,7 @@ only ever fetches its 5-15 most recent items (discovery/config/
 blog_sources.yaml's fetch_limit), so an entry older than this window is
 provably unreachable again -- dead weight, not real cross-run dedup
 coverage. 35 days (top half of the 30-45 day range this was scoped to)
-gives real buffer for the slowest, sunday-bucket/weekly-cadence sources
+gives real buffer for the slowest, saturday-bucket/weekly-cadence sources
 (fetch_limit=6): even a multi-week gap in that source's publishing
 schedule shouldn't let an old, already-scored item wrongly reappear as
 "new" before it's expired here too.
@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from langgraph.store.base import GetOp, PutOp
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +70,8 @@ def filter_unseen(items: list[dict]) -> tuple[list[dict], list[str]]:
     One batched store.batch() call covering every item, not one
     store.get() per item -- measured 12.1x faster on a real 10-key
     benchmark against the live store (2636ms looped vs 219ms batched),
-    the most concrete inefficiency found in the real 45-minute Sunday
-    timeout investigation. Real Sunday-run volume (up to ~108 raw items)
+    the most concrete inefficiency found in the real 45-minute Saturday
+    timeout investigation. Real Saturday-run volume (up to ~108 raw items)
     made this loop itself a material cost, independent of the model-load
     tax and per-item embedding write loops fixed separately."""
     if not items:

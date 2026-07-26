@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from daily.nodes.assemble_digest import assemble_digest
-from sunday.nodes.assemble_plan import assemble_plan
-from sunday.memory_store_config import get_store
+from saturday.nodes.assemble_plan import assemble_plan
+from saturday.memory_store_config import get_store
 
 VILLAGE_NAMESPACE = ("village",)
 COMPANION_NAMESPACE = ("companion",)
@@ -76,7 +76,7 @@ def test_plan_ready_event() -> bool:
         "classified_items": classified_items,
         "uncategorized_items": [],
         "pending_approvals": [],
-        "run_id": "village-store-test-sunday",
+        "run_id": "village-store-test-saturday",
         "trello_cards": [],
         "prioritized_project_work": [],
         "costs": [],
@@ -101,7 +101,7 @@ def test_plan_ready_event() -> bool:
         print(f"  value: {new_items[0].value}")
 
     companion_stored = get_store().get(COMPANION_NAMESPACE, "current_weekly_plan")
-    companion_ok = companion_stored is not None and companion_stored.value.get("run_id") == "village-store-test-sunday"
+    companion_ok = companion_stored is not None and companion_stored.value.get("run_id") == "village-store-test-saturday"
     print(f"  companion prefix still writes correctly (untouched): {'PASS' if companion_ok else 'FAIL'}")
 
     return ok and companion_ok

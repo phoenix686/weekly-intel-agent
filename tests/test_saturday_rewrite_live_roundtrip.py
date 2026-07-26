@@ -1,6 +1,6 @@
 """
-Real-embedding, real-Haiku live verification for sunday/nodes/update_profile.py's
-Sunday consolidated rewrite -- the one blocked feature that touches BOTH a
+Real-embedding, real-Haiku live verification for saturday/nodes/update_profile.py's
+Saturday consolidated rewrite -- the one blocked feature that touches BOTH a
 real Anthropic call and real local embeddings (via the nested
 recompute_topic_vectors call).
 
@@ -16,7 +16,7 @@ after), runs the real node function, verifies the real consolidated
 rewrite + real recompute + real same_day_adjustments clearing, then
 cleans up everything it wrote.
 
-Run: uv run --env-file .env python scripts/test_sunday_rewrite_live_roundtrip.py
+Run: uv run --env-file .env python scripts/test_saturday_rewrite_live_roundtrip.py
 """
 from dotenv import load_dotenv
 load_dotenv()
@@ -27,22 +27,22 @@ setup_logging()
 import uuid
 from datetime import datetime, timezone
 
-import sunday.nodes.update_profile as update_profile_mod
-from sunday.memory_store_config import get_store
+import saturday.nodes.update_profile as update_profile_mod
+from saturday.memory_store_config import get_store
 from discovery.taste_profile_store import get_taste_profile, put_taste_profile
 
-RUN_ID = "smoke-test-sunday-rewrite-live"
+RUN_ID = "smoke-test-saturday-rewrite-live"
 store = get_store()
 
 # Seed one real, throwaway feedback_events record.
 feedback_key = str(uuid.uuid4())
 feedback_value = {
-    "item_id": "https://example.com/smoke-sunday-rewrite-item",
+    "item_id": "https://example.com/smoke-saturday-rewrite-item",
     "feedback_text": "really liked this one, more agentic-engineering deep dives please",
     "replied_at": datetime.now(timezone.utc).isoformat(),
     "run_id": RUN_ID,
     "tags": ["agentic-engineering"],
-    "title": "Smoke Test Sunday Rewrite Item",
+    "title": "Smoke Test Saturday Rewrite Item",
     "content_summary": "some real content body about agent harnesses",
     "sentiment": "positive",
 }
@@ -56,7 +56,7 @@ try:
     state = {
         "run_id": RUN_ID, "scored_items": [], "trello_cards": [], "correlated_items": [],
         "classified_items": [], "plan_text": "", "plan_item_map": {}, "pending_approvals": [],
-        "pending_resumes": [], "costs": [], "errors": [], "source_context": "sunday",
+        "pending_resumes": [], "costs": [], "errors": [], "source_context": "saturday",
     }
     print("\nCalling the real update_profile() -- real Haiku consolidated rewrite + real local embedding recompute...")
     result = update_profile_mod.update_profile(state)
@@ -98,7 +98,7 @@ from discovery.taste_vectors import _NAMESPACE as _VECTORS_NAMESPACE, TOPIC_TAGS
 for tag in [t for t in TOPIC_TAGS if _TAG_TO_BULLET.get(t) is not None]:
     store.delete(_VECTORS_NAMESPACE, tag)
 
-print("\nsunday_rewrite live round-trip: PASS")
+print("\nsaturday_rewrite live round-trip: PASS")
 print("  real consolidated Haiku rewrite happened exactly once, real nonzero cost")
 print("  real recompute_topic_vectors ran on the fresh text (5/6 tags, learning-resource flagged)")
 print("  real same_day_adjustments namespace confirmed cleared")

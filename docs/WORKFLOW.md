@@ -1,23 +1,30 @@
 # Workflow Map
 
-Last updated: daily.yml schedule-delay pattern documented (Scheduled runs section) -- see below
+Last updated: 2026-07-26 -- Sunday pipeline renamed to Saturday (schedule-timing-and-rename checkpoint, see Checkpoint history below)
 
 ## Scheduled runs (GitHub Actions)
 
-- **`.github/workflows/daily.yml`** — `30 1 * * 1-6` (01:30 UTC / 07:00 IST,
-  Monday-Saturday; changed 2026-07-19 from the prior 02:30 UTC / 08:00 IST;
-  Sunday is skipped since the Sunday workflow's discovery subgraph already
-  covers that day). Runs `scripts/run_daily.py`.
-- **`.github/workflows/sunday.yml`** — `30 5 * * 0` (05:30 UTC / 11:00 IST,
-  Sunday only; changed 2026-07-19 from the prior 13:30 UTC / 19:00 IST).
-  Runs `scripts/run_sunday.py`.
+- **`.github/workflows/daily.yml`** — `0 22 * * 0-4,6` (22:00 UTC / 03:30 IST,
+  every day except Friday; changed 2026-07-26 from the prior `30 1 * * 1-6`
+  to compensate for an observed ~3.5h GitHub-side scheduling lag. Friday is
+  skipped since the weekly pipeline's own discovery subgraph already covers
+  the day it delivers on (Saturday) — see the schedule-timing-and-rename
+  checkpoint below for the full UTC/IST verification). Runs
+  `scripts/run_daily.py`.
+- **`.github/workflows/saturday.yml`** — `0 23 * * 5` (23:00 UTC Friday =
+  04:30 IST Saturday; changed 2026-07-26 from the prior `30 5 * * 0`
+  (Sunday-triggered) to compensate for an observed ~2.5h GitHub-side
+  scheduling lag — this workflow, its directory (`saturday/`, was
+  `sunday/`), and its entry point (`run_saturday.py`, was `run_sunday.py`)
+  were all renamed the same day to match the actual delivery day. See the
+  schedule-timing-and-rename checkpoint below. Runs `scripts/run_saturday.py`.
 - **`.github/workflows/poll.yml`** _(new, Checkpoint 3)_ — `30 16 * * *` (16:30
-  UTC / 22:00 IST, **every day including Sunday** — unlike `daily.yml`, which
-  skips Sunday, this must run all 7 days since resumes/feedback/ad-hoc input
+  UTC / 22:00 IST, **every day including Saturday** — unlike `daily.yml`, which
+  skips Saturday, this must run all 7 days since resumes/feedback/ad-hoc input
   can arrive any day; this line was stale -- corrected to match the real
   cron, which had already moved to 22:00 IST per an earlier commit not
   reflected here until now). Runs `scripts/run_poll.py`, which calls
-  `telegram.polling.poll_once()`. Reuses the same secrets as `sunday.yml`
+  `telegram.polling.poll_once()`. Reuses the same secrets as `saturday.yml`
   (Trello + Telegram + Anthropic + `DB_URI`) — no new secrets needed, since a
   resume can trigger `handle_approval`/`handle_rejection`.
 - All three also have `workflow_dispatch:` for manual triggering (Actions tab →
@@ -26,19 +33,19 @@ Last updated: daily.yml schedule-delay pattern documented (Scheduled runs sectio
   already-running scheduled job — the newer run queues instead of
   cancelling the older one, since killing a run mid-Anthropic-call would
   waste the API cost already spent.
-- The Sunday job does NOT stay alive waiting for Telegram approve/reject
+- The Saturday job does NOT stay alive waiting for Telegram approve/reject
   replies — each proposal pauses on its own dedicated checkpointer thread in
   Postgres (per-proposal `interrupt()`, verified in Parts 1-7), and the job
   itself exits normally once every proposal has been sent, whether or not any
   are still pending. Resuming a paused proposal happens later, in a separate
   process, via `telegram/polling.py`'s `poll_once()`, now scheduled daily via
-  `poll.yml` (Checkpoint 3). `timeout-minutes: 20` on daily/sunday and
+  `poll.yml` (Checkpoint 3). `timeout-minutes: 20` on daily/saturday and
   `timeout-minutes: 10` on poll (lighter job, no LLM calls of its own beyond
   what a resume/feedback path triggers) are safety nets against a genuine
   hang, not a wait for replies.
 - **Blocker found and resolved this session:** `.github/` had been added to
   `.gitignore` in an uncommitted working-tree change that predated Checkpoint
-  3 (bundled with unrelated changes). `daily.yml` and `sunday.yml` had in
+  3 (bundled with unrelated changes). `daily.yml` and `saturday.yml` had in
   fact **never been committed, in any commit, at any point in this repo's
   history** before now. Flagged to Pooja rather than silently edited; she
   chose to un-ignore `.github/` and commit all three workflows (commit
@@ -48,7 +55,7 @@ Last updated: daily.yml schedule-delay pattern documented (Scheduled runs sectio
   Secrets and variables → Actions (this workflow file only *references* them
   — adding the actual values is a manual step, not something committed code
   can do): `DB_URI`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`,
-  `TELEGRAM_CHAT_ID`, plus for Sunday/poll `TRELLO_API_KEY`, `TRELLO_TOKEN`,
+  `TELEGRAM_CHAT_ID`, plus for Saturday/poll `TRELLO_API_KEY`, `TRELLO_TOKEN`,
   `TRELLO_BOARD_ID`. `LANGSMITH_TRACING`/`LANGSMITH_API_KEY`/`LANGSMITH_PROJECT`
   are passed through to all three if set, for tracing parity with local runs.
 - **Known gap, not worked around:** `ingest_bookmarks` reads
@@ -60,7 +67,7 @@ Last updated: daily.yml schedule-delay pattern documented (Scheduled runs sectio
   a missing file in automated contexts). Flagged rather than guessed around.
 - `requirements.txt` was missing `python-dotenv` and
   `langgraph-checkpoint-postgres` (both entrypoint scripts need the former;
-  `core/checkpointer_config.py`/`sunday/memory_store_config.py` need the latter) — added
+  `core/checkpointer_config.py`/`saturday/memory_store_config.py` need the latter) — added
   both; `pyproject.toml` already listed them correctly, `requirements.txt` had
   drifted out of sync.
 - **`daily.yml`'s `schedule` trigger runs consistently ~2.5-3h late — this is
@@ -90,7 +97,7 @@ Last updated: daily.yml schedule-delay pattern documented (Scheduled runs sectio
 **Daily pipeline** — `python scripts/run_daily.py` ingests bookmarks, scores them,
 formats a digest, and sends it to Telegram. No checkpointer; no interrupts.
 
-**Sunday pipeline** — `python scripts/run_sunday.py` runs the full Sunday graph,
+**Saturday pipeline** — `python scripts/run_saturday.py` runs the full Saturday graph,
 which:
 1. Runs the discovery subgraph (ingest → cluster_dedupe → score)
 2. Reads open Trello cards from the Brain board
@@ -115,10 +122,10 @@ which:
    - Calls `approval_actions.handle_approval` or `handle_rejection` with the resolved item
    - Deletes the `pending_resume_map` entry
 3. Other replies → `feedback_router.handle_feedback` (stub — daily feedback path not yet built)
-4. Non-reply messages → queued in `("weekly_intel", "adhoc_queue")` for next Sunday's
+4. Non-reply messages → queued in `("weekly_intel", "adhoc_queue")` for next Saturday's
    `process_adhoc_input` node
 
-State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_items`,
+State handoff: `DailyGraphState` and `SaturdayGraphState` share `run_id`, `scored_items`,
 `costs`, and `errors` with `DiscoverySubgraphState` by key intersection. `raw_items`,
 `clustered_items`, and `stage` stay internal to the subgraph.
 
@@ -131,47 +138,47 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **Key schemas:**
   - `RawItem`, `ClusteredItem`, `ScoredItem`, `NodeCost`, `DiscoverySubgraphState`,
     `DailyGraphState`, `make_daily_initial_state()`
-  - `SundayGraphState` — contains `pending_resumes: Annotated[list[dict], operator.add]`
+  - `SaturdayGraphState` — contains `pending_resumes: Annotated[list[dict], operator.add]`
     (populated by `proposal_worker` per fan-out branch: `{proposal_id, thread_id, message_id}`).
     Also `card_movements: list[dict]` (sub-phase 4, populated by `read_trello`) —
-    real cross-week Trello movement per card, see `sunday/card_movement.py`'s entry.
+    real cross-week Trello movement per card, see `saturday/card_movement.py`'s entry.
     Also `prioritized_project_work: list[dict]` (sub-phase 5, populated by
     `prioritize_plan_items`) — bounded, priority-ordered Existing Project Work
     selection, not yet consumed by `assemble_plan`.
-    `approval_results` removed — proposals now resolve async, outside the Sunday run.
-- **Key exports:** all TypedDicts + `make_sunday_initial_state()`, `make_daily_initial_state()`
+    `approval_results` removed — proposals now resolve async, outside the Saturday run.
+- **Key exports:** all TypedDicts + `make_saturday_initial_state()`, `make_daily_initial_state()`
 - **Depended on by:** every node file and both graph files
 
 ### `core/connection_pool.py`  _(added Parts 1-7)_
 - **What it does:** Singleton `psycopg_pool.ConnectionPool` shared by both
-  `core/checkpointer_config.py` and `sunday/memory_store_config.py`. Prevents each config
+  `core/checkpointer_config.py` and `saturday/memory_store_config.py`. Prevents each config
   module from opening its own raw connection. Pool kwargs: `autocommit=True`,
   `prepare_threshold=0`.
 - **Key exports:** `get_connection_pool() -> ConnectionPool`
-- **Depended on by:** `core/checkpointer_config.py`, `sunday/memory_store_config.py`
+- **Depended on by:** `core/checkpointer_config.py`, `saturday/memory_store_config.py`
 
 ### `core/checkpointer_config.py`  _(updated Parts 1-7)_
 - **What it does:** Creates a `PostgresSaver` using a connection borrowed from
   `get_connection_pool()` (was: raw `psycopg.connect`). Sets `LANGGRAPH_STRICT_MSGPACK=true`.
   `DEFAULT_RECURSION_LIMIT = 50`.
 - **Key exports:** `get_checkpointer() -> PostgresSaver`, `DEFAULT_RECURSION_LIMIT`
-- **Depended on by:** `sunday/graph.py`, `sunday/nodes/await_approval.py`, `scripts/run_sunday.py`
+- **Depended on by:** `saturday/graph.py`, `saturday/nodes/await_approval.py`, `scripts/run_saturday.py`
 
-### `sunday/memory_store_config.py`  _(updated Parts 1-7)_
+### `saturday/memory_store_config.py`  _(updated Parts 1-7)_
 - **What it does:** Creates a `PostgresStore` using a connection borrowed from
   `get_connection_pool()` (was: raw `psycopg.Connection.connect`).
 - **Key exports:** `get_store() -> PostgresStore`
-- **Depended on by:** `sunday/nodes/update_profile.py`, `sunday/nodes/await_approval.py`,
-  `sunday/nodes/process_adhoc_input.py`, `telegram/polling.py`
+- **Depended on by:** `saturday/nodes/update_profile.py`, `saturday/nodes/await_approval.py`,
+  `saturday/nodes/process_adhoc_input.py`, `telegram/polling.py`
 
-### `sunday/approval_actions.py`  _(added Parts 1-7)_
+### `saturday/approval_actions.py`  _(added Parts 1-7)_
 - **What it does:** Plain functions (no LangGraph) for writing proposal outcomes.
-  Called from `polling.py` at resume time — NOT from the Sunday graph.
+  Called from `polling.py` at resume time — NOT from the Saturday graph.
   - `handle_approval(item, thread_id)` — creates or updates Trello card + sends Telegram confirmation
   - `handle_rejection(item, run_id)` — writes `rejection_event` to Postgres store
     + calls `_update_yaml_for_rejection` (incremental Haiku-based taste profile update)
   Moved from `write_outputs.py` (approval path) and `update_profile.py` (rejection path).
-  Per-resolution timing instead of batched-at-Sunday-end — a tighter fit with the
+  Per-resolution timing instead of batched-at-Saturday-end — a tighter fit with the
   project's incremental-update philosophy.
 - **Key exports:** `handle_approval(item, thread_id)`, `handle_rejection(item, run_id)`
 - **Depended on by:** `telegram/polling.py`
@@ -194,7 +201,7 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **Key exports:** `handle_feedback(message: dict)`
 - **Depended on by:** `telegram/polling.py`
 
-### `sunday/nodes/await_approval.py`  _(rewritten Parts 1-7)_
+### `saturday/nodes/await_approval.py`  _(rewritten Parts 1-7)_
 - **What it does:** Per-proposal child graph with its own dedicated checkpointer thread.
   `thread_id_for(proposal_id)` hashes the proposal URL. `send_proposal_message` captures
   the real Telegram `message_id` from the API response. `proposal_worker` stores
@@ -203,22 +210,22 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   `ProposalState` now includes `run_id` so it flows through to the store entry.
 - **Key exports:** `ProposalState`, `thread_id_for`, `get_proposal_graph()`,
   `route_to_approvals(state) -> list[Send]`, `proposal_worker(state) -> dict`
-- **Depended on by:** `sunday/graph.py`, `telegram/polling.py`
+- **Depended on by:** `saturday/graph.py`, `telegram/polling.py`
 
-### `sunday/nodes/write_outputs.py`  _(gutted Parts 1-7)_
-- **What it does:** Empty — logic moved to `sunday/approval_actions.py`. Node removed
-  from `sunday/graph.py`.
+### `saturday/nodes/write_outputs.py`  _(gutted Parts 1-7)_
+- **What it does:** Empty — logic moved to `saturday/approval_actions.py`. Node removed
+  from `saturday/graph.py`.
 - **Depended on by:** nothing (no longer a graph node)
 
-### `sunday/nodes/update_profile.py`  _(simplified Parts 1-7)_
+### `saturday/nodes/update_profile.py`  _(simplified Parts 1-7)_
 - **What it does:** Cost-summing and `data/cost_log.csv` append only. Rejection writes
   and YAML preference update moved to `approval_actions.handle_rejection`. CSV schema
-  change: `rejections` column removed (not knowable at Sunday-run time; rejections now
+  change: `rejections` column removed (not knowable at Saturday-run time; rejections now
   resolve async via polling).
 - **Key exports:** `update_profile(state) -> dict`
-- **Depended on by:** `sunday/graph.py`
+- **Depended on by:** `saturday/graph.py`
 
-### `sunday/nodes/process_adhoc_input.py`  _(added Parts 1-7)_
+### `saturday/nodes/process_adhoc_input.py`  _(added Parts 1-7)_
 - **What it does:** Node function — reads all queued ad-hoc messages from
   `("weekly_intel", "adhoc_queue")`, converts each to a `RawItem` (source `"adhoc_telegram"`,
   url `"adhoc:<key>"`), deletes each key after consuming. Zero-cost node (no LLM calls).
@@ -256,7 +263,7 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   full pipeline (URL dedup → seen_items → semantic dedup → taste
   pre-filter).
 - **Key exports:** `build_discovery_subgraph()`, `route_sources()`, `make_initial_state()`
-- **Depended on by:** `daily/graph.py`, `sunday/graph.py`
+- **Depended on by:** `daily/graph.py`, `saturday/graph.py`
 
 ### `discovery/parsers/bookmarks_json.py`
 - **What it does:** Standalone JSON parser for Twillot bookmark exports.
@@ -275,17 +282,17 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 
 ### `discovery/nodes/score.py`
 - **What it does:** Scores `ClusteredItem`s against taste profile using Claude Haiku.
-  `ALLOWED_TAGS` now includes `course` (added Sunday-plan-LLM-prioritization
+  `ALLOWED_TAGS` now includes `course` (added Saturday-plan-LLM-prioritization
   checkpoint, sub-phase 1) -- a format tag distinct from the pre-existing
   catch-all `learning-resource`: assigned only to structured, multi-lesson
   courses/bootcamps/certifications, not single articles/tutorials/essays.
 - **Key exports:** `score_node(state) -> dict`, `ALLOWED_TAGS`
 - **Depended on by:** `discovery/graph.py`, `discovery/taste_vectors.py` (imports `ALLOWED_TAGS`)
 
-### `sunday/__init__.py`, `sunday/nodes/__init__.py`
+### `saturday/__init__.py`, `saturday/nodes/__init__.py`
 - **What it does:** Empty package markers.
 
-### `sunday/trello_client.py`
+### `saturday/trello_client.py`
 - **What it does:** Pure-stdlib HTTP wrapper for Trello REST API.
   `fetch_board_cards()` only fetches the `Dump` and `In Progress` lists
   (`RELEVANT_LIST_NAMES`) -- the real board has 6 lists total (live-checked
@@ -309,27 +316,27 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **Key exports:** `fetch_board_cards`, `fetch_list_id_to_name_map`,
   `fetch_card_current_state`, `get_dump_list_id`, `create_trello_card`,
   `update_trello_card`
-- **Depended on by:** `sunday/nodes/read_trello.py`, `sunday/approval_actions.py`
+- **Depended on by:** `saturday/nodes/read_trello.py`, `saturday/approval_actions.py`
 
-### `sunday/nodes/read_trello.py`
+### `saturday/nodes/read_trello.py`
 - **What it does:** LangGraph node — calls `fetch_board_cards()`, returns `trello_cards`.
   Also calls `detect_card_movement(state["run_id"])` (sub-phase 4) and returns
   its result as the new `card_movements` state field -- real cross-week
-  movement since the most recent prior Sunday plan, computed before the plan
+  movement since the most recent prior Saturday plan, computed before the plan
   itself is generated (item 4's requirement: "before generating each new
   plan"). `[]` when there's no prior `plan_history` entry to compare
-  against yet (e.g. the very first real Sunday run under this checkpoint).
+  against yet (e.g. the very first real Saturday run under this checkpoint).
 - **Key exports:** `read_trello(state) -> dict`
 
-### `sunday/nodes/correlate_trello.py`
+### `saturday/nodes/correlate_trello.py`
 - **What it does:** LangGraph node — matches scored items against Trello cards via Haiku.
 - **Key exports:** `correlate_trello(state) -> dict`
 
-### `sunday/nodes/classify_item.py`
+### `saturday/nodes/classify_item.py`
 - **What it does:** LangGraph node — classifies items as `plan_item` or `project_proposal`.
 - **Key exports:** `classify_item(state) -> dict`
 
-### `sunday/nodes/prioritize_plan_items.py`  _(new, sub-phase 5)_
+### `saturday/nodes/prioritize_plan_items.py`  _(new, sub-phase 5)_
 - **What it does:** LangGraph node, runs after `classify_item` and before
   `assemble_plan` (parallel to `route_to_approvals`/`proposal_worker` in the
   same fan-out `Send`). One real Haiku call combining this week's matched
@@ -359,9 +366,9 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   -- that's the final sub-phase of this checkpoint ("assemble_plan
   rendering": bounding + priority-order rendering, items 6-7).
 - **Key exports:** `prioritize_plan_items(state) -> dict`, `MAX_PROJECT_WORK_ITEMS`
-- **Depended on by:** `sunday/graph.py`
+- **Depended on by:** `saturday/graph.py`
 
-### `sunday/nodes/assemble_plan.py`
+### `saturday/nodes/assemble_plan.py`
 - **What it does:** `format_plan()` + `assemble_plan` node wrapper. Produces weekly
   plan text with three sections in order: **Reading & Learning** (no `course` tag,
   no `matched_card_id`; unbounded), **Courses** (any plan item tagged `course`,
@@ -386,7 +393,7 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   "surfaced" means "Pooja actually saw it in the plan," which only
   `prioritized_project_work` can answer correctly now that bounding exists.
   **2026-07-19:** the node wrapper now also calls
-  `sunday/carry_forward.py`'s `get_carry_forward_items(run_id)` and merges
+  `saturday/carry_forward.py`'s `get_carry_forward_items(run_id)` and merges
   the result into a LOCAL copy of `classified_items` (never into
   `state["classified_items"]` itself, so `plan_history`/
   `prioritize_plan_items` -- both already run earlier in the graph by this
@@ -438,9 +445,9 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 - **Key exports:** `format_plan(...)`, `assemble_plan(state) -> dict`,
   `MAX_PLAN_TEXT_CHARS`, `REASONING_CHAR_BUDGET`
 
-### `sunday/plan_history.py`  _(new sub-phase 3, schema revised + reader added sub-phase 4)_
+### `saturday/plan_history.py`  _(new sub-phase 3, schema revised + reader added sub-phase 4)_
 - **What it does:** `record_plan_history(run_id, cards)` writes one entry per
-  Sunday run to `("weekly_intel", "plan_history")`, keyed by `run_id`, recording
+  Saturday run to `("weekly_intel", "plan_history")`, keyed by `run_id`, recording
   which real Trello cards got surfaced as Existing Project Work plan items that
   week. **Schema revised in sub-phase 4:** each entry is now `{"run_id", "cards":
   [{"card_id", "list_name"}, ...], "generated_at"}` -- originally (sub-phase 3)
@@ -457,9 +464,9 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   `discovery/seen_items.py`'s `mark_seen()` already makes.
 - **Key exports:** `record_plan_history(run_id, cards) -> None`,
   `get_most_recent_prior_entry(current_run_id) -> dict | None`
-- **Depended on by:** `sunday/nodes/assemble_plan.py` (writes), `sunday/card_movement.py` (reads)
+- **Depended on by:** `saturday/nodes/assemble_plan.py` (writes), `saturday/card_movement.py` (reads)
 
-### `sunday/card_movement.py`  _(new, sub-phase 4)_
+### `saturday/card_movement.py`  _(new, sub-phase 4)_
 - **What it does:** `detect_card_movement(run_id)` -- real cross-week Trello card
   movement, ground truth from Trello's actual API state, not a self-reported flag.
   Looks up the most recent prior `plan_history` entry; for each card in it, fetches
@@ -474,9 +481,9 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   purely a deterministic comparison against real API state; the LLM node that
   will consume this signal is sub-phase 5, not this one.
 - **Key exports:** `detect_card_movement(run_id) -> list[dict]`
-- **Depended on by:** `sunday/nodes/read_trello.py`
+- **Depended on by:** `saturday/nodes/read_trello.py`
 
-### `sunday/carry_forward.py`  _(new, 2026-07-19)_
+### `saturday/carry_forward.py`  _(new, 2026-07-19)_
 - **What it does:** `get_carry_forward_items(run_id)` -- capped, one-time-only
   carry-forward for unfinished Reading & Learning / Courses items, reading
   `companion_item_completions` (a real Postgres table, NOT a LangGraph store
@@ -484,9 +491,9 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   TIMESTAMPTZ`, written externally by `companion_writer`; this module is
   SELECT-only against it, never INSERT/UPDATE/DELETE). Resolves "last week's
   Reading/Courses items" via `run_history` (most recent `status="success"`,
-  `path="sunday"` entry, excluding the current run) and that run's
+  `path="saturday"` entry, excluding the current run) and that run's
   `digest_item_map` entry, filtered by the `section` field (see
-  `sunday/nodes/assemble_plan.py`'s entry below) to exclude Existing Project
+  `saturday/nodes/assemble_plan.py`'s entry below) to exclude Existing Project
   Work items entirely -- out of scope, Trello-tracked separately. An item
   with `checked=false` OR no completion row at all (never interacted with)
   AND not already in `("weekly_intel","carry_forward_log")` gets carried;
@@ -503,21 +510,21 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   `score_node`'s `mark_seen()` at all, this run or any run -- there is no
   code path connecting this module to either.
 - **Key exports:** `get_carry_forward_items(run_id) -> list[dict]`
-- **Depended on by:** `sunday/nodes/assemble_plan.py`
+- **Depended on by:** `saturday/nodes/assemble_plan.py`
 
-### `sunday/nodes/send_telegram_plan.py`
+### `saturday/nodes/send_telegram_plan.py`
 - **What it does:** Posts `state["plan_text"]` to Telegram.
 - **Key exports:** `send_telegram_plan(state) -> dict`
 
-### `sunday/graph.py`  _(updated Parts 1-7; sub-phase 5)_
-- **What it does:** Builds and compiles the Sunday parent graph. `write_outputs` node
+### `saturday/graph.py`  _(updated Parts 1-7; sub-phase 5)_
+- **What it does:** Builds and compiles the Saturday parent graph. `write_outputs` node
   removed — `proposal_worker` edges directly to `update_profile`. Sub-phase 5:
   `_fan_out_after_classify` now sends to `"prioritize_plan_items"` instead of
   directly to `"assemble_plan"`; a new edge `prioritize_plan_items -> assemble_plan`
   keeps the rest of the topology (including the parallel `route_to_approvals`/
   `proposal_worker` branch) unchanged.
-- **Key exports:** `build_sunday_graph() -> CompiledStateGraph`
-- **Depended on by:** `scripts/run_sunday.py`
+- **Key exports:** `build_saturday_graph() -> CompiledStateGraph`
+- **Depended on by:** `scripts/run_saturday.py`
 
 ### `telegram/__init__.py`
 - **What it does:** Empty package marker.
@@ -527,7 +534,7 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
   `parse_mode` changed from legacy v1 `"Markdown"` to `"HTML"` -- root-caused a
   real `send_telegram_plan` 400 (full investigation in the dated entry below).
   `parse_mode=None` omits the key entirely, sending plain unformatted text (used
-  by `sunday/approval_actions.py`'s two confirmation messages, which have no
+  by `saturday/approval_actions.py`'s two confirmation messages, which have no
   formatting intent). `urllib.error.HTTPError` is now caught and its real
   response body read and both logged and included in the raised `RuntimeError`
   -- previously this propagated unread, so any failure only ever surfaced the
@@ -539,7 +546,7 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 
 ### `telegram/markdown.py`  _(escape_html added, 2026-07-19)_
 - **What it does:** `escape_markdown_v2` (pre-existing) -- used only where
-  `parse_mode="MarkdownV2"` is passed explicitly (`sunday/nodes/await_approval.py`),
+  `parse_mode="MarkdownV2"` is passed explicitly (`saturday/nodes/await_approval.py`),
   NOT the project's default. `escape_html` (new) -- `&`/`<`/`>` escaping for
   Telegram's HTML parse mode, `&` replaced first to avoid double-escaping the
   `&` introduced by escaping `<`/`>`. Used by `assemble_plan.py`/
@@ -571,8 +578,8 @@ State handoff: `DailyGraphState` and `SundayGraphState` share `run_id`, `scored_
 ### `scripts/run_daily.py`
 - **What it does:** Daily run entry point.
 
-### `scripts/run_sunday.py`
-- **What it does:** Sunday run entry point. Prints pending proposals + resume instructions.
+### `scripts/run_saturday.py`
+- **What it does:** Saturday run entry point. Prints pending proposals + resume instructions.
 
 ## Current state of the graph
 
@@ -594,7 +601,7 @@ conditional entry point (`set_conditional_entry_point`), so both
 `scrape_blogs` and `process_adhoc_input` show as reachable from
 `__start__` in the compiled graph shape -- which one actually fires for a
 given invocation is decided at runtime by `state["source_context"]`
-("daily" -> `scrape_blogs` only; "sunday" -> both), not by two separate
+("daily" -> `scrape_blogs` only; "saturday" -> both), not by two separate
 compiled graphs:
 
 ```mermaid
@@ -613,9 +620,9 @@ graph TD
     score --> __end__
 ```
 
-**Sunday parent graph** (Parts 1-7 — `write_outputs` removed, `proposal_worker` → `update_profile` directly;
+**Saturday parent graph** (Parts 1-7 — `write_outputs` removed, `proposal_worker` → `update_profile` directly;
 sub-phase 5 inserts `prioritize_plan_items` into the fan-out, between `classify_item` and `assemble_plan`).
-Re-verified against the real compiled graph 2026-07-18 (`build_sunday_graph().get_graph().draw_mermaid()`):
+Re-verified against the real compiled graph 2026-07-18 (`build_saturday_graph().get_graph().draw_mermaid()`):
 `draw_mermaid()` cannot resolve the `Send()`-based dynamic fan-out from `classify_item` at all (confirmed
 live -- the raw generated output only shows `classify_item --> __end__` as a placeholder for that edge, same
 real limitation the pre-sub-phase-5 version of this diagram already had to annotate manually). Every other
@@ -663,38 +670,40 @@ actual code, not assumed from the spec's prior draft).
 | Namespace | Shape | Written by | Read by |
 |---|---|---|---|
 | `polling_state` | `{value: int}` (update_offset) | `telegram/polling.py` | `telegram/polling.py` |
-| `pending_resume_map` | `{thread_id, proposal_id, run_id}` | `sunday/nodes/await_approval.py` | `telegram/polling.py` |
-| `adhoc_queue` | `{text, queued_at}` | `telegram/polling.py` | `sunday/nodes/process_adhoc_input.py` |
-| `digest_item_map` | `{run_id, items: {number: {url,title,tags,reasoning,section}}}` -- `section` (`"reading"`\|`"courses"`\|`"existing_project_work"`) added 2026-07-19, Sunday-plan entries only (daily digest entries don't set it) | `daily/nodes/send_telegram_digest.py`, `sunday/nodes/send_telegram_plan.py` | `telegram/feedback_router.py`, `sunday/carry_forward.py` (`_load_prior_reading_and_course_items`) |
-| `feedback_events` | `{item_id, feedback_text, replied_at, run_id, tags, title, content_summary, sentiment}` | `sunday/approval_actions.py` (`handle_feedback`) | `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) |
+| `pending_resume_map` | `{thread_id, proposal_id, run_id}` | `saturday/nodes/await_approval.py` | `telegram/polling.py` |
+| `adhoc_queue` | `{text, queued_at}` | `telegram/polling.py` | `saturday/nodes/process_adhoc_input.py` |
+| `digest_item_map` | `{run_id, items: {number: {url,title,tags,reasoning,section}}}` -- `section` (`"reading"`\|`"courses"`\|`"existing_project_work"`) added 2026-07-19, Saturday-plan entries only (daily digest entries don't set it) | `daily/nodes/send_telegram_digest.py`, `saturday/nodes/send_telegram_plan.py` | `telegram/feedback_router.py`, `saturday/carry_forward.py` (`_load_prior_reading_and_course_items`) |
+| `feedback_events` | `{item_id, feedback_text, replied_at, run_id, tags, title, content_summary, sentiment}` | `saturday/approval_actions.py` (`handle_feedback`) | `saturday/nodes/update_profile.py` (Saturday consolidated rewrite) |
 | `seen_items` | `{seen: true, seen_at}` (rolling 35-day expiry, 2026-07-18) | `discovery/seen_items.py` (`mark_seen`) | `discovery/seen_items.py` (`filter_unseen`, also runs `_expire_stale_entries`) |
 | `recent_item_embeddings` | `{item_id, url, embedding_vector, fetched_at, scored_at}` -- `embedding_vector` is 2048-dim as of the 2026-07-19 NVIDIA swap (was 384-dim; the namespace was cleared, not migrated, at swap time -- see "Embedding provider: NVIDIA NIM swap" below) | `discovery/semantic_dedup.py` | `discovery/semantic_dedup.py` |
 | `taste_topic_vectors` | `{tag, embedding_vector, updated_at}` -- same 2026-07-19 dimension change/clear, then immediately re-populated with real 2048-dim vectors from the real `data/taste_profile.yaml` content (not left empty) | `discovery/taste_vectors.py` (`recompute_topic_vectors`) | `discovery/taste_vectors.py` (`taste_prefilter`) |
 | `prefilter_drops` | `{item_id, filter_type: "dedup"\|"taste", similarity_score, compared_against_item_id, compared_against_tag, run_id}` | `discovery/semantic_dedup.py`, `discovery/taste_vectors.py` | audit log only -- no reader yet |
-| `same_day_adjustments` | `{tag, cumulative_adjustment, item_ids_contributing, week_of}` | `sunday/same_day_nudge.py` | `sunday/nodes/update_profile.py` (cleared weekly; not yet consumed to influence live scoring/pre-filter comparisons -- spec Section 7 scopes this namespace's build to storage/computation/clearing only, no consumer described) |
+| `same_day_adjustments` | `{tag, cumulative_adjustment, item_ids_contributing, week_of}` | `saturday/same_day_nudge.py` | `saturday/nodes/update_profile.py` (cleared weekly; not yet consumed to influence live scoring/pre-filter comparisons -- spec Section 7 scopes this namespace's build to storage/computation/clearing only, no consumer described) |
 | `rejection_events` | **KNOWN-DEAD** -- orphaned, no schema in production use | `scripts/test_update_profile_rejections.py` only (manual test script) | none in production |
-| `classification_log` | `{item_id, decision: "plan_item"\|"project_proposal", proposal_type, run_id}` | `sunday/nodes/classify_item.py` (every item, not just proposals) | future eval work (`classify_item` eval, not yet built) |
-| `approval_log` | `{item_id, outcome: "approved"\|"rejected", run_id}` | `sunday/approval_actions.py` (`handle_approval`, `handle_rejection`) | future eval work (`classify_item` eval, not yet built) |
+| `classification_log` | `{item_id, decision: "plan_item"\|"project_proposal", proposal_type, run_id}` | `saturday/nodes/classify_item.py` (every item, not just proposals) | future eval work (`classify_item` eval, not yet built) |
+| `approval_log` | `{item_id, outcome: "approved"\|"rejected", run_id}` | `saturday/approval_actions.py` (`handle_approval`, `handle_rejection`) | future eval work (`classify_item` eval, not yet built) |
 | `node_summary` | `{run_id, node_name, items_in, items_out, dropped, cost_usd, duration_seconds, langsmith_url, error_summary}` | `core/observability.py` (`record_node_summary`, called from `cluster_dedupe_node`, `scrape_blogs`, `score_node`, `correlate_trello`, `classify_item`) | manual query -- durable per-node aggregate + LangSmith pointer, no automated reader yet |
-| `run_history` | `{run_id, path, started_at, finished_at, status: "in_progress"\|"success"\|"failed"\|"paused", total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `core/observability.py` (`record_run_started` writes the initial `in_progress` marker; `record_run_history` overwrites the same key with the final outcome -- called from `run_daily.py`/`run_sunday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet. A record stuck at `status="in_progress"` with no overwrite means the run never finished (crashed harder than a Python exception could catch) |
-| `plan_history` | `{run_id, cards: [{card_id, list_name}, ...], generated_at}` (one entry per Sunday run, keyed by `run_id`, never overwritten; schema revised sub-phase 4 -- was bare `card_ids: list[str]` in sub-phase 3) | `sunday/plan_history.py` (`record_plan_history`, called from `sunday/nodes/assemble_plan.py`) | `sunday/plan_history.py` (`get_most_recent_prior_entry`, called from `sunday/card_movement.py`, called from `sunday/nodes/read_trello.py`) |
-| `carry_forward_log` | `{url, carried_in_run_id, carried_at}` (one entry per url, EVER -- keyed by url, never overwritten, never expired) | `sunday/carry_forward.py` (`_log_carried`, called from `get_carry_forward_items`) | `sunday/carry_forward.py` (`_already_carried`, same module) -- a url's mere presence here means it was already given its one carry-forward chance, regardless of outcome |
+| `run_history` | `{run_id, path, started_at, finished_at, status: "in_progress"\|"success"\|"failed"\|"paused", total_cost_usd, items_in, items_out, duration_seconds, error_summary}` | `core/observability.py` (`record_run_started` writes the initial `in_progress` marker; `record_run_history` overwrites the same key with the final outcome -- called from `run_daily.py`/`run_saturday.py`/`run_poll.py`) | manual query -- durable per-run record, no automated reader yet. A record stuck at `status="in_progress"` with no overwrite means the run never finished (crashed harder than a Python exception could catch) |
+| `plan_history` | `{run_id, cards: [{card_id, list_name}, ...], generated_at}` (one entry per Saturday run, keyed by `run_id`, never overwritten; schema revised sub-phase 4 -- was bare `card_ids: list[str]` in sub-phase 3) | `saturday/plan_history.py` (`record_plan_history`, called from `saturday/nodes/assemble_plan.py`) | `saturday/plan_history.py` (`get_most_recent_prior_entry`, called from `saturday/card_movement.py`, called from `saturday/nodes/read_trello.py`) |
+| `carry_forward_log` | `{url, carried_in_run_id, carried_at}` (one entry per url, EVER -- keyed by url, never overwritten, never expired) | `saturday/carry_forward.py` (`_log_carried`, called from `get_carry_forward_items`) | `saturday/carry_forward.py` (`_already_carried`, same module) -- a url's mere presence here means it was already given its one carry-forward chance, regardless of outcome |
 
-**Not a `weekly_intel` store namespace -- a real, separate Postgres table**, same `DB_URI` database: `companion_item_completions` (`url TEXT PK, checked BOOLEAN, run_id TEXT, updated_at TIMESTAMPTZ`), written externally by `companion_writer` (a separate app, not part of this repo). `sunday/carry_forward.py` is SELECT-only against it -- confirmed present and matching this exact schema via a live `information_schema.columns` query, 2026-07-19, before any code was written against it.
+**Not a `weekly_intel` store namespace -- a real, separate Postgres table**, same `DB_URI` database: `companion_item_completions` (`url TEXT PK, checked BOOLEAN, run_id TEXT, updated_at TIMESTAMPTZ`), written externally by `companion_writer` (a separate app, not part of this repo). `saturday/carry_forward.py` is SELECT-only against it -- confirmed present and matching this exact schema via a live `information_schema.columns` query, 2026-07-19, before any code was written against it.
 
 ## What does NOT exist yet
 
 - **Taste profile in LangMem** — currently a plain YAML file, read/written by
-  `sunday/nodes/update_profile.py` (Sunday consolidated rewrite) and
-  `sunday/approval_actions.py` (log-only as of Checkpoint 5).
+  `saturday/nodes/update_profile.py` (Saturday consolidated rewrite) and
+  `saturday/approval_actions.py` (log-only as of Checkpoint 5).
 - Numeric score field on `ScoredItem`, tag feedback loop — deferred.
 - **`resume-live-check`** (Checkpoint 3) — a real Telegram approve/reject
-  round-trip against a real paused Sunday proposal, confirming `poll.yml`'s
+  round-trip against a real paused Saturday proposal, confirming `poll.yml`'s
   next run actually resumes the graph and writes the correct Trello outcome.
   Human-only per `feature_list.json` — Claude Code must not and did not mark
   this passing.
 - **None.** The Sunday plan LLM prioritization checkpoint (all 7 items /
-  5 sub-phases) is complete as of 2026-07-19. See
+  5 sub-phases) is complete as of 2026-07-19 -- named for what the weekly
+  pipeline was called at the time; see the schedule-timing-and-rename
+  checkpoint (below) for why it's since been renamed to Saturday. See
   [Sunday plan LLM prioritization checkpoint](workflow/sunday-plan-rewrite.md)
   for what was built and what real evidence backs each piece.
 
@@ -728,3 +737,9 @@ grown to 201KB/3300 lines -- nothing was deleted, only moved:
   (2026-07-19) — the NVIDIA NIM embedding provider swap, capped
   carry-forward for unfinished items, the real send_telegram_plan 400
   root-cause fix, and the length-budget follow-up
+- [Schedule timing fix + Sunday → Saturday rename](workflow/schedule-timing-and-rename.md)
+  (2026-07-26) — two gated phases: retargeted daily/weekly cron schedules
+  to compensate for observed GitHub Actions scheduling lag (moving the
+  weekly pipeline from Sunday-trigger to Friday-trigger/Saturday-delivery),
+  then a comprehensive rename of `sunday/` → `saturday/` and every
+  reference to it throughout the codebase to match

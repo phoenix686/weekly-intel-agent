@@ -51,7 +51,7 @@ from discovery.embeddings import (
     embed_texts, cosine_similarity, COST_PER_TOKEN_USD,
     MAX_EMBED_CHARS as _MAX_EMBED_CHARS, record_embedding_failure,
 )
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 from core.state import ClusteredItem, NodeCost
 
 logger = logging.getLogger(__name__)

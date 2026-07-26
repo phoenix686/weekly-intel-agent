@@ -18,7 +18,7 @@ from discovery.parsers.tldr_ai import ParseResult as TldrParseResult
 
 
 def test_feed_url_entry_passes_its_own_fetch_limit():
-    entry = {"name": "Test Feed", "feed_url": "https://example.com/feed", "bucket": "sunday", "fetch_limit": 6}
+    entry = {"name": "Test Feed", "feed_url": "https://example.com/feed", "bucket": "saturday", "fetch_limit": 6}
 
     with patch("discovery.parsers.scrape_blogs.fetch_rss_feed", return_value=RssParseResult(rows=[])) as mock_fetch:
         fetch_one_source(entry)
@@ -63,7 +63,7 @@ def test_real_blog_sources_yaml_tldr_ai_is_marked_roundup():
 
 
 def test_scrape_url_entry_passes_its_own_fetch_limit():
-    entry = {"name": "Anthropic Engineering Blog", "scrape_url": "https://www.anthropic.com/engineering", "bucket": "sunday", "fetch_limit": 6}
+    entry = {"name": "Anthropic Engineering Blog", "scrape_url": "https://www.anthropic.com/engineering", "bucket": "saturday", "fetch_limit": 6}
 
     with patch("discovery.parsers.scrape_blogs.fetch_anthropic_engineering", return_value=AnthropicParseResult(rows=[])) as mock_fetch:
         fetch_one_source(entry)
@@ -72,7 +72,7 @@ def test_scrape_url_entry_passes_its_own_fetch_limit():
 
 
 def test_scrape_url_entry_without_fetch_limit_falls_back_to_default():
-    entry = {"name": "Anthropic Engineering Blog", "scrape_url": "https://www.anthropic.com/engineering", "bucket": "sunday"}
+    entry = {"name": "Anthropic Engineering Blog", "scrape_url": "https://www.anthropic.com/engineering", "bucket": "saturday"}
 
     with patch("discovery.parsers.scrape_blogs.fetch_anthropic_engineering", return_value=AnthropicParseResult(rows=[])) as mock_fetch:
         fetch_one_source(entry)
@@ -89,20 +89,20 @@ def test_real_blog_sources_yaml_daily_entries_all_have_fetch_limit_15():
         assert entry.get("fetch_limit") == 15, f"{entry['name']!r} expected fetch_limit=15, got {entry.get('fetch_limit')!r}"
 
 
-def test_real_blog_sources_yaml_sunday_only_entries_all_have_fetch_limit_6():
+def test_real_blog_sources_yaml_saturday_only_entries_all_have_fetch_limit_6():
     """Six sources moved off RSS onto the shared AgentMail inbox
     (2026-07-18): JamWithAI, The Nuanced Perspective, AI with Aish, The
     Neural Maze, Decoding AI Magazine, Ahead of AI -- none of them are
     blog_sources.yaml entries anymore (see discovery/config/
     agentmail_sources.yaml, gitignored, and blog_sources.yaml's dated
-    comment). Technically moved from daily to sunday (2026-07-22, weekly
+    comment). Technically moved from daily to saturday (2026-07-22, weekly
     publish cadence doesn't fit a 48h daily cutoff). Hacker News (Show HN)
-    is the one remaining deliberate exception to the sunday-bucket
+    is the one remaining deliberate exception to the saturday-bucket
     default of 6 (fetch_limit=8, higher real volume)."""
     from discovery.blog_sources_config import load_blog_sources
     entries = load_blog_sources()
-    sunday_entries = [e for e in entries if e["bucket"] == "sunday"]
-    assert len(sunday_entries) == 4, f"expected 4 sunday-bucket entries, got {len(sunday_entries)}"
-    for entry in sunday_entries:
+    saturday_entries = [e for e in entries if e["bucket"] == "saturday"]
+    assert len(saturday_entries) == 4, f"expected 4 saturday-bucket entries, got {len(saturday_entries)}"
+    for entry in saturday_entries:
         expected = 8 if entry["name"] == "Hacker News (Show HN)" else 6
         assert entry.get("fetch_limit") == expected, f"{entry['name']!r} expected fetch_limit={expected}, got {entry.get('fetch_limit')!r}"

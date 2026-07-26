@@ -1,10 +1,10 @@
-# sunday/nodes/correlate_trello.py
+# saturday/nodes/correlate_trello.py
 import time
 import json
 import logging
 import anthropic
 
-from core.state import SundayGraphState, NodeCost
+from core.state import SaturdayGraphState, NodeCost
 from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ def _parse_json_response(raw: str) -> list:
     return json.loads(raw.strip())
 
 
-def correlate_trello(state: SundayGraphState) -> dict:
+def correlate_trello(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
 
     kept_items = [i for i in state["scored_items"] if i["keep"]]

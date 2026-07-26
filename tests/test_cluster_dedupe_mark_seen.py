@@ -35,7 +35,7 @@ def _state(raw_items, dry_run=None):
     state = {
         "raw_items": raw_items, "clustered_items": [], "scored_items": [],
         "run_id": "run-1", "costs": [], "errors": [],
-        "source_context": "sunday",
+        "source_context": "saturday",
     }
     if dry_run is not None:
         state["dry_run"] = dry_run

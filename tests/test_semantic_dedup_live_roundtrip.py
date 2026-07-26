@@ -14,7 +14,7 @@ from core.logging_config import setup_logging
 setup_logging()
 
 from discovery.semantic_dedup import dedupe_semantic, _NAMESPACE as _EMB_NAMESPACE, _DROPS_NAMESPACE
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 RUN_ID = "smoke-test-semantic-dedup-live"
 

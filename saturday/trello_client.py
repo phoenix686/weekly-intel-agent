@@ -69,7 +69,7 @@ def fetch_board_cards(board_id: str | None = None) -> list[dict]:
     (ISO 8601 string, e.g. "2026-05-31T12:17:18.243Z") -- already present in
     Trello's default card response, no extra API param needed; live-verified
     2026-07-18 against the real board. Exposed for downstream staleness/
-    cross-week movement use (Sunday plan LLM prioritization checkpoint,
+    cross-week movement use (Saturday plan LLM prioritization checkpoint,
     sub-phase 2) -- not read by correlate_trello today.
     """
     board_id = board_id or os.environ["TRELLO_BOARD_ID"]
@@ -105,7 +105,7 @@ def fetch_list_id_to_name_map(board_id: str | None = None) -> dict[str, str]:
     """Return {list_id: list_name} for EVERY open list on the board, not just
     RELEVANT_LIST_NAMES -- includes "Done" and any other list a card might
     have moved to since it was last surfaced. Used by cross-week movement
-    detection (Sunday plan LLM prioritization checkpoint, sub-phase 4) to
+    detection (Saturday plan LLM prioritization checkpoint, sub-phase 4) to
     resolve a card's current idList to a human-readable name; fetch_board_cards()
     itself deliberately still only fetches Dump/In Progress cards -- Done-list
     cards should never enter correlate_trello's matching pool.

@@ -1,5 +1,5 @@
 """
-sunday/plan_history.py -- Sunday plan LLM prioritization checkpoint,
+saturday/plan_history.py -- Saturday plan LLM prioritization checkpoint,
 sub-phase 3 (record_plan_history), schema revised + get_most_recent_prior_entry
 added in sub-phase 4. Covers: one entry per run_id, duplicate card_ids
 collapsed (keeping first list_name), real fields written, and finding the
@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch
 
-from sunday.plan_history import record_plan_history, get_most_recent_prior_entry
+from saturday.plan_history import record_plan_history, get_most_recent_prior_entry
 
 
 class _Item:
@@ -40,7 +40,7 @@ def _card(card_id, list_name="In Progress"):
 
 def test_writes_one_entry_keyed_by_run_id():
     fake_store = _FakeStore()
-    with patch("sunday.plan_history.get_store", return_value=fake_store):
+    with patch("saturday.plan_history.get_store", return_value=fake_store):
         record_plan_history("run-1", [_card("card1"), _card("card2", "Dump")])
 
     assert len(fake_store.put_calls) == 1
@@ -57,7 +57,7 @@ def test_writes_one_entry_keyed_by_run_id():
 
 def test_duplicate_card_ids_collapsed_keeping_first_list_name():
     fake_store = _FakeStore()
-    with patch("sunday.plan_history.get_store", return_value=fake_store):
+    with patch("saturday.plan_history.get_store", return_value=fake_store):
         record_plan_history("run-1", [_card("card1", "In Progress"), _card("card1", "Done")])
 
     _, _, value = fake_store.put_calls[0]
@@ -68,7 +68,7 @@ def test_empty_cards_still_records_an_entry():
     """A week with zero surfaced project cards is real data (distinct
     from no record at all), not skipped."""
     fake_store = _FakeStore()
-    with patch("sunday.plan_history.get_store", return_value=fake_store):
+    with patch("saturday.plan_history.get_store", return_value=fake_store):
         record_plan_history("run-1", [])
 
     assert len(fake_store.put_calls) == 1
@@ -78,7 +78,7 @@ def test_empty_cards_still_records_an_entry():
 
 def test_cards_sorted_by_card_id_for_deterministic_output():
     fake_store = _FakeStore()
-    with patch("sunday.plan_history.get_store", return_value=fake_store):
+    with patch("saturday.plan_history.get_store", return_value=fake_store):
         record_plan_history("run-1", [_card("cardZ"), _card("cardA")])
 
     _, _, value = fake_store.put_calls[0]
@@ -89,7 +89,7 @@ def test_cards_sorted_by_card_id_for_deterministic_output():
 
 def test_returns_none_when_no_entries_exist():
     fake_store = _FakeStore(seed=[])
-    with patch("sunday.plan_history.get_store", return_value=fake_store):
+    with patch("saturday.plan_history.get_store", return_value=fake_store):
         result = get_most_recent_prior_entry(current_run_id="run-2")
 
     assert result is None
@@ -100,7 +100,7 @@ def test_returns_latest_entry_by_generated_at():
         {"run_id": "run-1", "cards": [_card("card1")], "generated_at": "2026-07-05T00:00:00+00:00"},
         {"run_id": "run-2", "cards": [_card("card2")], "generated_at": "2026-07-12T00:00:00+00:00"},
     ])
-    with patch("sunday.plan_history.get_store", return_value=fake_store):
+    with patch("saturday.plan_history.get_store", return_value=fake_store):
         result = get_most_recent_prior_entry(current_run_id="run-3")
 
     assert result["run_id"] == "run-2"
@@ -113,7 +113,7 @@ def test_excludes_current_run_id():
         {"run_id": "run-1", "cards": [_card("card1")], "generated_at": "2026-07-05T00:00:00+00:00"},
         {"run_id": "run-2", "cards": [_card("card2")], "generated_at": "2026-07-19T00:00:00+00:00"},
     ])
-    with patch("sunday.plan_history.get_store", return_value=fake_store):
+    with patch("saturday.plan_history.get_store", return_value=fake_store):
         result = get_most_recent_prior_entry(current_run_id="run-2")
 
     assert result["run_id"] == "run-1"

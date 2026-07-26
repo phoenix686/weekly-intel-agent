@@ -21,8 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-from sunday.nodes.await_approval import proposal_worker, thread_id_for
-from sunday.memory_store_config import get_store
+from saturday.nodes.await_approval import proposal_worker, thread_id_for
+from saturday.memory_store_config import get_store
 
 TEST_MESSAGE_ID = 900000001
 TEST_PROPOSAL_ID = "https://example.com/pending-resume-map-roundtrip-test"
@@ -47,7 +47,7 @@ def test_pending_resume_map_roundtrip() -> bool:
     fake_child = MagicMock()
     fake_child.invoke.return_value = {"message_id": TEST_MESSAGE_ID}
 
-    with patch("sunday.nodes.await_approval.get_proposal_graph", return_value=fake_child):
+    with patch("saturday.nodes.await_approval.get_proposal_graph", return_value=fake_child):
         proposal_worker(state)
 
     store = get_store()

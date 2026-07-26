@@ -56,7 +56,7 @@ def test_max_age_hours_drops_items_older_than_cutoff():
         ("Stale Post", "stale-post", _date_str(30)),
     ])
     with patch("urllib.request.urlopen", return_value=_mock_response(html)):
-        result = fetch_anthropic_engineering(max_age_hours=216)  # 9 days, real sunday-bucket value
+        result = fetch_anthropic_engineering(max_age_hours=216)  # 9 days, real saturday-bucket value
 
     titles = [r["title"] for r in result.rows]
     assert titles == ["Fresh Post"]
@@ -89,9 +89,9 @@ def test_missing_date_always_kept_even_with_cutoff():
     assert result.rows[0]["title"] == "No Date Post"
 
 
-def test_dormant_source_yields_zero_rows_under_real_sunday_cutoff():
+def test_dormant_source_yields_zero_rows_under_real_saturday_cutoff():
     """Direct regression test for the real bug: a source that's been
-    dormant well past the 216h (9-day) sunday-bucket window must yield
+    dormant well past the 216h (9-day) saturday-bucket window must yield
     zero rows, not silently re-serve its unchanging top-N listing every
     week."""
     html = _listing_html([

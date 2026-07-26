@@ -1,5 +1,5 @@
 """
-Real-store smoke test for sunday/same_day_nudge.py, same pattern as
+Real-store smoke test for saturday/same_day_nudge.py, same pattern as
 scripts/test_pending_resume_map_roundtrip.py: no embedding dependency at
 all (same_day_nudge only calls Haiku), so this has never needed an
 embedding provider to verify. Writes real data
@@ -14,8 +14,8 @@ load_dotenv()
 from core.logging_config import setup_logging
 setup_logging()
 
-from sunday.same_day_nudge import apply_nudge, _NAMESPACE, _week_key
-from sunday.memory_store_config import get_store
+from saturday.same_day_nudge import apply_nudge, _NAMESPACE, _week_key
+from saturday.memory_store_config import get_store
 from datetime import datetime, timezone
 
 TEST_TAG = "smoke-test-same-day-nudge-tag"

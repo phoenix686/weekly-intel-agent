@@ -21,8 +21,8 @@ import logging
 
 import anthropic
 
-from sunday.approval_actions import handle_feedback as apply_feedback
-from sunday.memory_store_config import get_store
+from saturday.approval_actions import handle_feedback as apply_feedback
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 

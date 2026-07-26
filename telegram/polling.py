@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 
 from langgraph.types import Command
 
-from sunday.nodes.await_approval import get_proposal_graph
-from sunday.approval_actions import handle_approval, handle_rejection
-from sunday.memory_store_config import get_store
+from saturday.nodes.await_approval import get_proposal_graph
+from saturday.approval_actions import handle_approval, handle_rejection
+from saturday.memory_store_config import get_store
 import telegram.feedback_router as feedback_router
 
 logger = logging.getLogger(__name__)

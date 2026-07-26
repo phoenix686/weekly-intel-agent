@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 from unittest.mock import patch, MagicMock
 
-import sunday.nodes.classify_item as classify_item_mod
-from sunday.nodes.classify_item import classify_item, _CLASSIFICATION_LOG_NAMESPACE
+import saturday.nodes.classify_item as classify_item_mod
+from saturday.nodes.classify_item import classify_item, _CLASSIFICATION_LOG_NAMESPACE
 
 
 class _FakeStore:
@@ -41,7 +41,7 @@ def _state(correlated_items):
         "run_id": "run-classify-1",
         "scored_items": [], "trello_cards": [], "correlated_items": correlated_items,
         "classified_items": [], "plan_text": "", "plan_item_map": {}, "pending_approvals": [],
-        "pending_resumes": [], "costs": [], "errors": [], "source_context": "sunday",
+        "pending_resumes": [], "costs": [], "errors": [], "source_context": "saturday",
     }
 
 

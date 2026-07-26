@@ -7,7 +7,7 @@ from langgraph.types import interrupt, Send
 from telegram.bot_client import send_message
 from telegram.markdown import escape_markdown_v2
 from core.checkpointer_config import get_checkpointer
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 
 class ProposalState(TypedDict):

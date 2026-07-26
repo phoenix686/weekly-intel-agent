@@ -79,7 +79,7 @@ Real, live-verified 2026-07-19 against the actual endpoint (not assumed):
 Shared by semantic dedup (discovery/semantic_dedup.py), the
 taste-similarity pre-filter (discovery/taste_vectors.py), and topic-vector
 recompute (discovery/taste_vectors.recompute_topic_vectors, called from
-sunday/nodes/update_profile.py's Sunday consolidated rewrite). Interface
+saturday/nodes/update_profile.py's Saturday consolidated rewrite). Interface
 (embed_text, embed_texts, cosine_similarity, COST_PER_TOKEN_USD)
 unchanged from the local-model version -- confirmed isolated swap, same
 as the prior provider transitions this module has already been through.
@@ -99,7 +99,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 

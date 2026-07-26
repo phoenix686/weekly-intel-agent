@@ -20,18 +20,18 @@ Run once to trigger the pause. Run again (same file) to resume — the
 script detects an existing paused thread and skips straight to the
 resume step instead of re-triggering everything from scratch.
 
-Run: uv run --env-file .env python tests/test_sunday_approval.py
+Run: uv run --env-file .env python tests/test_saturday_approval.py
 """
 
 import json
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send, Command
 from core.checkpointer_config import get_checkpointer
-from sunday.nodes.await_approval import route_to_approvals, proposal_worker
-from core.state import make_sunday_initial_state
-from sunday.nodes.read_trello import read_trello
-from sunday.nodes.correlate_trello import correlate_trello
-from sunday.nodes.classify_item import classify_item
+from saturday.nodes.await_approval import route_to_approvals, proposal_worker
+from core.state import make_saturday_initial_state
+from saturday.nodes.read_trello import read_trello
+from saturday.nodes.correlate_trello import correlate_trello
+from saturday.nodes.classify_item import classify_item
 
 THREAD_ID = "test-approval-run-1"
 config = {"configurable": {"thread_id": THREAD_ID}}
@@ -64,7 +64,7 @@ else:
     with open("data/scored_items_synthetic.json", encoding="utf-8") as f:
         synthetic_items = json.load(f)
 
-    state = make_sunday_initial_state(run_id="test-approval-1")
+    state = make_saturday_initial_state(run_id="test-approval-1")
     state["scored_items"] = synthetic_items
     state.update(read_trello(state))
     state.update(correlate_trello(state))

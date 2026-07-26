@@ -1,7 +1,7 @@
 """
-sunday/carry_forward.py -- new module. Covers the eligibility logic
+saturday/carry_forward.py -- new module. Covers the eligibility logic
 (unchecked-or-no-row AND not-already-carried -> carry; checked=true ->
-never carry; already-carried -> never carry twice), the prior-Sunday-run
+never carry; already-carried -> never carry twice), the prior-Saturday-run
 lookup, and the section filter that excludes Existing Project Work
 items. get_store()/get_connection_pool() both mocked so this stays
 fully offline -- no real DB/store call.
@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, MagicMock
 
-import sunday.carry_forward as carry_forward_mod
-from sunday.carry_forward import get_carry_forward_items
+import saturday.carry_forward as carry_forward_mod
+from saturday.carry_forward import get_carry_forward_items
 
 
 class _Item:
@@ -39,7 +39,7 @@ class _FakeStore:
         self._data.setdefault(namespace, []).append(value)
 
 
-def _run_history_entry(run_id, path="sunday", status="success", finished_at="2026-07-12T00:00:00+00:00"):
+def _run_history_entry(run_id, path="saturday", status="success", finished_at="2026-07-12T00:00:00+00:00"):
     return {"run_id": run_id, "path": path, "status": status, "finished_at": finished_at}
 
 
@@ -94,7 +94,7 @@ def _mock_db(rows):
     return patch.object(carry_forward_mod, "get_connection_pool", return_value=_FakePool(rows))
 
 
-def test_no_prior_sunday_run_returns_empty():
+def test_no_prior_saturday_run_returns_empty():
     fake_store = _FakeStore(run_history=[])
     with patch.object(carry_forward_mod, "get_store", return_value=fake_store):
         result = get_carry_forward_items("run-current")
@@ -210,7 +210,7 @@ def test_carried_item_logged_to_carry_forward_log():
     assert value["carried_in_run_id"] == "run-current"
 
 
-def test_picks_most_recent_of_multiple_prior_sunday_runs():
+def test_picks_most_recent_of_multiple_prior_saturday_runs():
     fake_store = _FakeStore(
         run_history=[
             _run_history_entry("run-old", finished_at="2026-07-05T00:00:00+00:00"),
@@ -226,7 +226,7 @@ def test_picks_most_recent_of_multiple_prior_sunday_runs():
     assert [r["url"] for r in result] == ["https://new.com/1"]
 
 
-def test_ignores_non_sunday_run_history_entries():
+def test_ignores_non_saturday_run_history_entries():
     fake_store = _FakeStore(
         run_history=[_run_history_entry("run-daily", path="daily")],
         digest_item_map=[_digest_entry("run-daily", {1: _reading_item("https://a.com/1")})],

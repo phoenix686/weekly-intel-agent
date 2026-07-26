@@ -18,8 +18,8 @@ load_dotenv()
 from core.logging_config import setup_logging
 setup_logging()
 
-from sunday.graph import build_sunday_graph
-from core.state import make_sunday_initial_state
+from saturday.graph import build_saturday_graph
+from core.state import make_saturday_initial_state
 from core.checkpointer_config import DEFAULT_RECURSION_LIMIT
 from core.observability import record_run_started, record_run_history
 
@@ -33,16 +33,16 @@ t0 = time.perf_counter()
 # cancelling on timeout-minutes, the exact real failure mode this is for)
 # may never let the finally block below run at all. See
 # core/observability.py's module docstring.
-record_run_started(path="sunday", run_id=run_id, started_at=started_at.isoformat())
+record_run_started(path="saturday", run_id=run_id, started_at=started_at.isoformat())
 
 config = {
     "configurable": {"thread_id": thread_id},
     "recursion_limit": DEFAULT_RECURSION_LIMIT,
 }
 
-graph = build_sunday_graph()
+graph = build_saturday_graph()
 
-print(f"Starting Sunday run {run_id[:8]} (thread_id={thread_id})" + (" [DRY RUN -- mark_seen() disabled]" if dry_run else ""))
+print(f"Starting Saturday run {run_id[:8]} (thread_id={thread_id})" + (" [DRY RUN -- mark_seen() disabled]" if dry_run else ""))
 
 # run_history must still get a real record on a crash, not just a clean
 # finish -- see run_daily.py for the same reasoning. Re-raises so the
@@ -51,7 +51,7 @@ status = "failed"
 final_state = None
 error_summary = None
 try:
-    final_state = graph.invoke(make_sunday_initial_state(run_id=run_id, dry_run=dry_run), config=config)
+    final_state = graph.invoke(make_saturday_initial_state(run_id=run_id, dry_run=dry_run), config=config)
     status = "success"
 except Exception as e:
     error_summary = f"{type(e).__name__}: {e}"
@@ -68,7 +68,7 @@ finally:
         if snapshot.next:
             status = "paused"
     record_run_history(
-        path="sunday",
+        path="saturday",
         run_id=run_id,
         started_at=started_at.isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),

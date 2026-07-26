@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-from sunday.memory_store_config import get_store
+from saturday.memory_store_config import get_store
 
-# Real node execution order for a Sunday run (sunday/graph.py):
+# Real node execution order for a Saturday run (saturday/graph.py):
 # discovery_subgraph (scrape_blogs -> cluster_dedupe -> score_node) ->
 # read_trello -> correlate_trello -> classify_item -> assemble_plan.
 _NODE_ORDER = [
