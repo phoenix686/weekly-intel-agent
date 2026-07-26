@@ -2,20 +2,28 @@ name: Daily Digest
 
 on:
   schedule:
-    # 22:00 UTC = 03:30 IST, every day (2026-07-26 timing fix -- the prior
-    # 01:30 UTC (07:00 IST) trigger was observed actually delivering
-    # around 10:30 IST, a ~3.5h GitHub-side scheduling lag; retargeted
-    # earlier to land close to the real intended 07:00 IST delivery
-    # time). Day-of-week restriction removed per this fix's explicit
-    # spec -- flagged, not silently decided: the removed Mon-Sat/no-
-    # Sunday restriction existed because the weekly pipeline's own
-    # discovery subgraph already covered that one day; once the weekly
-    # pipeline itself moves to a Friday trigger/Saturday delivery
-    # (this same fix's Phase 2), that original rationale would point at
-    # excluding Saturday, not at no exclusion at all. Implemented
-    # exactly as specified for Phase 1; worth revisiting once Phase 2
-    # lands.
-    - cron: "0 22 * * *"
+    # 22:00 UTC = 03:30 IST, every day except Friday (2026-07-26 follow-up
+    # fix). Restores the original intent flagged when the day-of-week
+    # restriction was first dropped: skip the one day the weekly
+    # pipeline's own discovery subgraph already covers -- that used to be
+    # Sunday, but the weekly pipeline (sunday.yml) now fires 23:00 UTC
+    # Friday, delivering 04:30 IST Saturday.
+    #
+    # The exclusion must target the UTC day-of-week whose 22:00 UTC firing
+    # itself lands on IST Saturday -- NOT "Saturday" naively read in UTC
+    # terms, since IST is ahead of UTC and a late-UTC-evening cron rolls
+    # over to the next calendar day in IST. Verified directly (cron
+    # day-of-week convention: 0=Sun..6=Sat), firing this cron on every UTC
+    # weekday and converting each to IST:
+    #   Mon 22:00 UTC -> Tue 03:30 IST   Tue 22:00 UTC -> Wed 03:30 IST
+    #   Wed 22:00 UTC -> Thu 03:30 IST   Thu 22:00 UTC -> Fri 03:30 IST
+    #   Fri 22:00 UTC -> Sat 03:30 IST   <-- same IST day as the weekly
+    #                                        pipeline's Sat 04:30 IST delivery
+    #   Sat 22:00 UTC -> Sun 03:30 IST   Sun 22:00 UTC -> Mon 03:30 IST
+    # Confirms it's UTC-Friday (cron day-of-week 5) that must be excluded
+    # -- a Saturday-UTC firing actually delivers on IST Sunday, not
+    # Saturday, so excluding UTC-Saturday instead would have been wrong.
+    - cron: "0 22 * * 0-4,6"
   workflow_dispatch:
 
 concurrency:
