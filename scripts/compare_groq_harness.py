@@ -91,6 +91,7 @@ def _call_groq_structured(prompt: str, schema_name: str, json_schema: dict) -> t
     response = groq_client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
+        temperature=0,  # pinned to isolate determinism from genuine model disagreement
         response_format={
             "type": "json_schema",
             "json_schema": {"name": schema_name, "strict": True, "schema": json_schema},
