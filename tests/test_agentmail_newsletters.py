@@ -25,6 +25,7 @@ from unittest.mock import patch
 import discovery.parsers.agentmail_newsletters as agentmail_mod
 from discovery.parsers.agentmail_newsletters import (
     fetch_agentmail_newsletters, _extract_article_url, _html_to_text, _match_sender_name,
+    _WELCOME_SUBJECT_PATTERN,
 )
 
 _SENDER_TO_NAME = {
@@ -188,6 +189,107 @@ def test_tier1_before_tier2_when_both_present():
     mock_resolve.assert_not_called()
 
 
+# ── Welcome/onboarding subject-pattern pre-filter (2026-07-26, real bug) ────
+# Real run 08b5d13b: "Welcome to Decoding AI Magazine" had no article of its
+# own, but tier 1 of _extract_article_url found an unrelated /p/ link in its
+# body anyway (a "recommended posts" or evergreen footer link) and it was
+# ingested as real content. These directly regression-test that the
+# welcome/onboarding filter now stops that class of message before
+# extraction ever runs, regardless of what's findable in its body.
+
+def test_welcome_subject_pattern_matches_real_confirmed_subjects():
+    """Every one of these is a real subject seen across two Sunday runs
+    (07-22, 07-26) that should be filtered."""
+    real_subjects = [
+        "Welcome to Decoding AI Magazine \U0001F680",
+        "Welcome to AI Engineering!",
+        "Welcome to the DiamantAI Community! \U0001F48E",
+        "Welcome to The Neural Maze",
+        "Welcome to The Nuanced Perspective",
+        "Welcome to AI with Aish",
+        "Welcome to Jam with AI",
+        "Welcome, we're getting more technical",
+    ]
+    for subject in real_subjects:
+        assert _WELCOME_SUBJECT_PATTERN.search(subject), f"expected a match for {subject!r}"
+
+
+def test_welcome_subject_pattern_is_case_insensitive_and_anchored_to_start():
+    assert _WELCOME_SUBJECT_PATTERN.search("WELCOME TO THE TEAM")
+    assert not _WELCOME_SUBJECT_PATTERN.search("You're welcome to join our next event")
+
+
+def test_welcome_subject_pattern_does_not_match_unrelated_real_subjects():
+    """Real, non-welcome subjects from the same production logs -- must
+    not be caught by this narrower filter (including the known gap,
+    "Thanks for subscribing...", documented on the pattern itself)."""
+    real_subjects = [
+        "Thanks for subscribing to Ahead of AI!",
+        "Coding the KV Cache in LLMs",
+        "What's Harness Engineering?",
+        "Kimi K3 Redraws the Open Frontier, Muse Spark 1.1 Undercuts Competitors",
+    ]
+    for subject in real_subjects:
+        assert not _WELCOME_SUBJECT_PATTERN.search(subject), f"unexpected match for {subject!r}"
+
+
+def test_welcome_subject_message_never_reaches_extraction_even_with_a_real_matchable_url():
+    """Direct regression test for the real bug: a welcome-subject
+    message's body genuinely contains a real, matchable /p/{slug} href
+    (exactly the "Welcome to Decoding AI Magazine" shape) -- must still
+    be skipped entirely, proven by _resolve_redirect/tier-1-2 never being
+    reached at all (mock_extract never called), not just by the final
+    row count."""
+    now = datetime.now(timezone.utc)
+    html = '<a href="https://www.decodingai.com/p/ai-engineering-roadmaps">Read our latest</a>'
+    fake_messages = _FakeMessagesClient(
+        list_items=[_FakeMessageItem("msg-welcome", "Welcome to Decoding AI Magazine \U0001F680")],
+        get_by_id={
+            "msg-welcome": _FakeMessage(
+                "msg-welcome", "Welcome to Decoding AI Magazine \U0001F680", html,
+                "decodingai@substack.com", now,
+            ),
+        },
+    )
+    sender_map = dict(_SENDER_TO_NAME, **{"decodingai@substack.com": "Decoding AI Magazine"})
+
+    with patch.object(agentmail_mod, "AgentMail", return_value=_FakeAgentMailClient(fake_messages)), \
+         patch.object(agentmail_mod, "_extract_article_url") as mock_extract, \
+         patch.dict(os.environ, {"AGENTMAIL_API_KEY": "fake-key-for-test"}):
+        result = fetch_agentmail_newsletters("inbox-123", sender_map, limit=20)
+
+    mock_extract.assert_not_called()
+    assert result.rows == []
+    assert len(result.errors) == 1
+    assert result.errors[0][0] == "Decoding AI Magazine"
+    assert "welcome/onboarding" in result.errors[0][1]
+    assert fake_messages.update_calls == [("inbox-123", "msg-welcome", ["read"], ["unread"])]
+
+
+def test_non_welcome_subject_with_matchable_url_still_extracts_normally():
+    """Sanity check the filter is scoped correctly: a normal (non-welcome)
+    subject with a real matchable URL is completely unaffected -- still
+    reaches extraction and produces a real row."""
+    now = datetime.now(timezone.utc)
+    html = '<a href="https://www.decodingai.com/p/ai-engineering-roadmaps">Read</a>'
+    fake_messages = _FakeMessagesClient(
+        list_items=[_FakeMessageItem("msg-real", "AI Engineering Roadmaps")],
+        get_by_id={
+            "msg-real": _FakeMessage(
+                "msg-real", "AI Engineering Roadmaps", html, "decodingai@substack.com", now,
+            ),
+        },
+    )
+    sender_map = dict(_SENDER_TO_NAME, **{"decodingai@substack.com": "Decoding AI Magazine"})
+
+    with patch.object(agentmail_mod, "AgentMail", return_value=_FakeAgentMailClient(fake_messages)), \
+         patch.dict(os.environ, {"AGENTMAIL_API_KEY": "fake-key-for-test"}):
+        result = fetch_agentmail_newsletters("inbox-123", sender_map, limit=20)
+
+    assert len(result.rows) == 1
+    assert result.rows[0]["url"] == "https://www.decodingai.com/p/ai-engineering-roadmaps"
+
+
 class _FakeMessageItem:
     def __init__(self, message_id, subject):
         self.message_id = message_id
@@ -280,15 +382,23 @@ def test_fetch_agentmail_newsletters_unrecognized_sender_grouped_under_stable_ke
 
 def test_fetch_agentmail_newsletters_confirmed_content_free_grouped_under_real_source_name_and_marked_read():
     """Every href resolves successfully (no resolution error) but none is
-    a /p/ post -- a confirmed content-free email (real welcome message).
-    Step 4 fix (2026-07-22): this case is now marked read, since retrying
-    it next run could never produce a different outcome."""
+    a /p/ post -- a confirmed content-free email. Step 4 fix (2026-07-22):
+    this case is now marked read, since retrying it next run could never
+    produce a different outcome.
+
+    Subject is a real, confirmed production subject (2026-07-26 audit)
+    that does NOT match the welcome/onboarding subject-pattern filter
+    (^welcome) -- "Thanks for subscribing to..." is a real gap that
+    filter deliberately doesn't cover (see _WELCOME_SUBJECT_PATTERN's
+    docstring), so this specific subject is what keeps this test actually
+    exercising the extraction-based content-free path rather than the
+    subject-pattern short-circuit."""
     now = datetime.now(timezone.utc)
     fake_messages = _FakeMessagesClient(
-        list_items=[_FakeMessageItem("msg-3", "Welcome to Ahead of AI!")],
+        list_items=[_FakeMessageItem("msg-3", "Thanks for subscribing to Ahead of AI!")],
         get_by_id={
             "msg-3": _FakeMessage(
-                "msg-3", "Welcome to Ahead of AI!", '<a href="https://email.mg-d0.substack.com/c/tokenX">Subscribe</a>',
+                "msg-3", "Thanks for subscribing to Ahead of AI!", '<a href="https://email.mg-d0.substack.com/c/tokenX">Subscribe</a>',
                 "sebastianraschka@substack.com", now,
             ),
         },
@@ -307,14 +417,19 @@ def test_fetch_agentmail_newsletters_confirmed_content_free_grouped_under_real_s
 
 def test_fetch_agentmail_newsletters_warns_when_confirmed_content_free_body_is_substantial():
     """DiamantAI-shaped fixture (Step 4 WARN tripwire, 2026-07-22): a
-    confirmed content-free welcome email whose real visible body is
-    substantial (well over _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS), like
-    the real DiamantAI welcome email found during the read-only audit --
-    real content about the newsletter's repos/course/books, still no
-    /p/ post link anywhere. Must log a WARNing (visibility only) AND
-    still mark the message read, same as any other confirmed
-    content-free case -- no new extraction path, no behavior change to
-    what gets captured as a row."""
+    real visible body that's substantial (well over
+    _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS), like the real DiamantAI
+    welcome email found during the read-only audit -- real content about
+    the newsletter's repos/course/books, still no /p/ post link anywhere.
+    Must log a WARNing (visibility only) AND still mark the message read.
+
+    Updated 2026-07-26: this real subject ("Welcome to the DiamantAI
+    Community!") now matches the welcome/onboarding subject-pattern
+    filter, so this now exercises THAT branch's own copy of the same
+    WARN tripwire, not the post-extraction one -- confirmed via
+    mock_resolve.assert_not_called(), proving extraction is skipped
+    entirely while the substantial-body visibility net is still
+    preserved."""
     now = datetime.now(timezone.utc)
     substantial_paragraph = (
         "DiamantAI's real newsletter content: deep dives on RAG techniques, "
@@ -339,10 +454,12 @@ def test_fetch_agentmail_newsletters_warns_when_confirmed_content_free_body_is_s
     diamantai_sender_map = dict(_SENDER_TO_NAME, **{"diamantai@substack.com": "DiamantAI"})
 
     with patch.object(agentmail_mod, "AgentMail", return_value=_FakeAgentMailClient(fake_messages)), \
-         patch.object(agentmail_mod, "_resolve_redirect", return_value="https://magazine.example.com/unsubscribe"), \
+         patch.object(agentmail_mod, "_resolve_redirect", return_value="https://magazine.example.com/unsubscribe") as mock_resolve, \
          patch.object(agentmail_mod, "logger") as mock_logger, \
          patch.dict(os.environ, {"AGENTMAIL_API_KEY": "fake-key-for-test"}):
         result = fetch_agentmail_newsletters("inbox-123", diamantai_sender_map, limit=20)
+
+    mock_resolve.assert_not_called()  # welcome-subject filter skips extraction entirely
 
     assert result.rows == []
     mock_logger.warning.assert_called_once()

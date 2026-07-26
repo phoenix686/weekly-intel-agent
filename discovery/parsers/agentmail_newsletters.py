@@ -113,6 +113,14 @@ sender's format shifts. fetch_agentmail_newsletters now logs a WARNing
 exceeds _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS -- visibility only, no new
 extraction/scoring path.
 
+WELCOME/ONBOARDING PRE-FILTER (2026-07-26, real production bug): see
+_WELCOME_SUBJECT_PATTERN's own docstring for the full rationale and real
+subjects that triggered it. Runs before _extract_article_url, once a
+message's real sender is resolved -- a matched message is marked read
+immediately (it's definitionally confirmed content-free, so there's no
+reason to leave it unread for retry the way a genuine transient
+extraction error is) and never reaches extraction at all.
+
 No langgraph imports.
 """
 
@@ -303,6 +311,30 @@ def _visible_body_length(html: str) -> int:
     return len(_html_to_text(cleaned))
 
 
+# WELCOME/ONBOARDING PRE-FILTER (2026-07-26, real production bug): a
+# welcome email has no real article at all -- it shouldn't reach
+# _extract_article_url or scoring/uncategorized-flagging regardless of
+# whether some /p/{slug} link happens to be findable in its body (e.g. a
+# "recommended posts" section or evergreen footer link). Real case: run
+# 08b5d13b's "Welcome to Decoding AI Magazine" email had no article of
+# its own, but tier 1 of _extract_article_url found an unrelated /p/
+# link anyway and it was ingested as real content (see the sibling
+# title-sourcing fix -- that fixed the DISPLAYED title, this stops the
+# email from being extracted/scored at all). Subject-pattern heuristic
+# only (not "sender's first message in thread" -- that would need new
+# persistent per-sender state to track, out of scope here); real
+# subjects confirmed across two Sunday runs (07-22, 07-26) all start
+# with "Welcome": "Welcome to AI Engineering!", "Welcome to the
+# DiamantAI Community!", "Welcome to The Neural Maze", "Welcome to The
+# Nuanced Perspective", "Welcome to AI with Aish", "Welcome to Jam with
+# AI", "Welcome, we're getting more technical" (Technically). NOT
+# covered: "Thanks for subscribing to Ahead of AI!" -- a real
+# confirmed-content-free subject seen in the same logs that doesn't
+# start with "Welcome" at all; flagged, not silently absorbed into this
+# pattern, since broadening it was not part of what was asked.
+_WELCOME_SUBJECT_PATTERN = re.compile(r"^welcome\b", re.IGNORECASE)
+
+
 def _match_sender_name(from_address: str, sender_to_name: dict[str, str]) -> str | None:
     """Matches a message's real from_ header (e.g. 'Jane Doe <jane@pub.
     substack.com>') against the configured sender_to_name map's bare
@@ -371,6 +403,27 @@ def fetch_agentmail_newsletters(
                 continue
 
             html = message.extracted_html or message.html or ""
+
+            if _WELCOME_SUBJECT_PATTERN.search(message.subject or ""):
+                errors.append((source_name, f"{label}: welcome/onboarding email (subject pattern match) -- skipped before extraction, marking read"))
+                # Same substantial-body WARN tripwire as the confirmed-
+                # content-free path below (2026-07-22) -- a welcome email
+                # skipped by subject match is just as capable of having
+                # unexpectedly real content (DiamantAI's real welcome
+                # email is the confirmed example, 3013 chars) as one that
+                # reaches that check via failed extraction; short-
+                # circuiting on subject alone must not silently lose that
+                # existing visibility.
+                body_len = _visible_body_length(html)
+                if body_len > _SUBSTANTIAL_CONTENT_FREE_BODY_CHARS:
+                    logger.warning(
+                        f"agentmail_newsletters: welcome/onboarding email but body is substantial "
+                        f"({body_len} chars) -- sender: {source_name}, subject: {label!r} -- consider reviewing"
+                    )
+                client.inboxes.messages.update(
+                    inbox_id, item.message_id, add_labels=["read"], remove_labels=["unread"]
+                )
+                continue
             article_url, had_transient_error = _extract_article_url(html)
             if not article_url:
                 if had_transient_error:
