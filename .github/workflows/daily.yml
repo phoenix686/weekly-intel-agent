@@ -2,28 +2,29 @@ name: Daily Digest
 
 on:
   schedule:
-    # 22:00 UTC = 03:30 IST, every day except Friday (2026-07-26 follow-up
-    # fix). Restores the original intent flagged when the day-of-week
-    # restriction was first dropped: skip the one day the weekly
-    # pipeline's own discovery subgraph already covers -- that used to be
-    # Saturday, but the weekly pipeline (saturday.yml) now fires 23:00 UTC
-    # Friday, delivering 04:30 IST Saturday.
+    # 05:07 UTC = 10:37 IST, same UTC calendar day -- no day-boundary
+    # crossing (2026-07-28 fix). The prior 22:00 UTC scheme delivered on
+    # the NEXT IST calendar day, which required converting each UTC
+    # weekday to its IST equivalent just to figure out which day to
+    # exclude -- real complexity that turned out to be unnecessary.
+    # Reverted to same-day delivery (matching the pre-2026-07-26 schedule,
+    # just at a different time and off the round hour): 05:07 UTC lands on
+    # the same IST day directly, so excluding Saturday here means exactly
+    # what it says, no UTC/IST offset math needed.
     #
-    # The exclusion must target the UTC day-of-week whose 22:00 UTC firing
-    # itself lands on IST Saturday -- NOT "Saturday" naively read in UTC
-    # terms, since IST is ahead of UTC and a late-UTC-evening cron rolls
-    # over to the next calendar day in IST. Verified directly (cron
-    # day-of-week convention: 0=Sun..6=Sat), firing this cron on every UTC
-    # weekday and converting each to IST:
-    #   Mon 22:00 UTC -> Tue 03:30 IST   Tue 22:00 UTC -> Wed 03:30 IST
-    #   Wed 22:00 UTC -> Thu 03:30 IST   Thu 22:00 UTC -> Fri 03:30 IST
-    #   Fri 22:00 UTC -> Sat 03:30 IST   <-- same IST day as the weekly
-    #                                        pipeline's Sat 04:30 IST delivery
-    #   Sat 22:00 UTC -> Sun 03:30 IST   Sun 22:00 UTC -> Mon 03:30 IST
-    # Confirms it's UTC-Friday (cron day-of-week 5) that must be excluded
-    # -- a Saturday-UTC firing actually delivers on IST Saturday, not
-    # Saturday, so excluding UTC-Saturday instead would have been wrong.
-    - cron: "0 22 * * 0-4,6"
+    # Abandoned 22:00 UTC because two consecutive scheduled runs were
+    # silently missed at that slot (Sunday 2026-07-26 and Monday
+    # 2026-07-27) -- investigation ruled out YAML syntax, branch
+    # placement, workflow Active status, and concurrency/queue issues,
+    # all confirmed clean via gh CLI. Leading suspect: GitHub's documented
+    # tendency to delay/drop scheduled triggers at the start of every
+    # hour under load. 05:07 is deliberately off the round hour.
+    #
+    # Saturday excluded (day-of-week 0-5 = Sun-Fri) for the same original
+    # reason as before: the weekly pipeline's own discovery subgraph
+    # (saturday.yml, 23:00 UTC Friday -> 04:30 IST Saturday) already
+    # covers that day.
+    - cron: "7 5 * * 0-5"
   workflow_dispatch:
 
 concurrency:
