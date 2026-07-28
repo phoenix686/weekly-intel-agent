@@ -2,17 +2,36 @@ name: Saturday Pipeline
 
 on:
   schedule:
-    # 23:00 UTC Friday = 04:30 IST Saturday (2026-07-26 timing fix -- the
-    # prior 05:30 UTC (11:00 IST) Sunday trigger was observed actually
-    # delivering around 1:30 PM IST, a ~2.5h GitHub-side scheduling lag;
-    # retargeted for ~07:00 IST Saturday delivery). Day intentionally
-    # moved from Sunday-trigger/Sunday-delivery to Friday-trigger/
-    # Saturday-delivery as part of this same fix. This workflow's own
-    # filename, sunday/ -> saturday/, run_sunday.py -> run_saturday.py,
-    # and docs were all renamed in a separate, explicitly-confirmed
-    # follow-up commit (Phase 2) once this cron change itself was
-    # verified correct -- this file's rename is part of that same commit.
-    - cron: "0 23 * * 5"
+    # 05:07 UTC Saturday = 10:37 IST Saturday, same UTC calendar day --
+    # no day-boundary crossing (2026-07-28 fix, the same preventive fix
+    # applied to daily.yml's cron). The prior 23:00 UTC Friday scheme
+    # fired on one UTC calendar day to deliver on the next IST calendar
+    # day (04:30 IST Saturday) -- the same unnecessary boundary-crossing
+    # complexity daily.yml's old 22:00 UTC cron had. Firing directly on
+    # Saturday UTC instead means "Saturday" in this file's day-of-week
+    # field means exactly what it says, no UTC/IST offset math required.
+    #
+    # This slot itself was never confirmed to have dropped a run the way
+    # daily.yml's 22:00 UTC slot did (two silently missed runs, Sunday
+    # 2026-07-26 and Monday 2026-07-27, investigated and root-caused to
+    # that round-hour slot) -- this workflow's Friday 23:00 UTC cron
+    # hadn't yet reached its first occurrence since the 2026-07-26
+    # retiming fix (next Friday was 2026-07-31) at the time that
+    # investigation happened, so there was no data either way for this
+    # file specifically. Applying the same fix here proactively anyway:
+    # the identical suspects apply (a round-hour 23:00 UTC slot sits in
+    # GitHub's documented high-load window; the same boundary-crossing
+    # scheme), and there's no reason to wait for a real miss on this
+    # workflow to confirm a risk already identified on its sibling.
+    #
+    # 05:07 UTC deliberately matches daily.yml's own new cron -- same
+    # off-round-hour time, just restricted to Saturday (day-of-week 6)
+    # instead of daily's Sunday-Friday (0-5), so the two workflows stay
+    # mutually exclusive by day and never compete for the same slot.
+    # Delivery DAY is unchanged (still Saturday IST, matching this
+    # workflow's name and the sunday/ -> saturday/ rename); only the
+    # trigger mechanism changed.
+    - cron: "7 5 * * 6"
   workflow_dispatch:
 
 concurrency:
