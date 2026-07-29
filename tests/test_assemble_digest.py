@@ -148,18 +148,18 @@ def test_ampersand_in_title_is_html_escaped():
     assert "Research &amp; Compare Tools" in text
 
 
-def test_exactly_15_kept_items_all_appear():
-    items = [_item(keep=True, title=f"Item {i}") for i in range(15)]
+def test_exactly_max_kept_items_all_appear():
+    items = [_item(keep=True, title=f"Item {i}") for i in range(MAX_DIGEST_ITEMS)]
     text, item_map = format_digest(items, RUN_ID)
-    for i in range(15):
+    for i in range(MAX_DIGEST_ITEMS):
         assert f"Item {i}" in text
 
 
-def test_16_kept_items_only_15_appear():
-    items = [_item(keep=True, title=f"Item {i}") for i in range(16)]
+def test_items_above_max_are_not_rendered():
+    items = [_item(keep=True, title=f"Item {i}") for i in range(MAX_DIGEST_ITEMS + 1)]
     text, item_map = format_digest(items, RUN_ID)
-    assert "Item 15" not in text
-    for i in range(15):
+    assert f"Item {MAX_DIGEST_ITEMS}" not in text
+    for i in range(MAX_DIGEST_ITEMS):
         assert f"Item {i}" in text
 
 

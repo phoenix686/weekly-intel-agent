@@ -43,9 +43,11 @@ jobs:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
+      LANGSMITH_TRACING: "true"
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-      LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
+      LANGSMITH_PROJECT: weekly-intel-prod
+      LANGCHAIN_HIDE_INPUTS: "true"
+      LANGCHAIN_HIDE_OUTPUTS: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -81,7 +83,9 @@ jobs:
         # real downloadable artifact below -- see saturday.yml for the full
         # reasoning (pipefail is on by default for GH Actions bash steps,
         # so a real failure still fails this step despite the pipe).
-        run: python scripts/run_daily.py 2>&1 | tee daily_run.log
+        run: |
+          set -o pipefail
+          python scripts/run_daily.py 2>&1 | tee daily_run.log
 
       - name: Upload daily run log
         # if: always() -- see saturday.yml for the full reasoning (a real

@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 
 from core.state import SaturdayGraphState, NodeCost
 from core.observability import cost_breakdown_by_provider
-from saturday.memory_store_config import get_store
-from saturday.plan_history import record_plan_history
 from saturday.carry_forward import get_carry_forward_items
 from telegram.markdown import escape_html, format_cost_line
 
@@ -53,37 +51,19 @@ def assemble_plan(state: SaturdayGraphState) -> dict:
         }
         for entry in state["prioritized_project_work"]
     ]
-    record_plan_history(state["run_id"], surfaced_cards)
-
     generated_at = datetime.now(timezone.utc).isoformat()
-
-    get_store().put(
-        ("companion",),
-        "current_weekly_plan",
-        {
-            "run_id": state["run_id"],
-            "plan_text": text,
-            "generated_at": generated_at,
-        },
-    )
-
-    village_summary = f"{len(item_map)} plan item(s)" if item_map else "no new content"
-    get_store().put(
-        ("village",),
-        f"event:{generated_at}",
-        {
-            "agent": "weekly-intel",
-            "event_type": "plan_ready",
-            "summary": village_summary,
-            "timestamp": generated_at,
-        },
-    )
 
     cost = NodeCost(
         node_name="assemble_plan", input_tokens=0, output_tokens=0,
         cost_usd=0.0, latency_ms=round((time.perf_counter() - t0) * 1000, 2),
     )
-    return {"plan_text": text, "plan_item_map": item_map, "costs": [cost]}
+    return {
+        "plan_text": text,
+        "plan_generated_at": generated_at,
+        "plan_item_map": item_map,
+        "surfaced_cards": surfaced_cards,
+        "costs": [cost],
+    }
 def _build_project_entries(prioritized_project_work: list[dict], trello_cards: list[dict], plan_items: list[dict]) -> list[dict]:
     """Existing Project Work is rendered entirely from prioritize_plan_items'
     bounded, priority-ordered selection (sub-phase 5/final sub-phase) --

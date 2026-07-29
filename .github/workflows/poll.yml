@@ -28,9 +28,11 @@ jobs:
       TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
       TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
       TRELLO_BOARD_ID: ${{ secrets.TRELLO_BOARD_ID }}
-      LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
+      LANGSMITH_TRACING: "true"
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-      LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
+      LANGSMITH_PROJECT: weekly-intel-prod
+      LANGCHAIN_HIDE_INPUTS: "true"
+      LANGCHAIN_HIDE_OUTPUTS: "true"
     steps:
       - uses: actions/checkout@v4
 

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _OFFSET_NAMESPACE = ("weekly_intel", "polling_state")
 _OFFSET_KEY = "update_offset"
+_PROCESSED_NAMESPACE = ("weekly_intel", "telegram_updates")
 
 _APPROVE_KEYWORDS = {"approve", "approved", "yes", "y", "ok", "okay", "go", "do it"}
 _REJECT_KEYWORDS = {"reject", "rejected", "no", "n", "nope", "skip", "pass", "don't", "dont"}
@@ -62,17 +63,28 @@ def poll_once() -> dict:
     if not updates:
         return {"updates_in": 0}
 
+    processed = 0
     for update in updates:
+        update_id = str(update["update_id"])
+        if store.get(_PROCESSED_NAMESPACE, update_id):
+            continue
         _handle_update(update, store)
-
-    new_offset = updates[-1]["update_id"] + 1
-    store.put(_OFFSET_NAMESPACE, _OFFSET_KEY, {"value": new_offset})
-    return {"updates_in": len(updates)}
+        store.put(_PROCESSED_NAMESPACE, update_id, {
+            "status": "processed", "processed_at": datetime.now(timezone.utc).isoformat()
+        })
+        store.put(_OFFSET_NAMESPACE, _OFFSET_KEY, {"value": update["update_id"] + 1})
+        processed += 1
+    return {"updates_in": processed}
 
 
 def _handle_update(update: dict, store) -> None:
     message = update.get("message") or update.get("channel_post")
     if not message:
+        return
+    configured_chat = os.getenv("TELEGRAM_CHAT_ID")
+    actual_chat = str((message.get("chat") or {}).get("id", ""))
+    if configured_chat and actual_chat != configured_chat:
+        logger.warning("polling: rejected update from unconfigured chat")
         return
 
     reply_to = message.get("reply_to_message")

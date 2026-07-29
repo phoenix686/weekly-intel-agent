@@ -3,6 +3,8 @@ import uuid
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 load_dotenv()
+from core.tracing import validate_tracing, trace_metadata
+validate_tracing()
 
 from core.logging_config import setup_logging
 setup_logging()
@@ -36,7 +38,7 @@ error_summary = None
 try:
     final_state = graph.invoke(
         make_daily_initial_state(run_id=run_id),
-        config={"recursion_limit": 50},
+        config={"recursion_limit": 50, "metadata": trace_metadata("daily", run_id)},
     )
     status = "success"
 except Exception as e:

@@ -73,9 +73,11 @@ jobs:
       TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
       TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
       TRELLO_BOARD_ID: ${{ secrets.TRELLO_BOARD_ID }}
-      LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
+      LANGSMITH_TRACING: "true"
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-      LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
+      LANGSMITH_PROJECT: weekly-intel-prod
+      LANGCHAIN_HIDE_INPUTS: "true"
+      LANGCHAIN_HIDE_OUTPUTS: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -131,7 +133,9 @@ jobs:
         # already run with pipefail on by default, so a real pipeline
         # failure still fails this step even though the output is piped
         # through tee, not just captured in the live/in-browser log.
-        run: python scripts/run_saturday.py 2>&1 | tee saturday_run.log
+        run: |
+          set -o pipefail
+          python scripts/run_saturday.py 2>&1 | tee saturday_run.log
 
       - name: Upload Saturday run log
         # if: always() -- not just on success -- since a real timeout-

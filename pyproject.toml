@@ -12,6 +12,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=3.1.0",
     "groq>=1.6.0",
     "httpx>=0.28.1",
+    "agentmail>=0.5.8",
 ]
 
 [tool.uv]

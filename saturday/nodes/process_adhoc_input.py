@@ -12,7 +12,7 @@ def process_adhoc_input(state: DiscoverySubgraphState) -> dict:
     queued = store.search(("weekly_intel", "adhoc_queue"), limit=200)
 
     items: list[RawItem] = []
-    keys_to_delete: list[str] = []
+    queue_keys: list[str] = []
 
     for item_obj in queued:
         data = item_obj.value
@@ -31,14 +31,11 @@ def process_adhoc_input(state: DiscoverySubgraphState) -> dict:
             thread_contents=None,
             expanded_urls=[],
         ))
-        keys_to_delete.append(item_obj.key)
-
-    for key in keys_to_delete:
-        store.delete(("weekly_intel", "adhoc_queue"), key)
+        queue_keys.append(item_obj.key)
 
     cost = NodeCost(
         node_name="process_adhoc_input",
         input_tokens=0, output_tokens=0, cost_usd=0.0,
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
     )
-    return {"raw_items": items, "costs": [cost]}
+    return {"raw_items": items, "adhoc_queue_keys": queue_keys, "costs": [cost]}

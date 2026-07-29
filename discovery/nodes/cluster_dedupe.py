@@ -9,14 +9,16 @@ unique URL. No LangGraph imports, no LLM calls.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from core.state import DiscoverySubgraphState, RawItem, ClusteredItem, NodeCost
-from discovery.seen_items import filter_unseen, mark_seen
+from discovery.seen_items import filter_unseen
 from discovery.semantic_dedup import dedupe_semantic
 from discovery.taste_vectors import taste_prefilter
+from discovery.story_clusterer import assign_story_clusters
 from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
@@ -120,7 +122,11 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
 
     run_id = state["run_id"]
 
-    deduped, semantic_costs = dedupe_semantic(filterable_items, run_id)
+    story_candidate = assign_story_clusters(filterable_items)
+    clustering_input = story_candidate if os.getenv("STORY_CLUSTER_MODE") == "active" else filterable_items
+    if clustering_input is filterable_items:
+        logger.info("story_cluster_shadow: baseline=%d candidate=%d", len(filterable_items), len(story_candidate))
+    deduped, semantic_costs = dedupe_semantic(clustering_input, run_id)
     costs.extend(semantic_costs)
 
     relevant, uncategorized, taste_costs = taste_prefilter(deduped, run_id)
@@ -132,27 +138,6 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     # their own state field so assemble_digest/assemble_plan can surface
     # them instead of them vanishing. See taste_prefilter's docstring.
     #
-    # BUG FIX (2026-07-26, real run 08b5d13b): because uncategorized items
-    # never reach score_node, they were also never covered by
-    # score_node's mark_seen() call (scoped to all_scored only) --
-    # nothing else in the pipeline ever marked them seen either. A
-    # below-taste-threshold item that's still fetchable next run (a
-    # dormant source's same top-N posts, in particular -- see
-    # anthropic_blog.py's new recency filter for the other half of that
-    # specific case) would resurface as "new" indefinitely, every run,
-    # forever. taste_prefilter is itself the terminal decision for these
-    # items this run (there's no later "real processing" to wait for the
-    # way score_node's scoring is), so marking them seen right here,
-    # immediately after a successful taste_prefilter call, is the direct
-    # analogue of mark_seen()'s existing "call once real processing has
-    # actually completed" contract. Same dry_run gate as score_node's
-    # mark_seen() -- manual/dry runs must not permanently burn through
-    # the real seen_items pool for these either.
-    if state.get("dry_run", False):
-        logger.info(f"dry_run=True -- skipping mark_seen() for {len(uncategorized)} uncategorized item(s)")
-    else:
-        mark_seen([item["url"] for item in uncategorized])
-
     clustered_items = relevant + adhoc_items
     record_node_summary(
         run_id=run_id,
