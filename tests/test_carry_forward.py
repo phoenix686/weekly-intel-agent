@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import saturday.carry_forward as carry_forward_mod
 from saturday.carry_forward import get_carry_forward_items
@@ -195,7 +195,7 @@ def test_course_item_preserves_course_tag_when_carried():
     assert result[0]["tags"] == ["course"]
 
 
-def test_carried_item_logged_to_carry_forward_log():
+def test_carried_item_is_not_logged_before_delivery():
     fake_store = _FakeStore(
         run_history=[_run_history_entry("run-prior")],
         digest_item_map=[_digest_entry("run-prior", {1: _reading_item("https://a.com/1")})],
@@ -204,10 +204,7 @@ def test_carried_item_logged_to_carry_forward_log():
         get_carry_forward_items("run-current")
 
     log_calls = [c for c in fake_store.put_calls if c[0] == ("weekly_intel", "carry_forward_log")]
-    assert len(log_calls) == 1
-    namespace, key, value = log_calls[0]
-    assert key == "https://a.com/1"
-    assert value["carried_in_run_id"] == "run-current"
+    assert log_calls == []
 
 
 def test_picks_most_recent_of_multiple_prior_saturday_runs():

@@ -112,7 +112,7 @@ def _already_carried(urls: list[str]) -> set[str]:
     return {url for url in urls if url in carried_urls}
 
 
-def _log_carried(urls: list[str], run_id: str) -> None:
+def commit_carried(urls: list[str], run_id: str) -> None:
     if not urls:
         return
     store = get_store()
@@ -158,7 +158,6 @@ def get_carry_forward_items(current_run_id: str) -> list[dict]:
         for c in eligible
     ]
 
-    _log_carried([c["url"] for c in carried_items], current_run_id)
     logger.info(
         f"carry_forward: {len(carried_items)}/{len(candidates)} prior Reading/Courses item(s) "
         f"carried forward from run {prior_run_id} (run={current_run_id})"

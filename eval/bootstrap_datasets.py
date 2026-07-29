@@ -1,6 +1,6 @@
 """Upload immutable JSONL fixtures to LangSmith; never overwrites examples."""
 from langsmith import Client
-from dataset_seeds import DATASETS
+from eval.dataset_seeds import DATASETS
 
 
 def upload() -> None:

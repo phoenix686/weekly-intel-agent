@@ -59,7 +59,8 @@ logger = logging.getLogger(__name__)
 _NAMESPACE = ("weekly_intel", "recent_item_embeddings")
 _PENDING_NAMESPACE = ("weekly_intel", "pending_item_embeddings")
 _DROPS_NAMESPACE = ("weekly_intel", "prefilter_drops")
-_WINDOW_DAYS = 7
+_NEWS_WINDOW_DAYS = 14
+_EVERGREEN_WINDOW_DAYS = 60
 _THRESHOLD = 0.90
 
 # Second, lower tier: catches "same announcement, different dedicated
@@ -87,7 +88,7 @@ def _load_window() -> list[dict]:
     entry older than _WINDOW_DAYS as it's encountered -- keeps the
     namespace bounded with no separate cleanup job."""
     store = get_store()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=_WINDOW_DAYS)
+    now = datetime.now(timezone.utc)
     live: list[dict] = []
 
     logger.debug("semantic_dedup: BEFORE store.search() (_load_window)")
@@ -98,7 +99,8 @@ def _load_window() -> list[dict]:
     for item_obj in window_entries:
         value = item_obj.value
         scored_at = datetime.fromisoformat(value["scored_at"])
-        if scored_at < cutoff:
+        window_days = int(value.get("window_days", _NEWS_WINDOW_DAYS))
+        if scored_at < now - timedelta(days=window_days):
             logger.debug(f"semantic_dedup: BEFORE store.delete() (stale window entry {item_obj.key!r})")
             t0 = time.perf_counter()
             store.delete(_NAMESPACE, item_obj.key)
@@ -154,6 +156,12 @@ def _is_roundup_item(item: dict) -> bool:
     aggregation-format posts) -- same prefix-based identification pattern
     already used for Hacker News's "Show HN:" in discovery/nodes/score.py."""
     return (item.get("title") or "").startswith("[AINews]")
+
+
+def _window_days(item: dict) -> int:
+    text = f"{item.get('title', '')} {item.get('text', '')[:500]}".lower()
+    evergreen_markers = ("tutorial", "guide", "course", "walkthrough", "how to", "introduction")
+    return _EVERGREEN_WINDOW_DAYS if any(marker in text for marker in evergreen_markers) else _NEWS_WINDOW_DAYS
 
 
 def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tuple[list[ClusteredItem], list[NodeCost]]:
@@ -296,6 +304,7 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
                 "scored_at": scored_at,
                 "is_roundup": _is_roundup_item(item),
                 "run_id": run_id,
+                "window_days": _window_days(item),
             })
             for item, vector in zip(survivors, survivor_vectors)
         ])

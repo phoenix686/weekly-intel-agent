@@ -167,6 +167,8 @@ class DiscoverySubgraphState(TypedDict):
                     # pipeline without permanently exhausting the real
                     # seen_items pool
     adhoc_queue_keys: list[str]
+    carry_forward_urls: list[str]
+    preference_snapshot: dict
 
 
 class DailyGraphState(TypedDict):
@@ -188,6 +190,7 @@ class DailyGraphState(TypedDict):
     source_context: Literal["daily", "saturday"]
     digest_text: str        # populated by assemble_digest, consumed by send_telegram_digest
     digest_generated_at: str
+    digest_status: str
     digest_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
                                        # assemble_digest, persisted by send_telegram_digest keyed
                                        # by the sent message_id so a later numbered reply resolves
@@ -204,6 +207,7 @@ def make_daily_initial_state(run_id: str) -> DailyGraphState:
         errors=[],
         digest_text="",
         digest_generated_at="",
+        digest_status="",
         digest_item_map={},
         source_context="daily",
     )
@@ -251,6 +255,7 @@ class SaturdayGraphState(TypedDict):
                                      # the sent message_id so a later numbered reply resolves
     surfaced_cards: list[dict]
     adhoc_queue_keys: list[str]
+    carry_forward_urls: list[str]
     pending_approvals: list[dict]   # project_proposal items awaiting await_approval
     pending_resumes: Annotated[list[dict], operator.add]   # one entry per proposal_worker Send: {proposal_id, thread_id, message_id}
     costs: Annotated[list[NodeCost], operator.add]
@@ -275,6 +280,7 @@ def make_saturday_initial_state(run_id: str, dry_run: bool = False) -> SaturdayG
         plan_item_map={},
         surfaced_cards=[],
         adhoc_queue_keys=[],
+        carry_forward_urls=[],
         pending_approvals=[],
         pending_resumes=[],
         costs=[],

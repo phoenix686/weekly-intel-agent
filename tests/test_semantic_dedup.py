@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from langgraph.store.base import GetOp, PutOp
 
-from discovery.semantic_dedup import dedupe_semantic, _NAMESPACE
+from discovery.semantic_dedup import dedupe_semantic
 from discovery.embeddings import _FAILURES_NAMESPACE
 
 
@@ -145,9 +145,9 @@ def test_cross_run_match_drops_new_item_unconditionally():
     assert "https://new.com/1" not in fake_store._data
 
 
-def test_window_entries_older_than_7_days_are_excluded_and_deleted():
+def test_news_window_entries_older_than_14_days_are_excluded_and_deleted():
     item = _item("https://a.com/1", "Fresh story", "genuinely new content")
-    stale_scored_at = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    stale_scored_at = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
     fake_store = _FakeStore(seed={
         "https://stale.com/1": {
             "item_id": "https://stale.com/1", "url": "https://stale.com/1",

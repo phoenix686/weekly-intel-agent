@@ -9,7 +9,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import saturday.approval_actions as approval_actions
 
@@ -49,7 +49,7 @@ def test_handle_rejection_logs_rejected_outcome():
     item = {"url": "https://example.com/rejected-item", "title": "T", "text": "content", "tags": []}
 
     with patch.object(approval_actions, "get_store", return_value=fake_store), \
-         patch.object(approval_actions, "apply_nudge", return_value=[]):
+         patch.object(approval_actions, "apply_confirmed_events_locked", return_value={}):
         approval_actions.handle_rejection(item, run_id="run-rejected-1")
 
     log_puts = [p for p in fake_store.puts if p[0] == approval_actions._APPROVAL_LOG_NAMESPACE]
@@ -75,7 +75,7 @@ def test_one_approved_and_one_rejected_both_produce_distinct_approval_log_entrie
          patch.object(approval_actions, "create_trello_card", return_value={"name": "A", "url": "https://trello.com/c/a"}), \
          patch.object(approval_actions, "get_dump_list_id", return_value="list-1"), \
          patch.object(approval_actions, "send_message"), \
-         patch.object(approval_actions, "apply_nudge", return_value=[]):
+         patch.object(approval_actions, "apply_confirmed_events_locked", return_value={}):
         approval_actions.handle_approval(approved_item, thread_id="thread-a", run_id="run-both-1")
         approval_actions.handle_rejection(rejected_item, run_id="run-both-1")
 

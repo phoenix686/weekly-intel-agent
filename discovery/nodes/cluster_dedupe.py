@@ -20,6 +20,8 @@ from discovery.semantic_dedup import dedupe_semantic
 from discovery.taste_vectors import taste_prefilter
 from discovery.story_clusterer import assign_story_clusters
 from core.observability import record_node_summary
+from core.preferences import default_snapshot, load_snapshot
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +131,13 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     deduped, semantic_costs = dedupe_semantic(clustering_input, run_id)
     costs.extend(semantic_costs)
 
-    relevant, uncategorized, taste_costs = taste_prefilter(deduped, run_id)
+    try:
+        preference_snapshot = load_snapshot(get_store())
+    except Exception:
+        preference_snapshot = default_snapshot()
+    relevant, uncategorized, taste_costs = taste_prefilter(
+        deduped, run_id, preference_snapshot=preference_snapshot
+    )
     costs.extend(taste_costs)
 
     # uncategorized items deliberately do NOT join clustered_items -- they
@@ -152,4 +160,5 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
         "clustered_items": clustered_items,
         "uncategorized_items": uncategorized,
         "costs": costs,
+        "preference_snapshot": preference_snapshot,
     }

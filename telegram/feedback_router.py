@@ -6,8 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import anthropic
-from core.preferences import apply_confirmed_events
-from saturday.approval_actions import handle_feedback as log_feedback
+from core.preferences import apply_confirmed_events_locked, validate_feedback_event
 from saturday.memory_store_config import get_store
 from telegram.bot_client import send_message
 
@@ -53,8 +52,21 @@ def _parse_numbered_feedback(text: str, item_map: dict | None = None) -> list[di
     except (json.JSONDecodeError, IndexError):
         logger.exception("feedback parse failed; no preference state changed")
         return []
-    return [event for event in parsed if event.get("item_number") is None
-            or str(event.get("item_number")) in {str(k) for k in (item_map or {})}]
+    valid = []
+    valid_numbers = {str(k) for k in (item_map or {})}
+    try:
+        for raw_event in parsed:
+            if raw_event.get("item_number") is not None and str(raw_event["item_number"]) not in valid_numbers:
+                continue
+            raw_event.update({"event_id": str(uuid.uuid4()), "raw_text": text})
+            event = validate_feedback_event(raw_event)
+            event["confirmation_state"] = "pending"
+            event.pop("confirmed_at", None)
+            valid.append(event)
+    except (TypeError, ValueError, AttributeError):
+        logger.exception("feedback schema validation failed; no preference state changed")
+        return []
+    return valid
 
 
 def _summary(events: list[dict]) -> str:
@@ -76,6 +88,10 @@ def _confirm(reply_id: int, text: str, store) -> bool:
     if not pending_item:
         return False
     pending = pending_item.value
+    if datetime.fromisoformat(pending["expires_at"]) <= datetime.now(timezone.utc):
+        store.delete(_PENDING_NAMESPACE, str(reply_id))
+        send_message("That feedback confirmation expired; please reply to the digest again.")
+        return True
     if text.lower() in _CANCEL:
         store.delete(_PENDING_NAMESPACE, str(reply_id))
         send_message("Feedback discarded.")
@@ -84,15 +100,7 @@ def _confirm(reply_id: int, text: str, store) -> bool:
         send_message('Reply "confirm" to apply this feedback, or "cancel" to discard it.')
         return True
     events = pending["events"]
-    apply_confirmed_events(store, events)
-    item_map = pending["item_map"]
-    for event in events:
-        if event.get("item_number") is None:
-            continue
-        item = item_map.get(str(event["item_number"])) or item_map.get(event["item_number"])
-        if item:
-            log_feedback(item, event.get("feedback_text", ""), "positive" if event["relevance"] >= 2 else "negative",
-                         pending["run_id"])
+    apply_confirmed_events_locked(store, events)
     store.delete(_PENDING_NAMESPACE, str(reply_id))
     send_message(f"Applied {len(events)} confirmed feedback signal(s).")
     return True
@@ -108,8 +116,7 @@ def _handle_numbered_feedback(reply_id: int, text: str) -> bool:
         send_message("I couldn't parse that feedback, so nothing was changed.")
         return True
     for event in events:
-        event.update({"event_id": str(uuid.uuid4()), "confirmation_state": "pending",
-                      "parser_confidence": event.get("parser_confidence", .8), "raw_text": text})
+        event["parser_confidence"] = event.get("parser_confidence", .8)
     response = send_message(f"Please confirm: {_summary(events)}\n\nReply “confirm” or “cancel”.")
     confirmation_id = str(response["result"]["message_id"])
     store.put(_PENDING_NAMESPACE, confirmation_id, {

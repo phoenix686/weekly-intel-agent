@@ -191,4 +191,20 @@ def test_poll_once_no_updates_is_a_noop():
          patch("telegram.polling._get_updates", return_value=[]):
         polling.poll_once()
 
+
+def test_inbox_mode_never_calls_get_updates():
+    fake_store = _FakeStore()
+    with patch.dict("os.environ", {
+        "TELEGRAM_INBOX_MODE": "true",
+        "TELEGRAM_CHAT_ID": "1",
+        "TELEGRAM_USER_ID": "2",
+    }), patch("telegram.polling.get_store", return_value=fake_store), \
+         patch("telegram.polling._get_updates") as get_updates, \
+         patch("telegram.polling.process_inbox", return_value={
+             "processed": 0, "retry": 0, "dead_letter": 0,
+         }):
+        result = polling.poll_once()
+    get_updates.assert_not_called()
+    assert result["updates_in"] == 0
+
     assert fake_store.put_calls == []

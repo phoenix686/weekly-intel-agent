@@ -39,7 +39,7 @@ local file, and only for manual readability -- never the reverse.
 import csv
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import anthropic
@@ -48,6 +48,7 @@ from core.state import SaturdayGraphState, NodeCost
 from saturday.memory_store_config import get_store
 from discovery.taste_vectors import recompute_topic_vectors
 from discovery.taste_profile_store import get_taste_profile, put_taste_profile
+from core.preferences import consolidate_weekly, render_preference_context
 
 logger = logging.getLogger(__name__)
 
@@ -178,16 +179,18 @@ def update_profile(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
     costs: list[NodeCost] = []
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=_LOOKBACK_DAYS)
-    records = _load_recent_feedback(cutoff)
-
-    if records:
-        costs.extend(_consolidated_rewrite(records))
+    snapshot, usage = consolidate_weekly(get_store(), _client)
+    if usage:
+        input_tokens = usage["input_tokens"]
+        output_tokens = usage["output_tokens"]
+        costs.append(NodeCost(
+            node_name="update_profile", input_tokens=input_tokens, output_tokens=output_tokens,
+            cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
+            latency_ms=0.0, provider="anthropic",
+        ))
+        costs.extend(recompute_topic_vectors(render_preference_context(snapshot)))
     else:
-        logger.info("update_profile: no feedback_events since last Saturday, profile left unchanged")
-
-    cleared = _clear_same_day_adjustments()
-    logger.info(f"update_profile: cleared {cleared} same_day_adjustments entr(y/ies) for the new week")
+        logger.info("update_profile: fewer than five newly confirmed events; no weekly patch")
 
     total_cost = sum(c["cost_usd"] for c in state["costs"]) + sum(c["cost_usd"] for c in costs)
     plan_items = sum(1 for i in state["classified_items"] if i.get("classification") == "plan_item")

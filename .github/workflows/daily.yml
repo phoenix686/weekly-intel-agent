@@ -51,9 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
 
       # Same fix as saturday.yml, same underlying reason: actions/cache@v4's
       # save only runs as a POST step, which is skipped entirely if the job
@@ -70,7 +68,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync --frozen
 
       - name: Save pip cache
         uses: actions/cache/save@v4
@@ -85,7 +83,7 @@ jobs:
         # so a real failure still fails this step despite the pipe).
         run: |
           set -o pipefail
-          python scripts/run_daily.py 2>&1 | tee daily_run.log
+          uv run python scripts/run_daily.py 2>&1 | tee daily_run.log
 
       - name: Upload daily run log
         # if: always() -- see saturday.yml for the full reasoning (a real

@@ -1,5 +1,5 @@
 """Offline release-gate validation for versioned eval fixtures."""
-from dataset_seeds import DATASETS
+from eval.dataset_seeds import DATASETS
 
 REQUIRED = {
     "intel-dedup-v1.jsonl": 20, "intel-ranking-v1.jsonl": 30,

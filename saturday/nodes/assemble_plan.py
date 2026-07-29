@@ -37,6 +37,13 @@ def assemble_plan(state: SaturdayGraphState) -> dict:
         state["uncategorized_items"],
         cost_breakdown=cost_breakdown,
     )
+    if state.get("errors"):
+        warning = (
+            "⚠️ <i>Model provider fallback changed this run’s behavior.</i>"
+            if any("provider_degraded" in error for error in state["errors"])
+            else "⚠️ <i>One or more sources were degraded; coverage may be incomplete.</i>"
+        )
+        text = f"{text}\n\n{warning}"
 
     # plan_history must reflect what was ACTUALLY surfaced in Existing
     # Project Work (the bounded prioritize_plan_items selection), not the
@@ -62,6 +69,7 @@ def assemble_plan(state: SaturdayGraphState) -> dict:
         "plan_generated_at": generated_at,
         "plan_item_map": item_map,
         "surfaced_cards": surfaced_cards,
+        "carry_forward_urls": [item["url"] for item in carried_items],
         "costs": [cost],
     }
 def _build_project_entries(prioritized_project_work: list[dict], trello_cards: list[dict], plan_items: list[dict]) -> list[dict]:

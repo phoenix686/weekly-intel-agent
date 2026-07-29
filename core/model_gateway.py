@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -94,10 +95,21 @@ class ModelGateway:
         groq_client: Any,
         anthropic_client: Any | None,
         budget: ModelBudget | None = None,
+        sleep: Any = time.sleep,
+        max_retries: int = 3,
     ) -> None:
         self._groq = groq_client
         self._anthropic = anthropic_client
         self._budget = budget or ModelBudget(anthropic_limit_usd=0.0)
+        self._sleep = sleep
+        self._max_retries = max_retries
+
+    @staticmethod
+    def _status_code(exc: Exception) -> int | None:
+        value = getattr(exc, "status_code", None)
+        if value is None:
+            value = getattr(getattr(exc, "response", None), "status_code", None)
+        return value
 
     def complete_json(
         self,
@@ -115,21 +127,34 @@ class ModelGateway:
                 f"tokens, above the {GROQ_SAFE_TOKEN_LIMIT}-token safe envelope"
             )
 
-        try:
-            response = self._groq.chat.completions.create(
-                model=GROQ_MODEL,
-                temperature=0,
-                max_completion_tokens=max_completion_tokens,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": task.replace("-", "_"),
-                        "strict": True,
-                        "schema": json_schema,
+        response = None
+        last_error = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = self._groq.chat.completions.create(
+                    model=GROQ_MODEL,
+                    temperature=0,
+                    max_completion_tokens=max_completion_tokens,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": task.replace("-", "_"),
+                            "strict": True,
+                            "schema": json_schema,
+                        },
                     },
-                },
-            )
+                )
+                break
+            except Exception as exc:
+                status = self._status_code(exc)
+                if status == 413:
+                    raise ModelRequestTooLarge(f"{task} provider rejected request as too large") from exc
+                last_error = exc
+                if status not in {429, 500, 502, 503, 504} or attempt >= self._max_retries:
+                    break
+                self._sleep(0.5 * (2 ** attempt))
+        if response is not None:
             input_tokens = response.usage.prompt_tokens
             output_tokens = response.usage.completion_tokens
             return ModelResult(
@@ -139,17 +164,12 @@ class ModelGateway:
                 output_tokens=output_tokens,
                 cost_usd=groq_cost(input_tokens, output_tokens),
             )
-        except ModelRequestTooLarge:
-            raise
-        except Exception as exc:
-            if not allow_anthropic_fallback or self._anthropic is None:
-                raise ModelGatewayError(f"{task} Groq request failed: {exc}") from exc
-            return self._complete_anthropic(
-                task=task,
-                prompt=prompt,
-                json_schema=json_schema,
-                max_completion_tokens=max_completion_tokens,
-            )
+        if not allow_anthropic_fallback or self._anthropic is None:
+            raise ModelGatewayError(f"{task} Groq request failed: {last_error}") from last_error
+        return self._complete_anthropic(
+            task=task, prompt=prompt, json_schema=json_schema,
+            max_completion_tokens=max_completion_tokens,
+        )
 
     def _complete_anthropic(
         self,
@@ -159,7 +179,9 @@ class ModelGateway:
         json_schema: dict[str, Any],
         max_completion_tokens: int,
     ) -> ModelResult:
-        estimated_input = estimate_tokens(prompt)
+        schema_text = json.dumps(json_schema, separators=(",", ":"))
+        fallback_prompt = f"{prompt}\n\nReturn only JSON matching this schema:\n{schema_text}"
+        estimated_input = math.ceil(estimate_tokens(fallback_prompt) * 1.15)
         estimated_cost = anthropic_cost(estimated_input, max_completion_tokens)
         self._budget.reserve_anthropic(estimated_cost)
 
@@ -170,8 +192,7 @@ class ModelGateway:
                 {
                     "role": "user",
                     "content": (
-                        f"{prompt}\n\nReturn only JSON matching this schema:\n"
-                        f"{json.dumps(json_schema, separators=(',', ':'))}"
+                        fallback_prompt
                     ),
                 }
             ],
@@ -188,4 +209,3 @@ class ModelGateway:
             cost_usd=actual_cost,
             degraded=True,
         )
-

@@ -75,3 +75,35 @@ def test_anthropic_fallback_is_used_only_within_the_budget():
     assert result.degraded is True
     assert budget.anthropic_spend_usd > 0
 
+
+def test_provider_413_requests_batch_split_instead_of_fallback():
+    error = RuntimeError("request too large")
+    error.status_code = 413
+    groq = MagicMock()
+    groq.chat.completions.create.side_effect = error
+    anthropic = MagicMock()
+    gateway = ModelGateway(groq_client=groq, anthropic_client=anthropic)
+    with pytest.raises(ModelRequestTooLarge):
+        gateway.complete_json(
+            task="score", prompt="short", json_schema={"type": "object"},
+            allow_anthropic_fallback=True,
+        )
+    anthropic.messages.create.assert_not_called()
+
+
+def test_429_is_retried_with_bounded_backoff():
+    error = RuntimeError("rate limited")
+    error.status_code = 429
+    groq = MagicMock()
+    groq.chat.completions.create.side_effect = [
+        error, error, _groq_response({"results": []}),
+    ]
+    sleeps = []
+    gateway = ModelGateway(
+        groq_client=groq, anthropic_client=None, sleep=sleeps.append, max_retries=2
+    )
+    result = gateway.complete_json(
+        task="score", prompt="short", json_schema={"type": "object"},
+    )
+    assert result.provider == "groq"
+    assert sleeps == [0.5, 1.0]

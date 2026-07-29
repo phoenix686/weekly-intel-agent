@@ -81,9 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
 
       # actions/cache@v4's save only runs as a POST step, which GitHub Actions
       # only executes if the job reaches a "completed" state -- a job
@@ -104,7 +102,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync --frozen
 
       - name: Save pip cache
         uses: actions/cache/save@v4
@@ -135,7 +133,7 @@ jobs:
         # through tee, not just captured in the live/in-browser log.
         run: |
           set -o pipefail
-          python scripts/run_saturday.py 2>&1 | tee saturday_run.log
+          uv run python scripts/run_saturday.py 2>&1 | tee saturday_run.log
 
       - name: Upload Saturday run log
         # if: always() -- not just on success -- since a real timeout-

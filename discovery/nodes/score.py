@@ -12,8 +12,19 @@ from core.model_gateway import (
     ModelRequestTooLarge,
     ModelResult,
 )
+from core.preferences import default_snapshot, load_snapshot, render_preference_context
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
+
+
+def _load_preference_context() -> str:
+    try:
+        snapshot = load_snapshot(get_store())
+    except Exception as exc:
+        logger.warning("score_node: preference snapshot unavailable, using explicit baseline: %s", exc)
+        snapshot = default_snapshot()
+    return render_preference_context(snapshot)
 
 TASTE_PROFILE = """
 You are scoring bookmarks for an AI/ML engineer focused on agentic AI engineering.
@@ -177,6 +188,7 @@ def _score_batch(
     offset: int,
     gateway: ModelGateway,
     run_id: str = "unknown",
+    preference_context: str = "",
 ) -> tuple[list[ScoredItem], ModelResult]:
     items_text = "\n\n".join(
         f"[{i}] URL: {item['url']}\nTitle: {item['title']}\nText: {item['text'][:500]}"
@@ -190,6 +202,8 @@ def _score_batch(
     # that harness, so reused verbatim rather than risking the same
     # failure here).
     prompt = f"""{TASTE_PROFILE}
+
+{preference_context}
 
 Assign 1-3 tags from EXACTLY this list — no other tags are permitted:
 agentic-engineering, memory-systems, llm-tooling, evals, learning-resource,
@@ -234,17 +248,18 @@ def _score_with_split(
     offset: int,
     gateway: ModelGateway,
     run_id: str,
+    preference_context: str = "",
 ) -> list[tuple[list[ScoredItem], ModelResult]]:
     """Split only when the provider envelope says this batch cannot fit."""
     try:
-        return [_score_batch(batch, offset, gateway, run_id)]
+        return [_score_batch(batch, offset, gateway, run_id, preference_context)]
     except ModelRequestTooLarge:
         if len(batch) <= 1:
             raise
         midpoint = len(batch) // 2
         return [
-            *_score_with_split(batch[:midpoint], offset, gateway, run_id),
-            *_score_with_split(batch[midpoint:], offset + midpoint, gateway, run_id),
+            *_score_with_split(batch[:midpoint], offset, gateway, run_id, preference_context),
+            *_score_with_split(batch[midpoint:], offset + midpoint, gateway, run_id, preference_context),
         ]
 
 
@@ -261,10 +276,15 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         budget=ModelBudget(anthropic_limit_usd=budget_limit),
     )
     usage: list[ModelResult] = []
+    preference_context = render_preference_context(
+        state.get("preference_snapshot") or default_snapshot()
+    )
 
     for offset in range(0, len(items), BATCH_SIZE):
         batch = items[offset:offset + BATCH_SIZE]
-        for scored, model_result in _score_with_split(batch, offset, gateway, run_id):
+        for scored, model_result in _score_with_split(
+            batch, offset, gateway, run_id, preference_context
+        ):
             all_scored.extend(scored)
             usage.append(model_result)
         logger.info(f"scored {offset + len(batch)}/{len(items)}")

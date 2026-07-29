@@ -12,6 +12,7 @@ MAX_DIGEST_ITEMS = 10
 def format_digest(
     scored_items: list[ScoredItem], run_id: str, uncategorized_items: list[dict] | None = None,
     cost_breakdown: dict[str, float] | None = None,
+    outcome_status: str = "no_new_stories",
 ) -> tuple[str, dict[int, dict]]:
     """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
     NOT Markdown. This function used to escape underscores with MarkdownV2
@@ -39,12 +40,23 @@ def format_digest(
     cost_line = format_cost_line(cost_breakdown)
 
     if not kept and not uncategorized_items:
-        text = "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>"
+        messages = {
+            "sources_degraded": "Source outage: the run could not establish that there were no new stories.",
+            "provider_degraded": "Model provider degraded: no digest could be selected reliably.",
+            "all_filtered": "New candidates were collected, but all were filtered from today’s digest.",
+            "pipeline_failed": "The intelligence pipeline failed before a reliable digest was produced.",
+            "no_new_stories": "Nothing new today.",
+        }
+        text = f"🤖 <b>Daily Digest</b>\n\n<i>{messages[outcome_status]}</i>"
         if cost_line:
             text += f"\n\n{cost_line}"
         return text, {}
 
     lines = ["🤖 <b>Daily Digest</b>", ""]
+    if outcome_status == "provider_degraded":
+        lines.extend(["⚠️ <i>Model provider fallback changed this run’s behavior.</i>", ""])
+    elif outcome_status == "sources_degraded":
+        lines.extend(["⚠️ <i>One or more sources were degraded; coverage may be incomplete.</i>", ""])
     item_map: dict[int, dict] = {}
     counter = 1
 
@@ -130,9 +142,19 @@ def assemble_digest(state: DailyGraphState) -> dict:
     # the only node left, is free), so this is the true run total, not a
     # partial figure.
     cost_breakdown = cost_breakdown_by_provider(state["costs"])
+    errors = state.get("errors", [])
+    if any("provider_degraded" in error for error in errors):
+        status = "provider_degraded"
+    elif errors:
+        status = "sources_degraded"
+    elif state["scored_items"] and not any(item["keep"] for item in state["scored_items"]):
+        status = "all_filtered"
+    else:
+        status = "no_new_stories"
     text, item_map = format_digest(
         state["scored_items"], state["run_id"], uncategorized_items=state["uncategorized_items"],
         cost_breakdown=cost_breakdown,
+        outcome_status=status,
     )
 
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -148,6 +170,7 @@ def assemble_digest(state: DailyGraphState) -> dict:
         "digest_text": text,
         "digest_generated_at": generated_at,
         "digest_item_map": item_map,
+        "digest_status": status,
         "costs": [cost],
     }
 
