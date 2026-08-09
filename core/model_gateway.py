@@ -15,7 +15,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from core.groq_client import GROQ_MODEL, groq_cost
+import anthropic
+
+from core.groq_client import GROQ_MODEL, get_groq_client, groq_cost
 
 GROQ_TOTAL_TOKEN_LIMIT = 8_000
 GROQ_SAFE_TOKEN_LIMIT = 7_200
@@ -103,6 +105,11 @@ class ModelGateway:
         self._budget = budget or ModelBudget(anthropic_limit_usd=0.0)
         self._sleep = sleep
         self._max_retries = max_retries
+
+    @property
+    def anthropic_spend_usd(self) -> float:
+        """Serializable run-budget state for the next graph node/resume."""
+        return self._budget.anthropic_spend_usd
 
     @staticmethod
     def _status_code(exc: Exception) -> int | None:
@@ -209,3 +216,22 @@ class ModelGateway:
             cost_usd=actual_cost,
             degraded=True,
         )
+
+
+def get_model_gateway(
+    *,
+    pipeline: str,
+    anthropic_spend_usd: float = 0.0,
+) -> ModelGateway:
+    """Build a gateway while preserving the pipeline's persisted run budget."""
+    if pipeline not in {"daily", "saturday"}:
+        raise ValueError("pipeline must be daily or saturday")
+    limit = 0.10 if pipeline == "daily" else 0.50
+    return ModelGateway(
+        groq_client=get_groq_client(),
+        anthropic_client=anthropic.Anthropic(),
+        budget=ModelBudget(
+            anthropic_limit_usd=limit,
+            anthropic_spend_usd=anthropic_spend_usd,
+        ),
+    )

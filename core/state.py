@@ -169,6 +169,7 @@ class DiscoverySubgraphState(TypedDict):
     adhoc_queue_keys: list[str]
     carry_forward_urls: list[str]
     preference_snapshot: dict
+    anthropic_spend_usd: float
 
 
 class DailyGraphState(TypedDict):
@@ -196,6 +197,7 @@ class DailyGraphState(TypedDict):
                                        # by the sent message_id so a later numbered reply resolves
                                        # (includes uncategorized items too, numbered after kept ones,
                                        # so a reply naming a new tag routes through the same path)
+    anthropic_spend_usd: float
 
 
 def make_daily_initial_state(run_id: str) -> DailyGraphState:
@@ -209,6 +211,7 @@ def make_daily_initial_state(run_id: str) -> DailyGraphState:
         digest_generated_at="",
         digest_status="",
         digest_item_map={},
+        anthropic_spend_usd=0.0,
         source_context="daily",
     )
 
@@ -263,6 +266,7 @@ class SaturdayGraphState(TypedDict):
     source_context: Literal["daily", "saturday"]
     dry_run: bool  # passed through by name intersection into the nested
                     # discovery subgraph; see DiscoverySubgraphState.dry_run
+    anthropic_spend_usd: float
 
 
 def make_saturday_initial_state(run_id: str, dry_run: bool = False) -> SaturdayGraphState:
@@ -287,4 +291,5 @@ def make_saturday_initial_state(run_id: str, dry_run: bool = False) -> SaturdayG
         errors=[],
         source_context="saturday",
         dry_run=dry_run,
+        anthropic_spend_usd=0.0,
     )
