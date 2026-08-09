@@ -8,7 +8,9 @@ on:
     # day including Saturday -- unlike daily.yml (which skips Saturday), this
     # must run all 7 days: approval resumes, ad-hoc queuing, and digest/plan
     # feedback can all arrive on any day.
-    - cron: "30 16 * * *"
+    - cron: "17 * * * *"
+  repository_dispatch:
+    types: [telegram-update]
   workflow_dispatch:
 
 concurrency:
@@ -25,21 +27,23 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+      TELEGRAM_INBOX_MODE: "true"
       TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
       TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
       TRELLO_BOARD_ID: ${{ secrets.TRELLO_BOARD_ID }}
-      LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
+      LANGSMITH_TRACING: "true"
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-      LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
+      LANGSMITH_PROJECT: weekly-intel-prod
+      LANGCHAIN_HIDE_INPUTS: "true"
+      LANGCHAIN_HIDE_OUTPUTS: "true"
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync --frozen
 
       - name: Poll Telegram for resumes/feedback/ad-hoc input
-        run: python scripts/run_poll.py
+        run: uv run python scripts/run_poll.py

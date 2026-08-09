@@ -148,18 +148,18 @@ def test_ampersand_in_title_is_html_escaped():
     assert "Research &amp; Compare Tools" in text
 
 
-def test_exactly_15_kept_items_all_appear():
-    items = [_item(keep=True, title=f"Item {i}") for i in range(15)]
+def test_exactly_max_kept_items_all_appear():
+    items = [_item(keep=True, title=f"Item {i}") for i in range(MAX_DIGEST_ITEMS)]
     text, item_map = format_digest(items, RUN_ID)
-    for i in range(15):
+    for i in range(MAX_DIGEST_ITEMS):
         assert f"Item {i}" in text
 
 
-def test_16_kept_items_only_15_appear():
-    items = [_item(keep=True, title=f"Item {i}") for i in range(16)]
+def test_items_above_max_are_not_rendered():
+    items = [_item(keep=True, title=f"Item {i}") for i in range(MAX_DIGEST_ITEMS + 1)]
     text, item_map = format_digest(items, RUN_ID)
-    assert "Item 15" not in text
-    for i in range(15):
+    assert f"Item {MAX_DIGEST_ITEMS}" not in text
+    for i in range(MAX_DIGEST_ITEMS):
         assert f"Item {i}" in text
 
 
@@ -234,3 +234,17 @@ def test_item_map_keyed_by_display_number_with_correct_fields():
     assert item_map[1]["title"] == "Keep me"
     assert item_map[1]["tags"] == ["evals"]
     assert item_map[1]["reasoning"] == "Good content."
+
+
+def test_source_outage_never_renders_nothing_new():
+    text, item_map = format_digest([], RUN_ID, outcome_status="sources_degraded")
+    assert "source outage" in text.lower()
+    assert "Nothing new today" not in text
+    assert item_map == {}
+
+
+def test_all_filtered_is_distinct_from_no_new_stories():
+    text, _ = format_digest(
+        [_item(keep=False, title="Filtered")], RUN_ID, outcome_status="all_filtered"
+    )
+    assert "all were filtered" in text.lower()

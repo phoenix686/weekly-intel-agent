@@ -2,6 +2,22 @@ version = 1
 requires-python = ">=3.11"
 
 [[package]]
+name = "agentmail"
+version = "0.5.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/5c/85ca86daa8cbac5f02fd623e2413d27e2b2a08fa4de5aef776a4dc1f6ee9/agentmail-0.5.8.tar.gz", hash = "sha256:085eb0e847593f87315712102f86a249b52bea93359c477c48d6d646883dde5f", size = 142977 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/6f/1ee48bdf4a3dd64bde84f79109417e890a60edb119cd9d8024e46442b319/agentmail-0.5.8-py3-none-any.whl", hash = "sha256:e9479bf2d5c473ffbe6874d67a1a3679071e4eb99a4bc9f192473082ec4befd3", size = 307190 },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -204,6 +220,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e6/dc/be6cbe99670cd6e4ad387123647cb08e0c32975e223f82551e914c5568a6/filelock-3.29.4.tar.gz", hash = "sha256:10cdb3656fc44541cdf30652a93fb10ec6b05325620eb316bd26893e4201538a", size = 63028 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/13/37/a065dc3bd6e49423a6532c642ca7378d3f467b1ef44c2800c937af7f9739/filelock-3.29.4-py3-none-any.whl", hash = "sha256:dac1648087d5115554850d113e7dd8c83ab2d38e3435dde2d4f163847e57b767", size = 42757 },
+]
+
+[[package]]
+name = "groq"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/3e/687064918e861082cb02165872bbda31269126a108a78794dae86ddadae2/groq-1.6.0.tar.gz", hash = "sha256:c4237ecf0053ba85fd926bb31cb4b178996310474b4618867994e3e40d8e3c02", size = 158424 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/40/164338d796cf41ea5930a42023e986d8c993720bed670d5aa143e5854873/groq-1.6.0-py3-none-any.whl", hash = "sha256:fa16db582455db324adcff1b5908519474736872e28cd5c8fa2b8bef6860e12a", size = 143693 },
 ]
 
 [[package]]
@@ -1482,7 +1515,10 @@ name = "weekly-intel"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "agentmail" },
     { name = "anthropic" },
+    { name = "groq" },
+    { name = "httpx" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-postgres" },
     { name = "langmem" },
@@ -1500,7 +1536,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentmail", specifier = ">=0.5.8" },
     { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "groq", specifier = ">=1.6.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "langgraph", specifier = ">=1.2.6" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=3.1.0" },
     { name = "langmem", specifier = ">=0.0.15" },

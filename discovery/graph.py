@@ -39,7 +39,7 @@ discovery/parsers/scrape_blogs.py. Smol AI News was removed entirely
 from __future__ import annotations
 
 import uuid
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, END
 from core.state import DiscoverySubgraphState
 from discovery.nodes.cluster_dedupe import cluster_dedupe_node
 from discovery.nodes.score import score_node
@@ -111,4 +111,5 @@ def make_initial_state(source_context: str = "daily", dry_run: bool = False) -> 
         errors=[],
         source_context=source_context,
         dry_run=dry_run,
+        preference_snapshot={},
     )

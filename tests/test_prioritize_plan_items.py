@@ -10,10 +10,10 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import json
 from unittest.mock import patch, MagicMock
 
 import saturday.nodes.prioritize_plan_items as prioritize_mod
+from core.model_gateway import ModelGatewayError, ModelResult
 from saturday.nodes.prioritize_plan_items import prioritize_plan_items, MAX_PROJECT_WORK_ITEMS
 
 
@@ -44,12 +44,20 @@ def _state(classified_items, trello_cards=None, card_movements=None, run_id="run
     }
 
 
-def _haiku_response(selection: list[dict]):
-    resp = MagicMock()
-    resp.content = [MagicMock(text=json.dumps(selection))]
-    resp.usage.input_tokens = 100
-    resp.usage.output_tokens = 40
-    return resp
+def _gateway(selection=None, side_effect=None):
+    gateway = MagicMock()
+    if side_effect is not None:
+        gateway.complete_json.side_effect = side_effect
+    else:
+        gateway.complete_json.return_value = ModelResult(
+            data={"results": selection},
+            provider="groq",
+            input_tokens=100,
+            output_tokens=40,
+            cost_usd=0.001,
+        )
+    gateway.anthropic_spend_usd = 0.0
+    return gateway
 
 
 def test_selected_card_appears_in_output():
@@ -58,7 +66,8 @@ def test_selected_card_appears_in_output():
     reply = [{"matched_card_id": "card1", "source": "new_item", "item_url": "https://a.com/1",
               "priority_reasoning": "directly continues active work", "movement_note": None}]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)), \
+    with patch.object(prioritize_mod, "get_model_gateway",
+                      return_value=_gateway(reply)), \
          patch.object(prioritize_mod, "record_node_summary"):
         result = prioritize_plan_items(_state(items, cards))
 
@@ -84,7 +93,8 @@ def test_stale_nudge_entry_alongside_a_real_new_item():
          "priority_reasoning": "idle for 3 weeks", "movement_note": None},
     ]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)), \
+    with patch.object(prioritize_mod, "get_model_gateway",
+                      return_value=_gateway(reply)), \
          patch.object(prioritize_mod, "record_node_summary"):
         result = prioritize_plan_items(_state(items, cards))
 
@@ -102,7 +112,8 @@ def test_hard_cap_at_max_project_work_items_even_if_model_returns_more():
         for i in range(MAX_PROJECT_WORK_ITEMS + 3)
     ]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)), \
+    with patch.object(prioritize_mod, "get_model_gateway",
+                      return_value=_gateway(reply)), \
          patch.object(prioritize_mod, "record_node_summary"):
         result = prioritize_plan_items(_state(items, cards))
 
@@ -117,7 +128,8 @@ def test_hallucinated_card_id_dropped():
         {"matched_card_id": "ghost-card-not-real", "source": "stale_nudge", "item_url": None, "priority_reasoning": "r", "movement_note": None},
     ]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)), \
+    with patch.object(prioritize_mod, "get_model_gateway",
+                      return_value=_gateway(reply)), \
          patch.object(prioritize_mod, "record_node_summary"):
         result = prioritize_plan_items(_state(items, cards))
 
@@ -131,7 +143,8 @@ def test_hallucinated_item_url_on_new_item_dropped():
     reply = [{"matched_card_id": "card1", "source": "new_item", "item_url": "https://not-real.com",
               "priority_reasoning": "r", "movement_note": None}]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)), \
+    with patch.object(prioritize_mod, "get_model_gateway",
+                      return_value=_gateway(reply)), \
          patch.object(prioritize_mod, "record_node_summary"):
         result = prioritize_plan_items(_state(items, cards))
 
@@ -146,7 +159,8 @@ def test_order_preserved_from_model_response():
         {"matched_card_id": "card1", "source": "new_item", "item_url": "https://a.com/1", "priority_reasoning": "lower priority", "movement_note": None},
     ]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)), \
+    with patch.object(prioritize_mod, "get_model_gateway",
+                      return_value=_gateway(reply)), \
          patch.object(prioritize_mod, "record_node_summary"):
         result = prioritize_plan_items(_state(items, cards))
 
@@ -160,29 +174,29 @@ def test_movement_block_included_in_prompt():
     reply = [{"matched_card_id": "card1", "source": "new_item", "item_url": "https://a.com/1",
               "priority_reasoning": "r", "movement_note": "unchanged since last week"}]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)) as mock_create, \
+    gateway = _gateway(reply)
+    with patch.object(prioritize_mod, "get_model_gateway", return_value=gateway), \
          patch.object(prioritize_mod, "record_node_summary"):
         prioritize_plan_items(_state(items, cards, card_movements=movements))
 
-    prompt = mock_create.call_args.kwargs["messages"][0]["content"]
+    prompt = gateway.complete_json.call_args.kwargs["prompt"]
     assert "card1" in prompt and "unchanged" in prompt
 
 
 def test_json_parse_failure_falls_back_to_unprioritized_matched_items():
     items = [_matched_item("https://a.com/1", "card1"), _matched_item("https://b.com/1", "card2")]
     cards = [_card("card1"), _card("card2")]
-    bad_resp = MagicMock()
-    bad_resp.content = [MagicMock(text="not valid json")]
-    bad_resp.usage.input_tokens = 10
-    bad_resp.usage.output_tokens = 5
-
-    with patch.object(prioritize_mod.client.messages, "create", return_value=bad_resp), \
+    with patch.object(
+        prioritize_mod,
+        "get_model_gateway",
+        return_value=_gateway(side_effect=ModelGatewayError("malformed response")),
+    ), \
          patch.object(prioritize_mod, "record_node_summary") as mock_summary:
         result = prioritize_plan_items(_state(items, cards))
 
     assert len(result["prioritized_project_work"]) == 2
     assert all(e["source"] == "new_item" for e in result["prioritized_project_work"])
-    assert "prioritize_plan_items JSON parse failed after retry" in result["errors"][0]
+    assert "prioritize_plan_items provider failure" in result["errors"][0]
     mock_summary.assert_called_once()
 
 
@@ -201,11 +215,12 @@ def test_course_tagged_items_excluded_from_candidates():
     reply = [{"matched_card_id": "card2", "source": "new_item", "item_url": "https://b.com/1",
               "priority_reasoning": "r", "movement_note": None}]
 
-    with patch.object(prioritize_mod.client.messages, "create", return_value=_haiku_response(reply)) as mock_create, \
+    gateway = _gateway(reply)
+    with patch.object(prioritize_mod, "get_model_gateway", return_value=gateway), \
          patch.object(prioritize_mod, "record_node_summary"):
         prioritize_plan_items(_state(items, cards))
 
-    prompt = mock_create.call_args.kwargs["messages"][0]["content"]
+    prompt = gateway.complete_json.call_args.kwargs["prompt"]
     assert "https://a.com/1" not in prompt
     assert "https://b.com/1" in prompt
 
@@ -216,11 +231,11 @@ def test_zero_matched_items_skips_llm_call_entirely():
     into consideration, even though the board itself has real cards."""
     cards = [_card("card1"), _card("card2")]
 
-    with patch.object(prioritize_mod.client.messages, "create") as mock_create, \
+    with patch.object(prioritize_mod, "get_model_gateway") as mock_gateway, \
          patch.object(prioritize_mod, "record_node_summary") as mock_summary:
         result = prioritize_plan_items(_state([], cards))
 
-    mock_create.assert_not_called()
+    mock_gateway.assert_not_called()
     assert result["prioritized_project_work"] == []
     assert result["costs"][0]["cost_usd"] == 0.0
     assert result["costs"][0]["input_tokens"] == 0
@@ -237,9 +252,43 @@ def test_zero_matched_items_produces_no_trello_cards_in_output_even_with_a_large
     Existing Project Work with pure stale_nudge picks."""
     cards = [_card(f"card{i}") for i in range(10)]
 
-    with patch.object(prioritize_mod.client.messages, "create") as mock_create, \
+    with patch.object(prioritize_mod, "get_model_gateway") as mock_gateway, \
          patch.object(prioritize_mod, "record_node_summary"):
         result = prioritize_plan_items(_state([], cards))
 
-    mock_create.assert_not_called()
+    mock_gateway.assert_not_called()
     assert result["prioritized_project_work"] == []
+
+
+def test_prioritization_uses_bounded_structured_gateway_request():
+    items = [_matched_item("https://a.com/1", "card1")]
+    cards = [_card("card1")]
+    gateway = MagicMock()
+    gateway.complete_json.return_value = ModelResult(
+        data={
+            "results": [
+                {
+                    "matched_card_id": "card1",
+                    "source": "new_item",
+                    "item_url": "https://a.com/1",
+                    "priority_reasoning": "continues active work",
+                    "movement_note": None,
+                }
+            ]
+        },
+        provider="groq",
+        input_tokens=100,
+        output_tokens=40,
+        cost_usd=0.001,
+    )
+    gateway.anthropic_spend_usd = 0.0
+
+    with patch.object(prioritize_mod, "get_model_gateway", return_value=gateway), \
+         patch.object(prioritize_mod, "record_node_summary"):
+        result = prioritize_plan_items(_state(items, cards))
+
+    assert result["prioritized_project_work"][0]["matched_card_id"] == "card1"
+    request = gateway.complete_json.call_args.kwargs
+    assert request["max_completion_tokens"] <= 1024
+    assert request["allow_anthropic_fallback"] is True
+    assert request["json_schema"]["type"] == "object"

@@ -57,8 +57,10 @@ from core.state import ClusteredItem, NodeCost
 logger = logging.getLogger(__name__)
 
 _NAMESPACE = ("weekly_intel", "recent_item_embeddings")
+_PENDING_NAMESPACE = ("weekly_intel", "pending_item_embeddings")
 _DROPS_NAMESPACE = ("weekly_intel", "prefilter_drops")
-_WINDOW_DAYS = 7
+_NEWS_WINDOW_DAYS = 14
+_EVERGREEN_WINDOW_DAYS = 60
 _THRESHOLD = 0.90
 
 # Second, lower tier: catches "same announcement, different dedicated
@@ -86,7 +88,7 @@ def _load_window() -> list[dict]:
     entry older than _WINDOW_DAYS as it's encountered -- keeps the
     namespace bounded with no separate cleanup job."""
     store = get_store()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=_WINDOW_DAYS)
+    now = datetime.now(timezone.utc)
     live: list[dict] = []
 
     logger.debug("semantic_dedup: BEFORE store.search() (_load_window)")
@@ -97,7 +99,8 @@ def _load_window() -> list[dict]:
     for item_obj in window_entries:
         value = item_obj.value
         scored_at = datetime.fromisoformat(value["scored_at"])
-        if scored_at < cutoff:
+        window_days = int(value.get("window_days", _NEWS_WINDOW_DAYS))
+        if scored_at < now - timedelta(days=window_days):
             logger.debug(f"semantic_dedup: BEFORE store.delete() (stale window entry {item_obj.key!r})")
             t0 = time.perf_counter()
             store.delete(_NAMESPACE, item_obj.key)
@@ -152,7 +155,13 @@ def _is_roundup_item(item: dict) -> bool:
     prefix is the real, currently-observed signal (Latent Space's
     aggregation-format posts) -- same prefix-based identification pattern
     already used for Hacker News's "Show HN:" in discovery/nodes/score.py."""
-    return item.get("source") == "TLDR AI" or (item.get("title") or "").startswith("[AINews]")
+    return (item.get("title") or "").startswith("[AINews]")
+
+
+def _window_days(item: dict) -> int:
+    text = f"{item.get('title', '')} {item.get('text', '')[:500]}".lower()
+    evergreen_markers = ("tutorial", "guide", "course", "walkthrough", "how to", "introduction")
+    return _EVERGREEN_WINDOW_DAYS if any(marker in text for marker in evergreen_markers) else _NEWS_WINDOW_DAYS
 
 
 def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tuple[list[ClusteredItem], list[NodeCost]]:
@@ -287,16 +296,30 @@ def dedupe_semantic(items: list[ClusteredItem], run_id: str = "unknown") -> tupl
         logger.debug(f"semantic_dedup: BEFORE store.batch() (survivors, {len(survivors)} record(s))")
         t0 = time.perf_counter()
         store.batch([
-            PutOp(_NAMESPACE, item["url"], {
+            PutOp(_PENDING_NAMESPACE, f"{run_id}:{item['url']}", {
                 "item_id": item["url"],
                 "url": item["url"],
                 "embedding_vector": vector,
                 "fetched_at": item["fetched_at"],
                 "scored_at": scored_at,
                 "is_roundup": _is_roundup_item(item),
+                "run_id": run_id,
+                "window_days": _window_days(item),
             })
             for item, vector in zip(survivors, survivor_vectors)
         ])
         logger.debug(f"semantic_dedup: AFTER store.batch() (survivors) ({time.perf_counter() - t0:.3f}s)")
 
     return survivors, costs
+
+
+def commit_delivered_embeddings(run_id: str, delivered_urls: list[str]) -> None:
+    """Promote only Telegram-acknowledged stories into the dedup window."""
+    store = get_store()
+    delivered = set(delivered_urls)
+    for item_obj in store.search(_PENDING_NAMESPACE, limit=1000):
+        value = item_obj.value
+        if value.get("run_id") != run_id or value.get("url") not in delivered:
+            continue
+        store.put(_NAMESPACE, value["url"], {k: v for k, v in value.items() if k != "run_id"})
+        store.delete(_PENDING_NAMESPACE, item_obj.key)

@@ -1,167 +1,138 @@
-"""
-Routes Telegram replies that are not approval responses.
-
-Numbered digest/plan feedback (Part D) resolves item numbers back to real
-items via the digest_item_map store entry keyed by the ORIGINAL message's
-message_id, then folds the signal into taste_profile.yaml via
-approval_actions.handle_feedback -- NOT gated behind approval, unlike
-proposal approve/reject.
-
-`_parse_numbered_feedback` turns free-form reply text like "1. loved it,
-2. meh" into structured [{item_number, feedback_text, sentiment}, ...] via
-a Haiku call, same structured-output pattern as classify_item.py (prompt
--> parse -> retry-on-malformed-JSON -> defensive validation). Sentiment
-inference is folded into this same call rather than a second LLM
-round-trip, since it's the same judgment the parsing call is already
-making.
-"""
-
+"""Two-phase natural-language feedback: parse, confirm, then learn."""
+from __future__ import annotations
 import json
 import logging
+import uuid
+from datetime import datetime, timedelta, timezone
 
 import anthropic
-
-from saturday.approval_actions import handle_feedback as apply_feedback
+from core.preferences import apply_confirmed_events_locked, validate_feedback_event
 from saturday.memory_store_config import get_store
+from telegram.bot_client import send_message
 
 logger = logging.getLogger(__name__)
-
 _client = anthropic.Anthropic()
-
 _DIGEST_MAP_NAMESPACE = ("weekly_intel", "digest_item_map")
+_PENDING_NAMESPACE = ("weekly_intel", "pending_feedback")
+_CONFIRM = {"confirm", "confirmed", "yes", "apply"}
+_CANCEL = {"cancel", "no", "discard"}
 
-_PARSE_PROMPT = """You are parsing a user's free-form reply to a numbered list of digest/plan \
-items into structured per-item feedback.
-
-The numbered items shown to the user were:
-{items_block}
-
-The user's reply:
-{reply_text}
-
-For each item NUMBER the user gave feedback on, determine:
-- item_number: the integer number they referenced
-- feedback_text: their feedback in their own words (brief, verbatim or lightly cleaned up)
-- sentiment: "positive" or "negative" -- infer from tone/content
-
-Not every item needs to be covered -- only include items the user actually gave feedback on. \
-Ignore anything in the reply that doesn't reference the shown list.
-
-Return ONLY a JSON array, one object per referenced item, in this exact shape:
-[{{"item_number": 1, "feedback_text": "...", "sentiment": "positive" or "negative"}}]"""
-
-_VALID_SENTIMENTS = {"positive", "negative"}
+_PROMPT = """Parse the user's reply into JSON feedback events. Scale relevance:
+0=avoid, 1=informational/okay, 2=useful, 3=loved/must-read.
+Capture duplicate_of item number, liked_aspects, disliked_aspects, new_interests,
+topics, and digest_flags (including redundant_coverage). One event per referenced
+item; digest-level criticism may use item_number null. Do not invent feedback.
+Items:
+{items}
+Reply:
+{reply}
+Return only a JSON array with keys item_number, relevance, duplicate_of,
+liked_aspects, disliked_aspects, new_interests, topics, digest_flags, feedback_text."""
 
 
 def _format_items_for_parse(item_map: dict) -> str:
-    def _sort_key(kv):
-        try:
-            return int(kv[0])
-        except (TypeError, ValueError):
-            return 0
-
-    lines = []
-    for number, item in sorted(item_map.items(), key=_sort_key):
-        title = item.get("title") or item.get("url", "unknown")
-        lines.append(f"{number}. {title}")
-    return "\n".join(lines)
+    return "\n".join(f"{k}. {v.get('title') or v.get('url')}" for k, v in item_map.items())
 
 
 def _parse_json_response(raw: str) -> list:
     raw = raw.strip()
     if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1]
-        raw = raw.rsplit("```", 1)[0]
-    return json.loads(raw.strip())
+        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+    return json.loads(raw)
 
 
 def _parse_numbered_feedback(text: str, item_map: dict | None = None) -> list[dict]:
-    """Turns free-form reply text into structured per-item feedback +
-    sentiment via a Haiku call. item_map (the same shape stored in
-    digest_item_map) is included as context so loosely-worded replies
-    ("the langchain one was great") can still resolve to the right
-    number, not just strictly-numbered replies."""
-    items_block = _format_items_for_parse(item_map) if item_map else "(not available)"
-    prompt = _PARSE_PROMPT.format(items_block=items_block, reply_text=text)
-
     response = _client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
+        model="claude-haiku-4-5", max_tokens=1024,
+        messages=[{"role": "user", "content": _PROMPT.format(
+            items=_format_items_for_parse(item_map or {}), reply=text)}],
     )
-
     try:
         parsed = _parse_json_response(response.content[0].text)
-    except json.JSONDecodeError:
-        logger.warning("feedback_router: numbered-feedback parse failed, retrying")
-        retry = _client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=1024,
-            messages=[
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": response.content[0].text},
-                {"role": "user", "content": "Return ONLY valid JSON. No markdown, no text before or after the array."},
-            ],
-        )
-        try:
-            parsed = _parse_json_response(retry.content[0].text)
-        except json.JSONDecodeError:
-            logger.error("feedback_router: numbered-feedback parse failed after retry")
-            return []
-
-    valid: list[dict] = []
-    for entry in parsed:
-        if entry.get("sentiment") not in _VALID_SENTIMENTS:
-            logger.warning(f"feedback_router: dropping entry with invalid sentiment: {entry}")
-            continue
-        if not isinstance(entry.get("item_number"), int):
-            logger.warning(f"feedback_router: dropping entry with invalid item_number: {entry}")
-            continue
-        valid.append(entry)
+    except (json.JSONDecodeError, IndexError):
+        logger.exception("feedback parse failed; no preference state changed")
+        return []
+    valid = []
+    valid_numbers = {str(k) for k in (item_map or {})}
+    try:
+        for raw_event in parsed:
+            if raw_event.get("item_number") is not None and str(raw_event["item_number"]) not in valid_numbers:
+                continue
+            raw_event.update({"event_id": str(uuid.uuid4()), "raw_text": text})
+            event = validate_feedback_event(raw_event)
+            event["confirmation_state"] = "pending"
+            event.pop("confirmed_at", None)
+            valid.append(event)
+    except (TypeError, ValueError, AttributeError):
+        logger.exception("feedback schema validation failed; no preference state changed")
+        return []
     return valid
 
 
-def _handle_numbered_feedback(reply_to_message_id: int, text: str) -> bool:
-    """Returns True if this reply was a numbered digest/plan reply (and
-    was processed), False if there's no matching digest_item_map entry --
-    caller should fall through to the generic unrouted-reply log."""
-    entry = get_store().get(_DIGEST_MAP_NAMESPACE, str(reply_to_message_id))
-    if entry is None:
+def _summary(events: list[dict]) -> str:
+    parts = []
+    for event in events:
+        prefix = "digest" if event.get("item_number") is None else str(event["item_number"])
+        value = f"{prefix}={event.get('relevance', 1)}"
+        if event.get("duplicate_of"):
+            value += f" duplicate of {event['duplicate_of']}"
+        labels = event.get("topics", []) + event.get("new_interests", []) + event.get("digest_flags", [])
+        if labels:
+            value += " " + "/".join(labels[:3])
+        parts.append(value)
+    return "; ".join(parts)
+
+
+def _confirm(reply_id: int, text: str, store) -> bool:
+    pending_item = store.get(_PENDING_NAMESPACE, str(reply_id))
+    if not pending_item:
         return False
+    pending = pending_item.value
+    if datetime.fromisoformat(pending["expires_at"]) <= datetime.now(timezone.utc):
+        store.delete(_PENDING_NAMESPACE, str(reply_id))
+        send_message("That feedback confirmation expired; please reply to the digest again.")
+        return True
+    if text.lower() in _CANCEL:
+        store.delete(_PENDING_NAMESPACE, str(reply_id))
+        send_message("Feedback discarded.")
+        return True
+    if text.lower() not in _CONFIRM:
+        send_message('Reply "confirm" to apply this feedback, or "cancel" to discard it.')
+        return True
+    events = pending["events"]
+    apply_confirmed_events_locked(store, events)
+    store.delete(_PENDING_NAMESPACE, str(reply_id))
+    send_message(f"Applied {len(events)} confirmed feedback signal(s).")
+    return True
 
-    run_id = entry.value["run_id"]
-    item_map = entry.value["items"]  # keys are strings once round-tripped through the store
 
-    parsed = _parse_numbered_feedback(text, item_map)
-    for feedback_entry in parsed:
-        number = str(feedback_entry["item_number"])
-        item = item_map.get(number)
-        if item is None:
-            logger.warning(f"feedback_router: no item found for number {feedback_entry['item_number']}")
-            continue
-        apply_feedback(
-            item,
-            feedback_text=feedback_entry["feedback_text"],
-            sentiment=feedback_entry["sentiment"],
-            run_id=run_id,
-        )
-
-    logger.info(f"feedback_router: processed {len(parsed)} numbered feedback item(s)")
+def _handle_numbered_feedback(reply_id: int, text: str) -> bool:
+    store = get_store()
+    entry = store.get(_DIGEST_MAP_NAMESPACE, str(reply_id))
+    if not entry:
+        return False
+    events = _parse_numbered_feedback(text, entry.value["items"])
+    if not events:
+        send_message("I couldn't parse that feedback, so nothing was changed.")
+        return True
+    for event in events:
+        event["parser_confidence"] = event.get("parser_confidence", .8)
+    response = send_message(f"Please confirm: {_summary(events)}\n\nReply “confirm” or “cancel”.")
+    confirmation_id = str(response["result"]["message_id"])
+    store.put(_PENDING_NAMESPACE, confirmation_id, {
+        "events": events, "item_map": entry.value["items"], "run_id": entry.value["run_id"],
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+    })
     return True
 
 
 def handle_feedback(message: dict) -> None:
-    """Route a Telegram reply that isn't an approval response. If it's a
-    reply to a known digest/plan message, resolve numbered feedback and
-    fold it into taste_profile.yaml. Otherwise, just log it (unrouted)."""
-    reply_to = message.get("reply_to_message")
+    reply = message.get("reply_to_message")
     text = (message.get("text") or "").strip()
-
-    if reply_to and text and _handle_numbered_feedback(reply_to["message_id"], text):
+    if not reply or not text:
         return
-
-    logger.info(
-        f"feedback_router: unrouted reply "
-        f"(message_id={message.get('message_id')}): "
-        f"{(message.get('text') or '')[:100]}"
-    )
+    store = get_store()
+    if _confirm(reply["message_id"], text, store):
+        return
+    if not _handle_numbered_feedback(reply["message_id"], text):
+        logger.info("feedback_router: unrouted reply message_id=%s", message.get("message_id"))

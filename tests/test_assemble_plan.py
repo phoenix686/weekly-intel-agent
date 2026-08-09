@@ -538,13 +538,10 @@ def test_assemble_plan_records_cards_from_prioritized_project_work():
         _plan_item(matched_card_id="card1", title="Project B"),
     ]
     priority = [_priority_entry(matched_card_id="card1", item_url=items[1]["url"])]
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
-         patch("saturday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_saturday_state(items, [_card("card1")], priority))
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]):
+        result = assemble_plan(_saturday_state(items, [_card("card1")], priority))
 
-    mock_record.assert_called_once_with(RUN_ID, [{"card_id": "card1", "list_name": "In Progress"}])
+    assert result["surfaced_cards"] == [{"card_id": "card1", "list_name": "In Progress"}]
 
 
 def test_assemble_plan_records_empty_when_prioritized_project_work_is_empty():
@@ -553,45 +550,27 @@ def test_assemble_plan_records_empty_when_prioritized_project_work_is_empty():
     it -- 'surfaced' now means 'actually rendered', not 'happened to
     match something this week'."""
     items = [_plan_item(matched_card_id="card1", title="Project B")]
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
-         patch("saturday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_saturday_state(items, [_card("card1")], prioritized_project_work=[]))
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]):
+        result = assemble_plan(_saturday_state(items, [_card("card1")], prioritized_project_work=[]))
 
-    mock_record.assert_called_once_with(RUN_ID, [])
+    assert result["surfaced_cards"] == []
 
 
 def test_assemble_plan_falls_back_to_unknown_list_name_if_card_not_in_trello_cards():
     priority = [_priority_entry(matched_card_id="ghost-card", item_url="https://example.com")]
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
-         patch("saturday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_saturday_state([], trello_cards=[], prioritized_project_work=priority))
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]):
+        result = assemble_plan(_saturday_state([], trello_cards=[], prioritized_project_work=priority))
 
-    mock_record.assert_called_once_with(RUN_ID, [{"card_id": "ghost-card", "list_name": "Unknown"}])
+    assert result["surfaced_cards"] == [{"card_id": "ghost-card", "list_name": "Unknown"}]
 
 
 def test_assemble_plan_still_writes_current_weekly_plan():
     items = [_plan_item(matched_card_id=None, title="Article A")]
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
-         patch("saturday.nodes.assemble_plan.record_plan_history"):
-        assemble_plan(_saturday_state(items))
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]):
+        result = assemble_plan(_saturday_state(items))
 
-    # Two puts now: the existing ("companion",) write, plus the
-    # ("village",) event write added alongside it (2026-07-23,
-    # village-namespace event writes) -- checking the companion call
-    # specifically rather than assert_called_once.
-    assert fake_store.put.call_count == 2
-    companion_calls = [c for c in fake_store.put.call_args_list if c.args[0] == ("companion",)]
-    assert len(companion_calls) == 1
-    namespace, key, value = companion_calls[0].args
-    assert namespace == ("companion",)
-    assert key == "current_weekly_plan"
-    assert value["run_id"] == RUN_ID
+    assert result["plan_text"]
+    assert result["plan_generated_at"]
 
 
 def test_assemble_plan_passes_prioritized_project_work_through_to_format_plan():
@@ -599,10 +578,7 @@ def test_assemble_plan_passes_prioritized_project_work_through_to_format_plan():
     matched classified item still renders Existing Project Work."""
     priority = [_priority_entry(matched_card_id="card1", source="stale_nudge", item_url=None,
                                  priority_reasoning="Idle for weeks.")]
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]), \
-         patch("saturday.nodes.assemble_plan.record_plan_history"):
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]):
         result = assemble_plan(_saturday_state([], [_card("card1", "My Card")], priority))
 
     assert "<b>Existing Project Work</b>" in result["plan_text"]
@@ -618,10 +594,7 @@ def test_assemble_plan_merges_carried_items_into_rendered_plan():
         "proposal_type": None, "classification_reasoning": "carried forward, unfinished last week",
         "matched_card_id": None, "tags": ["agentic-engineering"],
     }]
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=carried), \
-         patch("saturday.nodes.assemble_plan.record_plan_history"):
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=carried):
         result = assemble_plan(_saturday_state([]))
 
     assert "Carried Article" in result["plan_text"]
@@ -629,10 +602,7 @@ def test_assemble_plan_merges_carried_items_into_rendered_plan():
 
 
 def test_assemble_plan_calls_get_carry_forward_items_with_current_run_id():
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]) as mock_carry, \
-         patch("saturday.nodes.assemble_plan.record_plan_history"):
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=[]) as mock_carry:
         assemble_plan(_saturday_state([]))
 
     mock_carry.assert_called_once_with(RUN_ID)
@@ -646,13 +616,10 @@ def test_assemble_plan_carried_item_not_recorded_in_plan_history():
         "reasoning": "r", "classification": "plan_item", "proposal_type": None,
         "classification_reasoning": "r", "matched_card_id": None, "tags": [],
     }]
-    fake_store = MagicMock()
-    with patch("saturday.nodes.assemble_plan.get_store", return_value=fake_store), \
-         patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=carried), \
-         patch("saturday.nodes.assemble_plan.record_plan_history") as mock_record:
-        assemble_plan(_saturday_state([]))
+    with patch("saturday.nodes.assemble_plan.get_carry_forward_items", return_value=carried):
+        result = assemble_plan(_saturday_state([]))
 
-    mock_record.assert_called_once_with(RUN_ID, [])
+    assert result["surfaced_cards"] == []
 
 
 # ── Length budget / reasoning truncation (2026-07-19) ───────────────────────────

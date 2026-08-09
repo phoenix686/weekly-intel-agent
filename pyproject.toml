@@ -12,6 +12,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=3.1.0",
     "groq>=1.6.0",
     "httpx>=0.28.1",
+    "agentmail>=0.5.8",
 ]
 
 [tool.uv]
@@ -31,6 +32,11 @@ dev = [
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+markers = [
+    "live: requires external network or production credentials",
+]
 
 [tool.ruff.lint]
 # E4=imports, E7=statement errors, E9=runtime errors, F=pyflakes — critical errors only

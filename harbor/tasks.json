@@ -1,0 +1,8 @@
+[
+  {"id":"groq-413-429-budget","asserts":["bounded retry","budget cap"]},
+  {"id":"telegram-no-premature-commit","asserts":["ack before seen state"]},
+  {"id":"feedback-mid-batch-exactly-once","asserts":["event id idempotency"]},
+  {"id":"source-outage-status","asserts":["no false nothing-new"]},
+  {"id":"saturday-resume-once","asserts":["queue and plan transaction"]},
+  {"id":"delivery-before-village","asserts":["receipt precedes publication"]}
+]

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-from discovery.blog_sources_config import load_blog_sources, CONFIG_PATH
+from discovery.blog_sources_config import load_blog_sources
 from discovery.parsers.rss_common import fetch_rss_feed
 
 
@@ -45,6 +45,7 @@ def test_at_least_two_entries_present():
     assert len(entries) >= 2
 
 
+@pytest.mark.live
 @pytest.mark.parametrize("entry", load_blog_sources(), ids=lambda e: e["name"])
 def test_feed_url_entries_return_real_content_live(entry):
     if "feed_url" not in entry:

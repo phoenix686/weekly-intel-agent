@@ -37,7 +37,8 @@ def test_queued_message_produces_one_raw_item_with_text_preserved():
     item = result["raw_items"][0]
     assert item["text"] == "check out this new agent framework"
     assert item["source"] == "adhoc_telegram"
-    assert fake_store.deleted == ["key-1"]
+    assert result["adhoc_queue_keys"] == ["key-1"]
+    assert fake_store.deleted == []
 
 
 def test_empty_queue_produces_no_raw_items():
@@ -46,6 +47,7 @@ def test_empty_queue_produces_no_raw_items():
         result = process_adhoc_input({})
 
     assert result["raw_items"] == []
+    assert result["adhoc_queue_keys"] == []
     assert len(result["costs"]) == 1
     assert result["costs"][0]["node_name"] == "process_adhoc_input"
 
@@ -70,7 +72,8 @@ def test_multiple_queued_messages_each_produce_a_raw_item():
     assert len(result["raw_items"]) == 2
     texts = {item["text"] for item in result["raw_items"]}
     assert texts == {"first item", "second item"}
-    assert sorted(fake_store.deleted) == ["key-1", "key-2"]
+    assert sorted(result["adhoc_queue_keys"]) == ["key-1", "key-2"]
+    assert fake_store.deleted == []
 
 
 def test_process_adhoc_input_wired_saturday_only_not_daily():

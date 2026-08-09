@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from langgraph.store.base import GetOp, PutOp
 
-from discovery.semantic_dedup import dedupe_semantic, _NAMESPACE
+from discovery.semantic_dedup import dedupe_semantic
 from discovery.embeddings import _FAILURES_NAMESPACE
 
 
@@ -145,9 +145,9 @@ def test_cross_run_match_drops_new_item_unconditionally():
     assert "https://new.com/1" not in fake_store._data
 
 
-def test_window_entries_older_than_7_days_are_excluded_and_deleted():
+def test_news_window_entries_older_than_14_days_are_excluded_and_deleted():
     item = _item("https://a.com/1", "Fresh story", "genuinely new content")
-    stale_scored_at = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    stale_scored_at = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
     fake_store = _FakeStore(seed={
         "https://stale.com/1": {
             "item_id": "https://stale.com/1", "url": "https://stale.com/1",
@@ -308,10 +308,8 @@ def test_roundup_item_never_drops_a_dedicated_article_via_content_overlap():
     assert not any(c.get("error") for c in costs)
 
 
-def test_tldr_ai_source_also_guarded_from_content_overlap_drops():
-    """Same scope guard, via the source=='TLDR AI' signal (matches
-    blog_sources.yaml's roundup: true config flag) rather than the
-    '[AINews]' title prefix."""
+def test_tldr_ai_blurbs_are_individual_documents_not_roundups():
+    """TLDR is split upstream, so each blurb participates in story matching."""
     roundup = _item("https://tldr.tech/ai/2026-07-23", "TLDR AI issue", "roundup issue content",
                      source="TLDR AI")
     dedicated = _item("https://example.com/one-story", "One Specific Story", "dedicated article content")
@@ -326,8 +324,8 @@ def test_tldr_ai_source_also_guarded_from_content_overlap_drops():
          patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect(vectors)):
         survivors, costs = dedupe_semantic([roundup, dedicated], run_id="run-1")
 
-    assert len(survivors) == 2
-    assert not any(c.get("error") for c in costs)
+    assert len(survivors) == 1
+    assert any(c.get("error") for c in costs)
 
 
 def test_survivor_window_entry_persists_is_roundup_flag():
@@ -345,7 +343,7 @@ def test_survivor_window_entry_persists_is_roundup_flag():
          patch("discovery.semantic_dedup.embed_texts", side_effect=_embed_texts_side_effect(vectors)):
         dedupe_semantic([roundup, dedicated], run_id="run-1")
 
-    roundup_entry = fake_store._data["https://www.latent.space/p/ainews-roundup"]
-    dedicated_entry = fake_store._data["https://example.com/one-story"]
+    roundup_entry = fake_store._data["run-1:https://www.latent.space/p/ainews-roundup"]
+    dedicated_entry = fake_store._data["run-1:https://example.com/one-story"]
     assert roundup_entry["is_roundup"] is True
     assert dedicated_entry["is_roundup"] is False

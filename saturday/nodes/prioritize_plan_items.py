@@ -2,13 +2,12 @@
 import time
 import json
 import logging
-import anthropic
 
 from core.state import SaturdayGraphState, NodeCost
+from core.model_gateway import ModelGatewayError, get_model_gateway
 from core.observability import record_node_summary
 
 logger = logging.getLogger(__name__)
-client = anthropic.Anthropic()
 
 MAX_PROJECT_WORK_ITEMS = 5
 
@@ -33,8 +32,8 @@ New items matched to existing cards this week:
 Full Trello board state (every Dump + In Progress card, including cards with no new content this week -- last_activity is Trello's own timestamp, ISO 8601):
 {cards_block}
 
-Select AT MOST {max_items} entries for this week's Existing Project Work section, ordered from HIGHEST to LOWEST priority. Target 3-{max_items} entries; fewer (including zero) is correct if there genuinely isn't enough worth surfacing this week -- never pad the list just to hit the target. Return ONLY a JSON array:
-[
+Select AT MOST {max_items} entries for this week's Existing Project Work section, ordered from HIGHEST to LOWEST priority. Target 3-{max_items} entries; fewer (including zero) is correct if there genuinely isn't enough worth surfacing this week -- never pad the list just to hit the target. Return a JSON object with a "results" array:
+{{"results": [
   {{
     "matched_card_id": "...",
     "source": "new_item" or "stale_nudge",
@@ -42,9 +41,41 @@ Select AT MOST {max_items} entries for this week's Existing Project Work section
     "priority_reasoning": "one sentence: why this rank, referencing urgency, staleness, or depth -- not just a description of the content",
     "movement_note": "..." or null
   }}
-]
+]}}
 
 "item_url" must be one of the URLs from "New items matched to existing cards" above when source is "new_item", and null when source is "stale_nudge" (a card with no new content this week). "matched_card_id" must be a real card id from the Trello board state above."""
+
+_PRIORITIZE_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "matched_card_id": {"type": "string"},
+                    "source": {
+                        "type": "string",
+                        "enum": ["new_item", "stale_nudge"],
+                    },
+                    "item_url": {"type": ["string", "null"]},
+                    "priority_reasoning": {"type": "string"},
+                    "movement_note": {"type": ["string", "null"]},
+                },
+                "required": [
+                    "matched_card_id",
+                    "source",
+                    "item_url",
+                    "priority_reasoning",
+                    "movement_note",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["results"],
+    "additionalProperties": False,
+}
 
 
 def _format_movements(movements: list[dict]) -> str:
@@ -165,66 +196,59 @@ def prioritize_plan_items(state: SaturdayGraphState) -> dict:
         max_items=MAX_PROJECT_WORK_ITEMS,
     )
 
-    response = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
+    gateway = get_model_gateway(
+        pipeline="saturday",
+        anthropic_spend_usd=state.get("anthropic_spend_usd", 0.0),
     )
-
-    input_tokens = response.usage.input_tokens
-    output_tokens = response.usage.output_tokens
-
     try:
-        raw_selection = _parse_json_response(response.content[0].text)
-    except json.JSONDecodeError:
-        logger.warning(f"prioritize_plan_items: first parse failed, retrying (run_id={state['run_id']})")
-        retry_response = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=4096,
-            messages=[
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": response.content[0].text},
-                {"role": "user", "content": "Return ONLY valid JSON. No markdown, no text before or after the array."},
-            ],
+        model_result = gateway.complete_json(
+            task="prioritize_plan_items",
+            prompt=prompt,
+            json_schema=_PRIORITIZE_JSON_SCHEMA,
+            max_completion_tokens=1024,
+            allow_anthropic_fallback=True,
         )
-        input_tokens += retry_response.usage.input_tokens
-        output_tokens += retry_response.usage.output_tokens
-        try:
-            raw_selection = _parse_json_response(retry_response.content[0].text)
-        except json.JSONDecodeError:
-            logger.error(f"prioritize_plan_items: retry parse also failed (run_id={state['run_id']})")
-            cost = NodeCost(
-                node_name="prioritize_plan_items",
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
-                latency_ms=round((time.perf_counter() - t0) * 1000, 2),
-                provider="anthropic",
-            )
-            # Graceful degradation: fall back to this week's matched items,
-            # unprioritized (original order), capped at the same bound --
-            # preserves at least the "new content" candidates rather than
-            # surfacing nothing, same fallback philosophy as
-            # correlate_trello/classify_item's own JSON-failure paths.
-            fallback = [
-                {
-                    "matched_card_id": i["matched_card_id"], "source": "new_item",
-                    "item_url": i["url"], "priority_reasoning": "fallback: JSON parse failed, unprioritized",
-                    "movement_note": None,
-                }
-                for i in matched_items[:MAX_PROJECT_WORK_ITEMS]
-            ]
-            record_node_summary(
-                run_id=state["run_id"], node_name="prioritize_plan_items",
-                items_in=len(matched_items), items_out=len(fallback), cost_usd=cost["cost_usd"],
-                duration_seconds=round(time.perf_counter() - t0, 3),
-                error_summary="JSON parse failed after retry",
-            )
-            return {
-                "prioritized_project_work": fallback,
-                "costs": [cost],
-                "errors": state["errors"] + [f"prioritize_plan_items JSON parse failed after retry (run_id={state['run_id']})"],
+        raw_selection = model_result.data["results"]
+    except (ModelGatewayError, KeyError, TypeError) as exc:
+        logger.error(
+            "prioritize_plan_items: model gateway failed (run_id=%s): %s",
+            state["run_id"],
+            exc,
+        )
+        fallback = [
+            {
+                "matched_card_id": item["matched_card_id"],
+                "source": "new_item",
+                "item_url": item["url"],
+                "priority_reasoning": "fallback: provider unavailable, unprioritized",
+                "movement_note": None,
             }
+            for item in matched_items[:MAX_PROJECT_WORK_ITEMS]
+        ]
+        cost = NodeCost(
+            node_name="prioritize_plan_items",
+            input_tokens=0,
+            output_tokens=0,
+            cost_usd=0.0,
+            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+            provider="groq",
+            error=str(exc),
+        )
+        record_node_summary(
+            run_id=state["run_id"],
+            node_name="prioritize_plan_items",
+            items_in=len(matched_items),
+            items_out=len(fallback),
+            cost_usd=0.0,
+            duration_seconds=round(time.perf_counter() - t0, 3),
+            error_summary="model gateway failed",
+        )
+        return {
+            "prioritized_project_work": fallback,
+            "costs": [cost],
+            "errors": [f"prioritize_plan_items provider failure: {exc}"],
+            "anthropic_spend_usd": gateway.anthropic_spend_usd,
+        }
 
     selection = _validate_selection(raw_selection, valid_card_ids, valid_item_urls)
 
@@ -235,11 +259,11 @@ def prioritize_plan_items(state: SaturdayGraphState) -> dict:
 
     cost = NodeCost(
         node_name="prioritize_plan_items",
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cost_usd=round((input_tokens * 0.00025 + output_tokens * 0.00125) / 1000, 6),
+        input_tokens=model_result.input_tokens,
+        output_tokens=model_result.output_tokens,
+        cost_usd=model_result.cost_usd,
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
-        provider="anthropic",
+        provider=model_result.provider,
     )
 
     record_node_summary(
@@ -248,4 +272,13 @@ def prioritize_plan_items(state: SaturdayGraphState) -> dict:
         duration_seconds=round(time.perf_counter() - t0, 3),
     )
 
-    return {"prioritized_project_work": selection, "costs": [cost]}
+    return {
+        "prioritized_project_work": selection,
+        "costs": [cost],
+        "errors": (
+            ["provider_degraded: Anthropic fallback used during project prioritization"]
+            if model_result.degraded
+            else []
+        ),
+        "anthropic_spend_usd": gateway.anthropic_spend_usd,
+    }

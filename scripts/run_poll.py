@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 load_dotenv()
+from core.tracing import validate_tracing
+validate_tracing()
 
 from core.logging_config import setup_logging
 setup_logging()

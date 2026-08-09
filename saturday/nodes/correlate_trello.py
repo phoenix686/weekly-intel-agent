@@ -8,8 +8,10 @@ import groq
 from core.state import SaturdayGraphState, NodeCost
 from core.observability import record_node_summary
 from core.groq_client import get_groq_client, GROQ_MODEL, groq_cost
+from core.model_gateway import ModelGatewayError, ModelResult, get_model_gateway
 
 logger = logging.getLogger(__name__)
+_MODEL_BATCH_SIZE = 12
 
 # Kept intact but unused -- rollback safety net for the 2026-07-26 Groq
 # swap (see core/groq_client.py's docstring). ANTHROPIC_API_KEY stays in
@@ -199,7 +201,7 @@ def _correlate_trello_anthropic_legacy(state: SaturdayGraphState) -> dict:
     return {"correlated_items": correlated_items, "costs": [cost]}
 
 
-def correlate_trello(state: SaturdayGraphState) -> dict:
+def _correlate_trello_groq_legacy(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
 
     kept_items = [i for i in state["scored_items"] if i["keep"]]
@@ -303,3 +305,86 @@ def correlate_trello(state: SaturdayGraphState) -> dict:
     )
 
     return {"correlated_items": correlated_items, "costs": [cost]}
+
+
+def correlate_trello(state: SaturdayGraphState) -> dict:
+    """Match kept stories to Trello through the shared bounded model seam."""
+    t0 = time.perf_counter()
+    kept_items = [item for item in state["scored_items"] if item["keep"]]
+    gateway = get_model_gateway(
+        pipeline="saturday",
+        anthropic_spend_usd=state.get("anthropic_spend_usd", 0.0),
+    )
+    matches = []
+    usage: list[ModelResult] = []
+    errors = []
+
+    for offset in range(0, len(kept_items), _MODEL_BATCH_SIZE):
+        batch = kept_items[offset:offset + _MODEL_BATCH_SIZE]
+        prompt = CORRELATE_PROMPT.format(
+            cards_block=_format_cards(state["trello_cards"]),
+            items_block=_format_items(batch),
+        ).replace(_GROQ_TRAILING_INSTRUCTION_OLD, _GROQ_TRAILING_INSTRUCTION_NEW)
+        try:
+            result = gateway.complete_json(
+                task="correlate_trello",
+                prompt=prompt,
+                json_schema=_CORRELATE_JSON_SCHEMA,
+                max_completion_tokens=1024,
+                allow_anthropic_fallback=True,
+            )
+            matches.extend(result.data["results"])
+            usage.append(result)
+            if result.degraded:
+                errors.append(
+                    "provider_degraded: Anthropic fallback used during Trello correlation"
+                )
+        except (ModelGatewayError, KeyError, TypeError) as exc:
+            logger.error(
+                "correlate_trello: model gateway failed (run_id=%s): %s",
+                state["run_id"],
+                exc,
+            )
+            errors.append(
+                f"correlate_trello provider failure (run_id={state['run_id']}): {exc}"
+            )
+
+    match_by_id = {entry["item_id"]: entry for entry in matches}
+    correlated_items = [
+        {
+            **item,
+            "matched_card_id": match_by_id.get(item["url"], {}).get("matched_card_id"),
+        }
+        for item in kept_items
+    ]
+    matched_count = sum(1 for item in correlated_items if item["matched_card_id"])
+    total_input = sum(item.input_tokens for item in usage)
+    total_output = sum(item.output_tokens for item in usage)
+    total_cost = sum(item.cost_usd for item in usage)
+    providers = {item.provider for item in usage}
+    provider = next(iter(providers)) if len(providers) == 1 else (
+        "hybrid" if providers else "groq"
+    )
+    cost = NodeCost(
+        node_name="correlate_trello",
+        input_tokens=total_input,
+        output_tokens=total_output,
+        cost_usd=round(total_cost, 6),
+        latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+        provider=provider,
+    )
+    record_node_summary(
+        run_id=state["run_id"],
+        node_name="correlate_trello",
+        items_in=len(kept_items),
+        items_out=matched_count,
+        cost_usd=cost["cost_usd"],
+        duration_seconds=round(time.perf_counter() - t0, 3),
+        error_summary="; ".join(errors) or None,
+    )
+    return {
+        "correlated_items": correlated_items,
+        "costs": [cost],
+        "errors": errors,
+        "anthropic_spend_usd": gateway.anthropic_spend_usd,
+    }

@@ -12,6 +12,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -36,6 +37,7 @@ def test_real_build_daily_graph_excludes_ingest_bookmarks():
     )
 
 
+@pytest.mark.skipif(not os.getenv("DB_URI"), reason="build_saturday_graph uses the live Postgres checkpointer")
 def test_real_build_saturday_graph_excludes_ingest_bookmarks():
     graph = build_saturday_graph()
     nodes = _discovery_subgraph_nodes(graph)

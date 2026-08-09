@@ -3,12 +3,28 @@ import logging
 import time
 import anthropic
 from core.state import DiscoverySubgraphState, ScoredItem, NodeCost
-from discovery.seen_items import mark_seen
 from discovery.scored_items_log import log_scored_items
 from core.observability import record_node_summary
-from core.groq_client import get_groq_client, GROQ_MODEL, groq_cost
+from core.groq_client import get_groq_client
+from core.model_gateway import (
+    ModelBudget,
+    ModelGateway,
+    ModelRequestTooLarge,
+    ModelResult,
+)
+from core.preferences import default_snapshot, load_effective_snapshot, render_preference_context
+from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
+
+
+def _load_preference_context() -> str:
+    try:
+        snapshot = load_effective_snapshot(get_store())
+    except Exception as exc:
+        logger.warning("score_node: preference snapshot unavailable, using explicit baseline: %s", exc)
+        snapshot = default_snapshot()
+    return render_preference_context(snapshot)
 
 TASTE_PROFILE = """
 You are scoring bookmarks for an AI/ML engineer focused on agentic AI engineering.
@@ -71,7 +87,7 @@ DROPPED_TAG_LOG = "data/dropped_tags.log"
 # below is the dead code path that used to call this.
 client = anthropic.Anthropic()
 
-BATCH_SIZE = 50
+BATCH_SIZE = 12
 
 _SCORE_JSON_SCHEMA = {
     "type": "object",
@@ -167,7 +183,13 @@ Return only valid JSON. No markdown, no explanation outside the array."""
     return scored, response.usage.input_tokens, response.usage.output_tokens
 
 
-def _score_batch(batch: list, offset: int, run_id: str = "unknown") -> tuple[list[ScoredItem], int, int]:
+def _score_batch(
+    batch: list,
+    offset: int,
+    gateway: ModelGateway,
+    run_id: str = "unknown",
+    preference_context: str = "",
+) -> tuple[list[ScoredItem], ModelResult]:
     items_text = "\n\n".join(
         f"[{i}] URL: {item['url']}\nTitle: {item['title']}\nText: {item['text'][:500]}"
         for i, item in enumerate(batch)
@@ -180,6 +202,8 @@ def _score_batch(batch: list, offset: int, run_id: str = "unknown") -> tuple[lis
     # that harness, so reused verbatim rather than risking the same
     # failure here).
     prompt = f"""{TASTE_PROFILE}
+
+{preference_context}
 
 Assign 1-3 tags from EXACTLY this list — no other tags are permitted:
 agentic-engineering, memory-systems, llm-tooling, evals, learning-resource,
@@ -195,19 +219,14 @@ from the permitted list above).
 Bookmarks to score:
 {items_text}"""
 
-    groq_client = get_groq_client()
-    response = groq_client.chat.completions.create(
-        model=GROQ_MODEL,
-        temperature=0,
-        max_completion_tokens=8192,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={
-            "type": "json_schema",
-            "json_schema": {"name": "score_batch", "strict": True, "schema": _SCORE_JSON_SCHEMA},
-        },
+    result = gateway.complete_json(
+        task="score_batch",
+        prompt=prompt,
+        json_schema=_SCORE_JSON_SCHEMA,
+        allow_anthropic_fallback=True,
     )
 
-    results = json.loads(response.choices[0].message.content)["results"]
+    results = result.data["results"]
 
     _skip = {"keep", "reasoning", "tags"}
     scored = []
@@ -221,7 +240,27 @@ Bookmarks to score:
             tags=validated_tags,
         ))
 
-    return scored, response.usage.prompt_tokens, response.usage.completion_tokens
+    return scored, result
+
+
+def _score_with_split(
+    batch: list,
+    offset: int,
+    gateway: ModelGateway,
+    run_id: str,
+    preference_context: str = "",
+) -> list[tuple[list[ScoredItem], ModelResult]]:
+    """Split only when the provider envelope says this batch cannot fit."""
+    try:
+        return [_score_batch(batch, offset, gateway, run_id, preference_context)]
+    except ModelRequestTooLarge:
+        if len(batch) <= 1:
+            raise
+        midpoint = len(batch) // 2
+        return [
+            *_score_with_split(batch[:midpoint], offset, gateway, run_id, preference_context),
+            *_score_with_split(batch[midpoint:], offset + midpoint, gateway, run_id, preference_context),
+        ]
 
 
 def score_node(state: DiscoverySubgraphState) -> dict:
@@ -230,32 +269,41 @@ def score_node(state: DiscoverySubgraphState) -> dict:
     run_id = state.get("run_id", "unknown")
 
     all_scored: list[ScoredItem] = []
-    total_input = 0
-    total_output = 0
+    budget_limit = 0.10 if state.get("source_context") == "daily" else 0.50
+    gateway = ModelGateway(
+        groq_client=get_groq_client(),
+        anthropic_client=client,
+        budget=ModelBudget(anthropic_limit_usd=budget_limit),
+    )
+    usage: list[ModelResult] = []
+    preference_context = (
+        render_preference_context(state["preference_snapshot"])
+        if state.get("preference_snapshot")
+        else _load_preference_context()
+    )
 
     for offset in range(0, len(items), BATCH_SIZE):
         batch = items[offset:offset + BATCH_SIZE]
-        scored, inp, out = _score_batch(batch, offset, run_id)
-        all_scored.extend(scored)
-        total_input += inp
-        total_output += out
+        for scored, model_result in _score_with_split(
+            batch, offset, gateway, run_id, preference_context
+        ):
+            all_scored.extend(scored)
+            usage.append(model_result)
         logger.info(f"scored {offset + len(batch)}/{len(items)}")
 
-    cost_usd = groq_cost(total_input, total_output)
-
+    total_input = sum(item.input_tokens for item in usage)
+    total_output = sum(item.output_tokens for item in usage)
+    cost_usd = sum(item.cost_usd for item in usage)
+    providers = {item.provider for item in usage}
+    provider = next(iter(providers)) if len(providers) == 1 else "hybrid"
     cost = NodeCost(
         node_name="score_node",
         input_tokens=total_input,
         output_tokens=total_output,
         latency_ms=round((time.perf_counter() - t0) * 1000, 4),
-        cost_usd=cost_usd,
-        provider="groq",
+        cost_usd=round(cost_usd, 6),
+        provider=provider,
     )
-
-    if state.get("dry_run", False):
-        logger.info(f"dry_run=True -- skipping mark_seen() for {len(all_scored)} item(s)")
-    else:
-        mark_seen([item["url"] for item in all_scored])
 
     log_scored_items(run_id, all_scored)
 
@@ -269,6 +317,11 @@ def score_node(state: DiscoverySubgraphState) -> dict:
     return {
         "scored_items": all_scored,
         "costs": [cost],
+        "errors": (
+            ["provider_degraded: Anthropic fallback used during scoring"]
+            if any(item.degraded for item in usage)
+            else []
+        ),
     }
 
 if __name__ == "__main__":

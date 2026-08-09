@@ -3,15 +3,16 @@ from datetime import datetime, timezone
 
 from core.state import ScoredItem, DailyGraphState, NodeCost
 from core.observability import cost_breakdown_by_provider
-from saturday.memory_store_config import get_store
 from telegram.markdown import escape_html, format_cost_line
+from discovery.story_clusterer import diversify
 
-MAX_DIGEST_ITEMS = 15
+MAX_DIGEST_ITEMS = 10
 
 
 def format_digest(
     scored_items: list[ScoredItem], run_id: str, uncategorized_items: list[dict] | None = None,
     cost_breakdown: dict[str, float] | None = None,
+    outcome_status: str = "no_new_stories",
 ) -> tuple[str, dict[int, dict]]:
     """Renders with Telegram HTML parse_mode (see telegram/bot_client.py) --
     NOT Markdown. This function used to escape underscores with MarkdownV2
@@ -32,18 +33,30 @@ def format_digest(
     telegram/feedback_router.py path as any other digest reply -- no
     changes needed there."""
     uncategorized_items = uncategorized_items or []
-    kept = [item for item in scored_items if item["keep"]]
+    all_kept = [item for item in scored_items if item["keep"]]
+    kept = diversify(all_kept, limit=MAX_DIGEST_ITEMS)
     total_scored = len(scored_items)
-    total_kept = len(kept)
+    total_kept = len(all_kept)
     cost_line = format_cost_line(cost_breakdown)
 
     if not kept and not uncategorized_items:
-        text = "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>"
+        messages = {
+            "sources_degraded": "Source outage: the run could not establish that there were no new stories.",
+            "provider_degraded": "Model provider degraded: no digest could be selected reliably.",
+            "all_filtered": "New candidates were collected, but all were filtered from today’s digest.",
+            "pipeline_failed": "The intelligence pipeline failed before a reliable digest was produced.",
+            "no_new_stories": "Nothing new today.",
+        }
+        text = f"🤖 <b>Daily Digest</b>\n\n<i>{messages[outcome_status]}</i>"
         if cost_line:
             text += f"\n\n{cost_line}"
         return text, {}
 
     lines = ["🤖 <b>Daily Digest</b>", ""]
+    if outcome_status == "provider_degraded":
+        lines.extend(["⚠️ <i>Model provider fallback changed this run’s behavior.</i>", ""])
+    elif outcome_status == "sources_degraded":
+        lines.extend(["⚠️ <i>One or more sources were degraded; coverage may be incomplete.</i>", ""])
     item_map: dict[int, dict] = {}
     counter = 1
 
@@ -56,6 +69,12 @@ def format_digest(
             lines.append(f'{counter}. <a href="{escape_html(url)}">{escape_html(title)}</a>')
             lines.append(f"   Tags: {tags}")
             lines.append(f"   <i>{escape_html(item['reasoning'])}</i>")
+            supporting = item.get("supporting_sources", [])
+            if supporting:
+                lines.append("   Also covered by: " + ", ".join(
+                    f'<a href="{escape_html(source["url"])}">{escape_html(source["source"])}</a>'
+                    for source in supporting
+                ))
             lines.append("")
 
             item_map[counter] = {
@@ -64,15 +83,20 @@ def format_digest(
                 "text": item["text"],
                 "tags": item["tags"],
                 "reasoning": item["reasoning"],
+                "supporting_sources": supporting,
             }
             counter += 1
     else:
         lines.append("<i>Nothing new today.</i>")
         lines.append("")
 
-    if uncategorized_items:
-        lines.append(f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic</b>")
-        for item in uncategorized_items:
+    uncategorized_slots = max(0, MAX_DIGEST_ITEMS - min(total_kept, MAX_DIGEST_ITEMS))
+    shown_uncategorized = uncategorized_items[:uncategorized_slots]
+    if shown_uncategorized:
+        lines.append(
+            f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic</b>"
+        )
+        for item in shown_uncategorized:
             title = (item.get("title") or item["text"])[:80]
             url = item["url"]
             best_tag = item["best_tag"]
@@ -118,35 +142,22 @@ def assemble_digest(state: DailyGraphState) -> dict:
     # the only node left, is free), so this is the true run total, not a
     # partial figure.
     cost_breakdown = cost_breakdown_by_provider(state["costs"])
+    errors = state.get("errors", [])
+    if any("provider_degraded" in error for error in errors):
+        status = "provider_degraded"
+    elif errors:
+        status = "sources_degraded"
+    elif state["scored_items"] and not any(item["keep"] for item in state["scored_items"]):
+        status = "all_filtered"
+    else:
+        status = "no_new_stories"
     text, item_map = format_digest(
         state["scored_items"], state["run_id"], uncategorized_items=state["uncategorized_items"],
         cost_breakdown=cost_breakdown,
+        outcome_status=status,
     )
 
     generated_at = datetime.now(timezone.utc).isoformat()
-
-    get_store().put(
-        ("companion",),
-        "current_daily_digest",
-        {
-            "run_id": state["run_id"],
-            "digest_text": text,
-            "generated_at": generated_at,
-        },
-    )
-
-    total_kept = len([i for i in state["scored_items"] if i["keep"]])
-    village_summary = f"{total_kept} item(s) kept" if total_kept else "no new content"
-    get_store().put(
-        ("village",),
-        f"event:{generated_at}",
-        {
-            "agent": "weekly-intel",
-            "event_type": "digest_ready",
-            "summary": village_summary,
-            "timestamp": generated_at,
-        },
-    )
 
     cost = NodeCost(
         node_name="assemble_digest",
@@ -157,7 +168,9 @@ def assemble_digest(state: DailyGraphState) -> dict:
     )
     return {
         "digest_text": text,
+        "digest_generated_at": generated_at,
         "digest_item_map": item_map,
+        "digest_status": status,
         "costs": [cost],
     }
 

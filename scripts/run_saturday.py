@@ -14,6 +14,8 @@ dry_run = "--dry-run" in sys.argv
 
 from dotenv import load_dotenv
 load_dotenv()
+from core.tracing import validate_tracing, trace_metadata
+validate_tracing()
 
 from core.logging_config import setup_logging
 setup_logging()
@@ -38,6 +40,7 @@ record_run_started(path="saturday", run_id=run_id, started_at=started_at.isoform
 config = {
     "configurable": {"thread_id": thread_id},
     "recursion_limit": DEFAULT_RECURSION_LIMIT,
+    "metadata": trace_metadata("saturday", run_id),
 }
 
 graph = build_saturday_graph()

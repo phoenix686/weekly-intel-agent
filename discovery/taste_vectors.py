@@ -67,6 +67,7 @@ from discovery.embeddings import (
 from discovery.nodes.score import ALLOWED_TAGS
 from saturday.memory_store_config import get_store
 from core.state import ClusteredItem, NodeCost, UncategorizedItem
+from core.preferences import load_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,8 @@ def _drop_record(item_id: str, similarity: float, compared_against_tag: str, run
 
 
 def taste_prefilter(
-    items: list[ClusteredItem], run_id: str = "unknown"
+    items: list[ClusteredItem], run_id: str = "unknown",
+    preference_snapshot: dict | None = None,
 ) -> tuple[list[ClusteredItem], list[UncategorizedItem], list[NodeCost]]:
     """Returns (surviving_items, uncategorized_items, cost_records).
 
@@ -243,10 +245,15 @@ def taste_prefilter(
         ]
 
     drop_records: list[dict] = []
+    snapshot = preference_snapshot or load_snapshot(store)
+    weights = dict(snapshot.get("long_term", {}))
+    for tag, value in snapshot.get("short_term", {}).items():
+        weights[tag] = weights.get(tag, 0.0) + value
 
     for item, vector, tokens in zip(items, all_vectors, all_tokens):
         best_tag, best_sim = max(
-            ((tv["tag"], cosine_similarity(vector, tv["embedding_vector"])) for tv in topic_vectors),
+            ((tv["tag"], cosine_similarity(vector, tv["embedding_vector"])
+              + 0.15 * weights.get(tv["tag"], 0.0)) for tv in topic_vectors),
             key=lambda pair: pair[1],
         )
         cost_usd = round(tokens * COST_PER_TOKEN_USD, 8)

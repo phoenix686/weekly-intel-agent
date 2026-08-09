@@ -4,12 +4,11 @@ import json
 import logging
 import uuid
 import anthropic
-import groq
 
 from core.state import SaturdayGraphState, NodeCost
 from saturday.memory_store_config import get_store
 from core.observability import record_node_summary
-from core.groq_client import get_groq_client, GROQ_MODEL, groq_cost
+from core.model_gateway import ModelGatewayError, ModelResult, get_model_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +20,7 @@ logger = logging.getLogger(__name__)
 client = anthropic.Anthropic()
 
 _CLASSIFICATION_LOG_NAMESPACE = ("weekly_intel", "classification_log")
+_MODEL_BATCH_SIZE = 12
 
 
 def _log_classifications(items: list[dict], run_id: str) -> None:
@@ -279,86 +279,34 @@ def _classify_item_anthropic_legacy(state: SaturdayGraphState) -> dict:
 
 def classify_item(state: SaturdayGraphState) -> dict:
     t0 = time.perf_counter()
-
-    prompt = CLASSIFY_PROMPT.format(
-        cards_block=_format_cards(state["trello_cards"]),
-        items_block=_format_items(state["correlated_items"]),
-    ).replace(_GROQ_TRAILING_INSTRUCTION_OLD, _GROQ_TRAILING_INSTRUCTION_NEW)
-
-    groq_client = get_groq_client()
-
-    try:
-        response = groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            temperature=0,
-            max_completion_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "classify_item", "strict": True, "schema": _CLASSIFY_JSON_SCHEMA},
-            },
-        )
-    except groq.APIError as e:
-        logger.error(f"classify_item: Groq call failed after retries (run_id={state['run_id']}): {e}")
-        cost = NodeCost(
-            node_name="classify_item",
-            input_tokens=0, output_tokens=0,
-            cost_usd=0.0,
-            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
-            provider="groq",
-            error=str(e),
-        )
-        fallback_items = [
-            {**item, "classification": "plan_item", "proposal_type": None,
-             "classification_reasoning": "fallback: Groq call failed after retries"}
-            for item in state["correlated_items"]
-        ]
-        _log_classifications(fallback_items, state["run_id"])
-        record_node_summary(
-            run_id=state["run_id"], node_name="classify_item",
-            items_in=len(state["correlated_items"]), items_out=0, cost_usd=0.0,
-            duration_seconds=round(time.perf_counter() - t0, 3),
-            error_summary="Groq API call failed after retries",
-        )
-        return {
-            "classified_items": fallback_items,
-            "pending_approvals": [],
-            "costs": [cost],
-            "errors": state["errors"] + [f"classify_item Groq call failed after retries (run_id={state['run_id']}): {e}"],
-        }
-
-    input_tokens = response.usage.prompt_tokens
-    output_tokens = response.usage.completion_tokens
-
-    try:
-        classifications = json.loads(response.choices[0].message.content)["results"]
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        logger.error(f"classify_item: malformed structured-output response (run_id={state['run_id']}): {e}")
-        cost = NodeCost(
-            node_name="classify_item",
-            input_tokens=input_tokens, output_tokens=output_tokens,
-            cost_usd=groq_cost(input_tokens, output_tokens),
-            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
-            provider="groq",
-        )
-        fallback_items = [
-            {**item, "classification": "plan_item", "proposal_type": None,
-             "classification_reasoning": "fallback: malformed structured-output response"}
-            for item in state["correlated_items"]
-        ]
-        _log_classifications(fallback_items, state["run_id"])
-        record_node_summary(
-            run_id=state["run_id"], node_name="classify_item",
-            items_in=len(state["correlated_items"]), items_out=0, cost_usd=cost["cost_usd"],
-            duration_seconds=round(time.perf_counter() - t0, 3),
-            error_summary="malformed structured-output response",
-        )
-        return {
-            "classified_items": fallback_items,
-            "pending_approvals": [],
-            "costs": [cost],
-            "errors": state["errors"] + [f"classify_item malformed structured-output response (run_id={state['run_id']}): {e}"],
-        }
+    gateway = get_model_gateway(
+        pipeline="saturday",
+        anthropic_spend_usd=state.get("anthropic_spend_usd", 0.0),
+    )
+    classifications = []
+    usage: list[ModelResult] = []
+    errors = []
+    for offset in range(0, len(state["correlated_items"]), _MODEL_BATCH_SIZE):
+        batch = state["correlated_items"][offset:offset + _MODEL_BATCH_SIZE]
+        prompt = CLASSIFY_PROMPT.format(
+            cards_block=_format_cards(state["trello_cards"]),
+            items_block=_format_items(batch),
+        ).replace(_GROQ_TRAILING_INSTRUCTION_OLD, _GROQ_TRAILING_INSTRUCTION_NEW)
+        try:
+            result = gateway.complete_json(
+                task="classify_item",
+                prompt=prompt,
+                json_schema=_CLASSIFY_JSON_SCHEMA,
+                max_completion_tokens=1024,
+                allow_anthropic_fallback=True,
+            )
+            classifications.extend(result.data["results"])
+            usage.append(result)
+            if result.degraded:
+                errors.append("provider_degraded: Anthropic fallback used during classification")
+        except (ModelGatewayError, KeyError, TypeError) as exc:
+            logger.error("classify_item: model gateway failed (run_id=%s): %s", state["run_id"], exc)
+            errors.append(f"classify_item provider failure (run_id={state['run_id']}): {exc}")
 
     class_by_id = {c["item_id"]: c for c in classifications}
 
@@ -379,13 +327,18 @@ def classify_item(state: SaturdayGraphState) -> dict:
 
     _log_classifications(classified_items, state["run_id"])
 
+    total_input = sum(item.input_tokens for item in usage)
+    total_output = sum(item.output_tokens for item in usage)
+    total_cost = sum(item.cost_usd for item in usage)
+    providers = {item.provider for item in usage}
+    provider = next(iter(providers)) if len(providers) == 1 else ("hybrid" if providers else "groq")
     cost = NodeCost(
         node_name="classify_item",
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cost_usd=groq_cost(input_tokens, output_tokens),
+        input_tokens=total_input,
+        output_tokens=total_output,
+        cost_usd=round(total_cost, 6),
         latency_ms=round((time.perf_counter() - t0) * 1000, 2),
-        provider="groq",
+        provider=provider,
     )
 
     # items_out = proposal count, not total classified_items -- nothing is
@@ -393,12 +346,16 @@ def classify_item(state: SaturdayGraphState) -> dict:
     # so that's what "dropped" (= plan_items) should reflect.
     record_node_summary(
         run_id=state["run_id"], node_name="classify_item",
-        items_in=len(state["correlated_items"]), items_out=len(pending_approvals), cost_usd=cost["cost_usd"],
+        items_in=len(state["correlated_items"]), items_out=len(pending_approvals),
+        cost_usd=cost["cost_usd"],
         duration_seconds=round(time.perf_counter() - t0, 3),
+        error_summary="; ".join(errors) or None,
     )
 
     return {
         "classified_items": classified_items,
         "pending_approvals": pending_approvals,
         "costs": [cost],
+        "errors": errors,
+        "anthropic_spend_usd": gateway.anthropic_spend_usd,
     }

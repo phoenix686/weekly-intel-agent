@@ -52,6 +52,10 @@ class ClusteredItem(TypedDict):
     duplicate_count: int
     has_video: NotRequired[bool]
     video_url: NotRequired[str | None]
+    story_id: NotRequired[str]
+    event_fingerprint: NotRequired[str]
+    canonical_url: NotRequired[str]
+    supporting_sources: NotRequired[list[dict]]
 
 
 class ScoredItem(TypedDict):
@@ -73,6 +77,10 @@ class ScoredItem(TypedDict):
     tags: list[str]     # 1-3 tags from the fixed vocabulary
     has_video: NotRequired[bool]
     video_url: NotRequired[str | None]
+    story_id: NotRequired[str]
+    event_fingerprint: NotRequired[str]
+    canonical_url: NotRequired[str]
+    supporting_sources: NotRequired[list[dict]]
 
 
 class UncategorizedItem(TypedDict):
@@ -158,6 +166,10 @@ class DiscoverySubgraphState(TypedDict):
                     # respectively) -- lets manual testing exercise the
                     # pipeline without permanently exhausting the real
                     # seen_items pool
+    adhoc_queue_keys: list[str]
+    carry_forward_urls: list[str]
+    preference_snapshot: dict
+    anthropic_spend_usd: float
 
 
 class DailyGraphState(TypedDict):
@@ -178,11 +190,14 @@ class DailyGraphState(TypedDict):
     errors: list[str]
     source_context: Literal["daily", "saturday"]
     digest_text: str        # populated by assemble_digest, consumed by send_telegram_digest
+    digest_generated_at: str
+    digest_status: str
     digest_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
                                        # assemble_digest, persisted by send_telegram_digest keyed
                                        # by the sent message_id so a later numbered reply resolves
                                        # (includes uncategorized items too, numbered after kept ones,
                                        # so a reply naming a new tag routes through the same path)
+    anthropic_spend_usd: float
 
 
 def make_daily_initial_state(run_id: str) -> DailyGraphState:
@@ -193,7 +208,10 @@ def make_daily_initial_state(run_id: str) -> DailyGraphState:
         costs=[],
         errors=[],
         digest_text="",
+        digest_generated_at="",
+        digest_status="",
         digest_item_map={},
+        anthropic_spend_usd=0.0,
         source_context="daily",
     )
 
@@ -234,9 +252,13 @@ class SaturdayGraphState(TypedDict):
                                     #   movement_note}. Not yet rendered by assemble_plan
                                     #   (that's the final sub-phase of this checkpoint).
     plan_text: str                  # populated by assemble_plan
+    plan_generated_at: str
     plan_item_map: dict[int, dict]  # {1: {url, title, tags, reasoning}, ...} -- populated by
                                      # assemble_plan, persisted by send_telegram_plan keyed by
                                      # the sent message_id so a later numbered reply resolves
+    surfaced_cards: list[dict]
+    adhoc_queue_keys: list[str]
+    carry_forward_urls: list[str]
     pending_approvals: list[dict]   # project_proposal items awaiting await_approval
     pending_resumes: Annotated[list[dict], operator.add]   # one entry per proposal_worker Send: {proposal_id, thread_id, message_id}
     costs: Annotated[list[NodeCost], operator.add]
@@ -244,6 +266,7 @@ class SaturdayGraphState(TypedDict):
     source_context: Literal["daily", "saturday"]
     dry_run: bool  # passed through by name intersection into the nested
                     # discovery subgraph; see DiscoverySubgraphState.dry_run
+    anthropic_spend_usd: float
 
 
 def make_saturday_initial_state(run_id: str, dry_run: bool = False) -> SaturdayGraphState:
@@ -257,11 +280,16 @@ def make_saturday_initial_state(run_id: str, dry_run: bool = False) -> SaturdayG
         classified_items=[],
         prioritized_project_work=[],
         plan_text="",
+        plan_generated_at="",
         plan_item_map={},
+        surfaced_cards=[],
+        adhoc_queue_keys=[],
+        carry_forward_urls=[],
         pending_approvals=[],
         pending_resumes=[],
         costs=[],
         errors=[],
         source_context="saturday",
         dry_run=dry_run,
+        anthropic_spend_usd=0.0,
     )

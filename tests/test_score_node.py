@@ -53,7 +53,6 @@ def _patched():
     Postgres store, or a real local file."""
     return (
         patch.object(score_mod, "get_groq_client"),
-        patch.object(score_mod, "mark_seen"),
         patch.object(score_mod, "log_scored_items"),
         patch.object(score_mod, "record_node_summary"),
         patch.object(score_mod, "_log_dropped_tag"),
@@ -78,8 +77,8 @@ def test_keep_true_and_keep_false_items_both_appear_in_scored_items():
         {"index": 1, "keep": False, "reasoning": "off-topic hiking content", "tags": ["noise"]},
     ]
 
-    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary, p_dropped:
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary, p_dropped:
         _set_groq_reply(mock_get_client, groq_reply)
         result = score_node(_state(items))
 
@@ -98,8 +97,8 @@ def test_invalid_tag_is_filtered_out_and_logged():
         {"index": 0, "keep": True, "reasoning": "r", "tags": ["agentic-engineering", "not-a-real-tag"]},
     ]
 
-    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary, p_dropped as mock_log_dropped:
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary, p_dropped as mock_log_dropped:
         _set_groq_reply(mock_get_client, groq_reply)
         result = score_node(_state(items))
 
@@ -108,21 +107,22 @@ def test_invalid_tag_is_filtered_out_and_logged():
     mock_log_dropped.assert_called_once_with("not-a-real-tag", "https://a.com/1", "run-1")
 
 
-def test_mark_seen_called_with_every_scored_url_regardless_of_keep():
+def test_scoring_does_not_mark_any_item_seen_before_delivery():
     items = [_clustered_item("https://a.com/1"), _clustered_item("https://b.com/1")]
     groq_reply = [
         {"index": 0, "keep": True, "reasoning": "r", "tags": ["evals"]},
         {"index": 1, "keep": False, "reasoning": "r", "tags": ["noise"]},
     ]
 
-    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_get_client as mock_get_client, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary, p_dropped:
         _set_groq_reply(mock_get_client, groq_reply)
-        score_node(_state(items))
+        result = score_node(_state(items))
 
-    mock_mark_seen.assert_called_once()
-    (called_urls,), _ = mock_mark_seen.call_args
-    assert set(called_urls) == {"https://a.com/1", "https://b.com/1"}
+    assert {item["url"] for item in result["scored_items"]} == {
+        "https://a.com/1",
+        "https://b.com/1",
+    }
 
 
 def test_dry_run_skips_mark_seen():
@@ -137,12 +137,12 @@ def test_dry_run_skips_mark_seen():
     state = _state(items)
     state["dry_run"] = True
 
-    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_get_client as mock_get_client, p_mark_seen as mock_mark_seen, p_log, p_summary, p_dropped:
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary, p_dropped:
         _set_groq_reply(mock_get_client, groq_reply)
-        score_node(state)
+        result = score_node(state)
 
-    mock_mark_seen.assert_not_called()
+    assert len(result["scored_items"]) == 1
 
 
 def test_record_node_summary_reflects_kept_count_not_total():
@@ -153,8 +153,8 @@ def test_record_node_summary_reflects_kept_count_not_total():
         {"index": 2, "keep": False, "reasoning": "r", "tags": ["noise"]},
     ]
 
-    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary as mock_summary, p_dropped:
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary as mock_summary, p_dropped:
         _set_groq_reply(mock_get_client, groq_reply)
         score_node(_state(items))
 
@@ -165,9 +165,9 @@ def test_record_node_summary_reflects_kept_count_not_total():
 
 
 def test_multiple_batches_when_over_batch_size():
-    """BATCH_SIZE is 50 -- confirms items beyond one batch still all get
+    """BATCH_SIZE is bounded -- confirms items beyond one batch still all get
     scored, via multiple real (mocked) Groq calls, not silently dropped."""
-    items = [_clustered_item(f"https://example.com/{i}") for i in range(60)]
+    items = [_clustered_item(f"https://example.com/{i}") for i in range(25)]
     call_sizes = []
 
     def _reply_for_batch(*args, **kwargs):
@@ -179,13 +179,38 @@ def test_multiple_batches_when_over_batch_size():
         call_sizes.append(batch_size)
         return _groq_response([{"index": i, "keep": True, "reasoning": "r", "tags": ["evals"]} for i in range(batch_size)])
 
-    p_get_client, p_mark_seen, p_log, p_summary, p_dropped = _patched()
-    with p_get_client as mock_get_client, p_mark_seen, p_log, p_summary, p_dropped:
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary, p_dropped:
         fake_client = MagicMock()
         fake_client.chat.completions.create.side_effect = _reply_for_batch
         mock_get_client.return_value = fake_client
         result = score_node(_state(items))
 
-    assert len(result["scored_items"]) == 60
-    assert fake_client.chat.completions.create.call_count == 2  # 50 + 10 -- two real batches, not one giant call
-    assert call_sizes == [50, 10]
+    assert len(result["scored_items"]) == 25
+    assert fake_client.chat.completions.create.call_count == 3
+    assert call_sizes == [12, 12, 1]
+    assert all(
+        call.kwargs["max_completion_tokens"] == 1024
+        for call in fake_client.chat.completions.create.call_args_list
+    )
+
+
+def test_score_node_loads_effective_preferences_when_state_has_no_snapshot():
+    items = [_clustered_item("https://a.com/1")]
+    groq_reply = [
+        {"index": 0, "keep": True, "reasoning": "r", "tags": ["evals"]},
+    ]
+    snapshot = score_mod.default_snapshot()
+    snapshot["short_term"] = {"evals": 0.7}
+
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary, p_dropped, \
+         patch.object(score_mod, "get_store", return_value=object()) as mock_store, \
+         patch.object(score_mod, "load_effective_snapshot", return_value=snapshot) as mock_load:
+        fake_client = _set_groq_reply(mock_get_client, groq_reply)
+        score_node(_state(items))
+
+    mock_store.assert_called_once()
+    mock_load.assert_called_once()
+    prompt = fake_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "Current positive signals: [('evals', 0.7)]" in prompt

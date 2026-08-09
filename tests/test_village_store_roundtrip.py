@@ -11,10 +11,12 @@ Run: uv run --env-file .env python tests/test_village_store_roundtrip.py
 """
 
 import sys
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pytest
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,6 +26,11 @@ from saturday.memory_store_config import get_store
 
 VILLAGE_NAMESPACE = ("village",)
 COMPANION_NAMESPACE = ("companion",)
+
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(not os.getenv("DB_URI"), reason="requires DB_URI for live PostgresStore round trip"),
+]
 
 
 def test_digest_ready_event() -> bool:

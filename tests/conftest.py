@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 # These files used to live in scripts/, run manually via
 # `uv run --env-file .env python scripts/test_X.py` against real
 # infrastructure (live Postgres/checkpointer, real Trello/Anthropic API
@@ -42,3 +44,12 @@ collect_ignore = [
     "test_trello_write.py",
     "test_update_profile_rejections.py",
 ]
+
+
+def pytest_collection_modifyitems(config, items):
+    if os.getenv("RUN_LIVE_TESTS") == "1":
+        return
+    skip_live = pytest.mark.skip(reason="set RUN_LIVE_TESTS=1 to run live tests")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip_live)

@@ -1,9 +1,14 @@
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from discovery.parsers.scrape_blogs import fetch_one_source, fetch_agentmail_sources
 from discovery.blog_sources_config import entries_for_context
 from core.state import DiscoverySubgraphState, RawItem, NodeCost
 from core.observability import record_node_summary
+from saturday.memory_store_config import get_store
+
+_SOURCE_HEALTH_NAMESPACE = ("weekly_intel", "source_health")
 
 
 def _row_to_item(row: dict) -> RawItem:
@@ -40,13 +45,18 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
     errors: list[str] = []
 
     entries = entries_for_context(state["source_context"])
-    for entry in entries:
-        t0 = time.perf_counter()
-        source_result = fetch_one_source(entry)
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(entries) + 1))) as executor:
+        futures = [(entry, time.perf_counter(), executor.submit(fetch_one_source, entry)) for entry in entries]
+        agentmail_started = time.perf_counter()
+        agentmail_future = executor.submit(fetch_agentmail_sources, state["source_context"])
+
+    health_records = []
+    for entry, started, future in futures:
+        source_result = future.result()
         cost = NodeCost(
             node_name="scrape_blogs",
             input_tokens=0, output_tokens=0,
-            latency_ms=round((time.perf_counter() - t0) * 1000, 4),
+            latency_ms=round((time.perf_counter() - started) * 1000, 4),
             cost_usd=0.0,
         )
         if source_result.error is not None:
@@ -54,15 +64,15 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
             errors.append(cost["error"])
         costs.append(cost)
         items.extend(_row_to_item(row) for row in source_result.rows)
+        health_records.append((source_result.name, source_result.error, len(source_result.rows)))
 
     # AgentMail-sourced newsletters (discovery/config/agentmail_sources.yaml,
     # gitignored) aren't blog_sources.yaml entries -- one shared inbox
     # covers up to 10 real senders via a single fetch, split into one
     # SourceResult per real sender for the same per-source NodeCost.error
     # visibility every other source gets.
-    agentmail_t0 = time.perf_counter()
-    agentmail_results = fetch_agentmail_sources(state["source_context"])
-    agentmail_elapsed_ms = round((time.perf_counter() - agentmail_t0) * 1000, 4)
+    agentmail_results = agentmail_future.result()
+    agentmail_elapsed_ms = round((time.perf_counter() - agentmail_started) * 1000, 4)
     for source_result in agentmail_results:
         cost = NodeCost(
             node_name="scrape_blogs",
@@ -75,6 +85,19 @@ def scrape_blogs(state: DiscoverySubgraphState) -> dict:
             errors.append(cost["error"])
         costs.append(cost)
         items.extend(_row_to_item(row) for row in source_result.rows)
+        health_records.append((source_result.name, source_result.error, len(source_result.rows)))
+
+    try:
+        store = get_store()
+        now = datetime.now(timezone.utc).isoformat()
+        for name, error, row_count in health_records:
+            store.put(_SOURCE_HEALTH_NAMESPACE, name, {
+                "source": name, "status": "degraded" if error else "healthy",
+                "error": str(error)[:300] if error else None,
+                "items_fetched": row_count, "checked_at": now, "run_id": state["run_id"],
+            })
+    except Exception as exc:
+        errors.append(f"source_health_persistence_failed: {exc}")
 
     # items_in/items_out here mean "active sources attempted" / "raw items
     # fetched" -- a different unit pair than cluster_dedupe's (items in,

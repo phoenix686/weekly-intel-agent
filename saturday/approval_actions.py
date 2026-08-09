@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from saturday.trello_client import create_trello_card, update_trello_card, get_dump_list_id
 from telegram.bot_client import send_message
 from saturday.memory_store_config import get_store
-from saturday.same_day_nudge import apply_nudge
+from core.preferences import apply_confirmed_events_locked
 
 logger = logging.getLogger(__name__)
 
@@ -99,13 +99,17 @@ def handle_feedback(item: dict, feedback_text: str, sentiment: str, run_id: str)
     store.put(_FEEDBACK_NAMESPACE, key, value)
     logger.info(f"handle_feedback: logged feedback_events entry for {item.get('url')} (sentiment={sentiment})")
 
-    nudge_costs = apply_nudge(item.get("url"), feedback_text, tags, run_id)
-    nudge_cost_usd = sum(c["cost_usd"] for c in nudge_costs)
-    nudge_errors = [c["error"] for c in nudge_costs if c.get("error")]
-    if nudge_errors:
-        logger.info(f"handle_feedback: same_day_nudge for {item.get('url')}: {nudge_errors[0]}")
-    else:
-        logger.info(f"handle_feedback: same_day_nudge for {item.get('url')} applied (${nudge_cost_usd:.6f})")
+    apply_confirmed_events_locked(store, [{
+        "event_id": key,
+        "relevance": 0 if sentiment == "negative" else 3,
+        "topics": tags,
+        "liked_aspects": [],
+        "disliked_aspects": tags if sentiment == "negative" else [],
+        "new_interests": [],
+        "digest_flags": [],
+        "raw_text": feedback_text,
+        "item_id": item.get("url"),
+    }])
 
 
 def handle_rejection(item: dict, run_id: str) -> None:
