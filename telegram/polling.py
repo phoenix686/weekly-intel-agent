@@ -20,6 +20,7 @@ _OFFSET_NAMESPACE = ("weekly_intel", "polling_state")
 _OFFSET_KEY = "update_offset"
 _PROCESSED_NAMESPACE = ("weekly_intel", "telegram_updates")
 _EFFECT_NAMESPACE = ("weekly_intel", "telegram_update_effects")
+TELEGRAM_GET_UPDATES_TIMEOUT_SECONDS = 10
 
 _APPROVE_KEYWORDS = {"approve", "approved", "yes", "y", "ok", "okay", "go", "do it"}
 _REJECT_KEYWORDS = {"reject", "rejected", "no", "n", "nope", "skip", "pass", "don't", "dont"}
@@ -33,7 +34,7 @@ def _get_updates(offset: int | None = None) -> list[dict]:
     url = f"https://api.telegram.org/bot{token}/getUpdates"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    with urllib.request.urlopen(url) as resp:
+    with urllib.request.urlopen(url, timeout=TELEGRAM_GET_UPDATES_TIMEOUT_SECONDS) as resp:
         result = json.loads(resp.read().decode("utf-8"))
     if not result.get("ok"):
         raise RuntimeError(f"Telegram getUpdates error: {result}")

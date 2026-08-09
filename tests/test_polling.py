@@ -208,3 +208,14 @@ def test_inbox_mode_never_calls_get_updates():
     assert result["updates_in"] == 0
 
     assert fake_store.put_calls == []
+
+
+def test_get_updates_uses_bounded_network_timeout():
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b'{"ok": true, "result": []}'
+    with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token"}), \
+         patch("telegram.polling.urllib.request.urlopen", return_value=response) as mock_urlopen:
+        assert polling._get_updates() == []
+
+    mock_urlopen.assert_called_once()
+    assert mock_urlopen.call_args.kwargs["timeout"] == polling.TELEGRAM_GET_UPDATES_TIMEOUT_SECONDS

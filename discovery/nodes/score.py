@@ -12,7 +12,7 @@ from core.model_gateway import (
     ModelRequestTooLarge,
     ModelResult,
 )
-from core.preferences import default_snapshot, load_snapshot, render_preference_context
+from core.preferences import default_snapshot, load_effective_snapshot, render_preference_context
 from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _load_preference_context() -> str:
     try:
-        snapshot = load_snapshot(get_store())
+        snapshot = load_effective_snapshot(get_store())
     except Exception as exc:
         logger.warning("score_node: preference snapshot unavailable, using explicit baseline: %s", exc)
         snapshot = default_snapshot()
@@ -276,8 +276,10 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         budget=ModelBudget(anthropic_limit_usd=budget_limit),
     )
     usage: list[ModelResult] = []
-    preference_context = render_preference_context(
-        state.get("preference_snapshot") or default_snapshot()
+    preference_context = (
+        render_preference_context(state["preference_snapshot"])
+        if state.get("preference_snapshot")
+        else _load_preference_context()
     )
 
     for offset in range(0, len(items), BATCH_SIZE):

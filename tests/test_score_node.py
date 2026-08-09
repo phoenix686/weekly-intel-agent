@@ -193,3 +193,24 @@ def test_multiple_batches_when_over_batch_size():
         call.kwargs["max_completion_tokens"] == 1024
         for call in fake_client.chat.completions.create.call_args_list
     )
+
+
+def test_score_node_loads_effective_preferences_when_state_has_no_snapshot():
+    items = [_clustered_item("https://a.com/1")]
+    groq_reply = [
+        {"index": 0, "keep": True, "reasoning": "r", "tags": ["evals"]},
+    ]
+    snapshot = score_mod.default_snapshot()
+    snapshot["short_term"] = {"evals": 0.7}
+
+    p_get_client, p_log, p_summary, p_dropped = _patched()
+    with p_get_client as mock_get_client, p_log, p_summary, p_dropped, \
+         patch.object(score_mod, "get_store", return_value=object()) as mock_store, \
+         patch.object(score_mod, "load_effective_snapshot", return_value=snapshot) as mock_load:
+        fake_client = _set_groq_reply(mock_get_client, groq_reply)
+        score_node(_state(items))
+
+    mock_store.assert_called_once()
+    mock_load.assert_called_once()
+    prompt = fake_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "Current positive signals: [('evals', 0.7)]" in prompt
