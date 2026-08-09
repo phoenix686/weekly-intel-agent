@@ -13,6 +13,7 @@ NAMESPACE = ("weekly_intel", "preference_snapshots")
 CURRENT_KEY = "current"
 APPLIED_NAMESPACE = ("weekly_intel", "applied_feedback_events")
 CONFIRMED_NAMESPACE = ("weekly_intel", "confirmed_feedback_events")
+SAME_DAY_NAMESPACE = ("weekly_intel", "same_day_adjustments")
 _LOCAL_WRITE_LOCK = threading.RLock()
 
 
@@ -45,6 +46,33 @@ def load_snapshot(store) -> dict:
         return default_snapshot()
     item = store.get(NAMESPACE, CURRENT_KEY)
     return dict(item.value) if item else default_snapshot()
+
+
+def _current_week_key() -> str:
+    iso = datetime.now(timezone.utc).isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def load_effective_snapshot(store) -> dict:
+    """Overlay current-week same-day nudges onto the persisted snapshot."""
+    snapshot = load_snapshot(store)
+    effective = dict(snapshot)
+    effective["short_term"] = dict(snapshot.get("short_term", {}))
+    if not hasattr(store, "search"):
+        return effective
+
+    current_week = _current_week_key()
+    for item in store.search(SAME_DAY_NAMESPACE, limit=1000):
+        value = item.value
+        if value.get("week_of") != current_week:
+            continue
+        tag = value.get("tag")
+        adjustment = value.get("cumulative_adjustment")
+        if not isinstance(tag, str) or not isinstance(adjustment, (int, float)):
+            continue
+        old = effective["short_term"].get(tag, 0.0)
+        effective["short_term"][tag] = round(max(-1.0, min(1.0, old + adjustment)), 4)
+    return effective
 
 
 def render_preference_context(snapshot: dict) -> str:

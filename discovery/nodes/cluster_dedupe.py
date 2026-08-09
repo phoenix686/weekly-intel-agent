@@ -20,7 +20,7 @@ from discovery.semantic_dedup import dedupe_semantic
 from discovery.taste_vectors import taste_prefilter
 from discovery.story_clusterer import assign_story_clusters
 from core.observability import record_node_summary
-from core.preferences import default_snapshot, load_snapshot
+from core.preferences import default_snapshot, load_effective_snapshot
 from saturday.memory_store_config import get_store
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ def cluster_dedupe_node(state: DiscoverySubgraphState) -> dict:
     costs.extend(semantic_costs)
 
     try:
-        preference_snapshot = load_snapshot(get_store())
+        preference_snapshot = load_effective_snapshot(get_store())
     except Exception:
         preference_snapshot = default_snapshot()
     relevant, uncategorized, taste_costs = taste_prefilter(

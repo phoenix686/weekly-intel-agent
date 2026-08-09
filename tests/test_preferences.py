@@ -1,4 +1,11 @@
-from core.preferences import apply_confirmed_events, apply_confirmed_events_locked
+from datetime import datetime, timezone
+
+from core.preferences import (
+    apply_confirmed_events,
+    apply_confirmed_events_locked,
+    load_effective_snapshot,
+    load_snapshot,
+)
 
 
 class Item:
@@ -14,6 +21,12 @@ class Store:
     def batch(self, ops):
         for op in ops:
             self.put(op.namespace, op.key, op.value)
+    def search(self, ns, limit=100):
+        return [
+            Item(value)
+            for (namespace, _key), value in self.data.items()
+            if namespace == ns
+        ][:limit]
 
 
 def test_preference_update_is_bounded_and_exactly_once():
@@ -65,3 +78,23 @@ def test_concurrent_confirmations_preserve_both_events():
         thread.join()
     snapshot = store.get(("weekly_intel", "preference_snapshots"), "current").value
     assert set(snapshot["provenance"]) == {"concurrent-0", "concurrent-1"}
+
+
+def test_current_week_same_day_adjustments_overlay_effective_snapshot_only():
+    store = Store()
+    snapshot = apply_confirmed_events(store, [{
+        "event_id": "base", "relevance": 3, "topics": ["evals"],
+        "liked_aspects": [], "new_interests": [],
+    }])
+    week = datetime.now(timezone.utc).isocalendar()
+    store.put(("weekly_intel", "same_day_adjustments"), f"{week[0]}-W{week[1]:02d}:evals", {
+        "tag": "evals",
+        "cumulative_adjustment": 0.2,
+        "item_ids_contributing": ["https://example.com/1"],
+        "week_of": f"{week[0]}-W{week[1]:02d}",
+    })
+
+    effective = load_effective_snapshot(store)
+
+    assert load_snapshot(store)["short_term"]["evals"] == snapshot["short_term"]["evals"]
+    assert effective["short_term"]["evals"] == 0.35
