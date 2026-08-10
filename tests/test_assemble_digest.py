@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from daily.nodes.assemble_digest import format_digest, MAX_DIGEST_ITEMS
+from daily.nodes.assemble_digest import format_digest, assemble_digest, MAX_DIGEST_ITEMS
 
 
 def _item(keep: bool, title: str = "A title", reasoning: str = "Good content.", tags: list[str] = None):
@@ -25,6 +25,16 @@ def _item(keep: bool, title: str = "A title", reasoning: str = "Good content.", 
 
 
 RUN_ID = "abc12345-0000-0000-0000-000000000000"
+
+
+def _daily_state(scored_items=None, uncategorized_items=None, errors=None):
+    return {
+        "scored_items": scored_items or [],
+        "uncategorized_items": uncategorized_items or [],
+        "run_id": RUN_ID,
+        "costs": [],
+        "errors": errors or [],
+    }
 
 
 def _uncategorized(url="https://example.com/uncategorized", title="An uncategorized title",
@@ -241,6 +251,23 @@ def test_source_outage_never_renders_nothing_new():
     assert "source outage" in text.lower()
     assert "Nothing new today" not in text
     assert item_map == {}
+
+
+def test_marktechpost_bot_challenge_alone_does_not_trigger_source_outage():
+    result = assemble_digest(_daily_state(errors=[
+        "MarkTechPost: blocked by bot-challenge (content-type='text/html', not XML/RSS)"
+    ]))
+
+    assert result["digest_status"] == "no_new_stories"
+    assert "Nothing new today" in result["digest_text"]
+    assert "Source outage" not in result["digest_text"]
+
+
+def test_other_source_errors_still_trigger_source_outage():
+    result = assemble_digest(_daily_state(errors=["TLDR AI: simulated network timeout"]))
+
+    assert result["digest_status"] == "sources_degraded"
+    assert "Source outage" in result["digest_text"]
 
 
 def test_all_filtered_is_distinct_from_no_new_stories():
