@@ -91,8 +91,17 @@ def test_uncategorized_item_no_longer_vanishes_before_after():
     assert "Nothing on the plan this week" not in after_text
 
 
-def test_uncategorized_section_appears_even_with_nothing_else_on_plan():
+def test_low_confidence_uncategorized_items_do_not_replace_empty_plan():
     text, item_map = format_plan([], 0, RUN_ID, [], uncategorized_items=[_uncategorized()])
+    assert "Nothing on the plan this week" in text
+    assert "didn't match any existing topic" not in text
+    assert item_map == {}
+
+
+def test_near_threshold_uncategorized_section_appears_even_with_nothing_else_on_plan():
+    text, item_map = format_plan(
+        [], 0, RUN_ID, [], uncategorized_items=[_uncategorized(similarity_score=0.251)]
+    )
     assert "Nothing on the plan this week" not in text
     assert "1 item(s) didn't match any existing topic" in text
     assert set(item_map.keys()) == {1}
@@ -107,7 +116,7 @@ def test_uncategorized_numbering_continues_after_all_other_sections():
     priority = [_priority_entry(matched_card_id="card1", item_url=items[2]["url"])]
     text, item_map = format_plan(
         items, 0, RUN_ID, [_card("card1")], priority,
-        uncategorized_items=[_uncategorized(title="Uncategorized D")],
+        uncategorized_items=[_uncategorized(title="Uncategorized D", similarity_score=0.251)],
     )
     assert item_map[1]["title"] == "Article A"
     assert item_map[2]["title"] == "Course B"
@@ -118,10 +127,31 @@ def test_uncategorized_numbering_continues_after_all_other_sections():
 
 def test_footer_includes_uncategorized_count():
     text, item_map = format_plan(
-        [_plan_item()], 0, RUN_ID, [], uncategorized_items=[_uncategorized(), _uncategorized()]
+        [_plan_item()], 0, RUN_ID, [],
+        uncategorized_items=[
+            _uncategorized(title="Hidden low-confidence", similarity_score=0.186),
+            _uncategorized(title="Shown near-threshold", similarity_score=0.251),
+        ],
     )
     assert "1 plan items" in text
-    assert "2 uncategorized" in text
+    assert "1/2 uncategorized shown" in text
+
+
+def test_low_confidence_uncategorized_items_are_hidden_from_plan():
+    text, item_map = format_plan(
+        [_plan_item()], 0, RUN_ID, [],
+        uncategorized_items=[
+            _uncategorized(title="Airy", similarity_score=0.252),
+            _uncategorized(title="Quick Share", similarity_score=0.114),
+            _uncategorized(title="Binaural beats", similarity_score=0.225),
+        ],
+    )
+    assert "Airy" in text
+    assert "Quick Share" not in text
+    assert "Binaural beats" not in text
+    assert "1/3 uncategorized shown" in text
+    assert set(item_map.keys()) == {1, 2}
+    assert item_map[2]["title"] == "Airy"
 
 
 def test_no_uncategorized_items_omits_the_section_entirely():

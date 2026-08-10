@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from telegram.markdown import escape_html, escape_markdown_v2
+from telegram.markdown import escape_html, escape_markdown_v2, format_cost_line
 
 
 def test_escape_html_ampersand():
@@ -44,3 +44,17 @@ def test_escape_markdown_v2_still_escapes_underscore():
     parse_mode="MarkdownV2" is passed explicitly, e.g.
     saturday/nodes/await_approval.py) is unaffected by adding escape_html."""
     assert escape_markdown_v2("last_activity") == "last\\_activity"
+
+
+def test_format_cost_line_includes_groq_when_present():
+    text = format_cost_line({
+        "total": 0.0013,
+        "groq": 0.0013,
+        "anthropic": 0.0,
+        "nvidia": 0.0,
+    })
+
+    assert text == (
+        "<i>Cost: $0.0013 (Groq: $0.0013, Anthropic: $0.0000, "
+        "NVIDIA embeddings: $0.0000)</i>"
+    )

@@ -123,6 +123,8 @@ def _build_project_entries(prioritized_project_work: list[dict], trello_cards: l
 
 MAX_PLAN_TEXT_CHARS = 3900  # soft budget, headroom under Telegram's real 4096 hard limit
 REASONING_CHAR_BUDGET = 150  # applied only when the full render exceeds MAX_PLAN_TEXT_CHARS
+MAX_UNCATEGORIZED_PLAN_ITEMS = 3
+MIN_UNCATEGORIZED_PLAN_SIMILARITY = 0.24
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -133,6 +135,17 @@ def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len].rstrip() + "…"
+
+
+def _surfaceable_uncategorized(uncategorized_items: list[dict]) -> list[dict]:
+    return sorted(
+        [
+            item for item in uncategorized_items
+            if item.get("similarity_score", 0.0) >= MIN_UNCATEGORIZED_PLAN_SIMILARITY
+        ],
+        key=lambda item: item.get("similarity_score", 0.0),
+        reverse=True,
+    )[:MAX_UNCATEGORIZED_PLAN_ITEMS]
 
 
 def _render(
@@ -156,6 +169,8 @@ def _render(
     through the exact same telegram/feedback_router.py path as any other
     plan reply."""
     uncategorized_items = uncategorized_items or []
+    shown_uncategorized_items = _surfaceable_uncategorized(uncategorized_items)
+    hidden_uncategorized_count = len(uncategorized_items) - len(shown_uncategorized_items)
     lines = ["📋 <b>Weekly Plan</b>", ""]
     counter = 1
     item_map: dict[int, dict] = {}
@@ -218,9 +233,15 @@ def _render(
             }
             counter += 1
 
-    if uncategorized_items:
-        lines.append(f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic</b>")
-        for item in uncategorized_items:
+    if shown_uncategorized_items:
+        if hidden_uncategorized_count:
+            lines.append(
+                f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic "
+                f"({len(shown_uncategorized_items)} shown)</b>"
+            )
+        else:
+            lines.append(f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic</b>")
+        for item in shown_uncategorized_items:
             title = (item.get("title") or item["text"])[:80]
             url = item["url"]
             best_tag = item["best_tag"]
@@ -242,7 +263,7 @@ def _render(
     total_rendered = len(reading) + len(courses) + len(project_entries)
     footer_parts = [f"{total_rendered} plan items"]
     if uncategorized_items:
-        footer_parts.append(f"{len(uncategorized_items)} uncategorized")
+        footer_parts.append(f"{len(shown_uncategorized_items)}/{len(uncategorized_items)} uncategorized shown")
     if pending_approvals_count > 0:
         footer_parts.append(f"{pending_approvals_count} proposals pending approval")
     footer_parts.append(f"run: {run_id[:8]}")
@@ -301,7 +322,7 @@ def format_plan(
     courses = [i for i in plan_items if "course" in i.get("tags", [])]
     reading = [i for i in plan_items if "course" not in i.get("tags", []) and i.get("matched_card_id") is None]
 
-    if not reading and not courses and not project_entries and not uncategorized_items:
+    if not reading and not courses and not project_entries and not _surfaceable_uncategorized(uncategorized_items):
         msg = "📋 <b>Weekly Plan</b>\n\n<i>Nothing on the plan this week."
         if pending_approvals_count > 0:
             msg += f" {pending_approvals_count} proposals pending approval — check Telegram."

@@ -17,7 +17,7 @@ def send_message(text: str, parse_mode: str | None = "HTML") -> dict:
         raise KeyError("TELEGRAM_CHAT_ID is not set in the environment")
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    body = {"chat_id": chat_id, "text": text}
+    body = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
     if parse_mode:
         body["parse_mode"] = parse_mode
     payload = json.dumps(body).encode("utf-8")
