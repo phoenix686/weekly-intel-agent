@@ -9,6 +9,14 @@ from discovery.story_clusterer import diversify
 MAX_DIGEST_ITEMS = 10
 
 
+def _is_non_actionable_source_error(error: str) -> bool:
+    return "MarkTechPost:" in error and "bot-challenge" in error
+
+
+def _actionable_errors(errors: list[str]) -> list[str]:
+    return [error for error in errors if not _is_non_actionable_source_error(error)]
+
+
 def format_digest(
     scored_items: list[ScoredItem], run_id: str, uncategorized_items: list[dict] | None = None,
     cost_breakdown: dict[str, float] | None = None,
@@ -142,7 +150,7 @@ def assemble_digest(state: DailyGraphState) -> dict:
     # the only node left, is free), so this is the true run total, not a
     # partial figure.
     cost_breakdown = cost_breakdown_by_provider(state["costs"])
-    errors = state.get("errors", [])
+    errors = _actionable_errors(state.get("errors", []))
     if any("provider_degraded" in error for error in errors):
         status = "provider_degraded"
     elif errors:

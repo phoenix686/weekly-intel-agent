@@ -53,7 +53,16 @@ def format_cost_line(cost_breakdown: dict[str, float] | None) -> str:
     existed."""
     if not cost_breakdown:
         return ""
-    anthropic = cost_breakdown.get("anthropic", 0.0)
-    nvidia = cost_breakdown.get("nvidia", 0.0)
     total = cost_breakdown.get("total", 0.0)
-    return f"<i>Cost: ${total:.4f} (Anthropic: ${anthropic:.4f}, NVIDIA embeddings: ${nvidia:.4f})</i>"
+    provider_labels = {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "nvidia": "NVIDIA embeddings",
+    }
+    provider_parts = [
+        f"{label}: ${cost_breakdown.get(provider, 0.0):.4f}"
+        for provider, label in provider_labels.items()
+        if provider in cost_breakdown
+    ]
+    provider_text = f" ({', '.join(provider_parts)})" if provider_parts else ""
+    return f"<i>Cost: ${total:.4f}{provider_text}</i>"

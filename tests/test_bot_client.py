@@ -63,6 +63,20 @@ def test_default_parse_mode_is_html():
     assert captured["payload"]["parse_mode"] == "HTML"
 
 
+def test_link_previews_are_disabled():
+    captured = {}
+
+    def _capture(req):
+        captured["payload"] = json.loads(req.data.decode("utf-8"))
+        return _ok_response()
+
+    with patch.object(bot_client_mod.urllib.request, "urlopen", side_effect=_capture), \
+         patch.dict(os.environ, _env()):
+        send_message('<a href="https://example.com/article">Article</a>')
+
+    assert captured["payload"]["disable_web_page_preview"] is True
+
+
 def test_parse_mode_none_omits_key_entirely():
     """approval_actions.py's confirmation messages use parse_mode=None --
     plain text, no formatting intent, sidesteps escaping entirely."""
