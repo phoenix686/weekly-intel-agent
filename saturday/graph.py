@@ -11,6 +11,7 @@ from saturday.nodes.prioritize_plan_items import prioritize_plan_items
 from saturday.nodes.assemble_plan import assemble_plan
 from saturday.nodes.send_telegram_plan import send_telegram_plan
 from saturday.nodes.await_approval import route_to_approvals, proposal_worker
+from saturday.nodes.update_profile import update_profile
 
 
 def _fan_out_after_classify(state: SaturdayGraphState) -> list[Send]:
@@ -30,6 +31,7 @@ def build_saturday_graph():
     graph.add_node("prioritize_plan_items", prioritize_plan_items)
     graph.add_node("assemble_plan", assemble_plan)
     graph.add_node("send_telegram_plan", send_telegram_plan)
+    graph.add_node("update_profile", update_profile)
     graph.add_node("proposal_worker", proposal_worker)
 
     graph.add_edge(START, "discovery_subgraph")
@@ -39,7 +41,8 @@ def build_saturday_graph():
     graph.add_conditional_edges("classify_item", _fan_out_after_classify)
     graph.add_edge("prioritize_plan_items", "assemble_plan")
     graph.add_edge("assemble_plan", "send_telegram_plan")
-    graph.add_edge("send_telegram_plan", END)
+    graph.add_edge("send_telegram_plan", "update_profile")
+    graph.add_edge("update_profile", END)
     graph.add_edge("proposal_worker", END)
 
     return graph.compile(checkpointer=get_checkpointer())
