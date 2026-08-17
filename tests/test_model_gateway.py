@@ -5,6 +5,7 @@ import pytest
 
 from core.model_gateway import (
     ModelBudget,
+    ModelGatewayError,
     ModelGateway,
     ModelRequestTooLarge,
 )
@@ -107,3 +108,26 @@ def test_429_is_retried_with_bounded_backoff():
     )
     assert result.provider == "groq"
     assert sleeps == [0.5, 1.0]
+
+
+def test_anthropic_fallback_malformed_json_is_gateway_error():
+    groq = MagicMock()
+    groq.chat.completions.create.side_effect = RuntimeError("provider unavailable")
+    anthropic = MagicMock()
+    anthropic.messages.create.return_value = MagicMock(
+        content=[MagicMock(text="I cannot produce JSON for this request.")],
+        usage=MagicMock(input_tokens=100, output_tokens=30),
+    )
+    gateway = ModelGateway(
+        groq_client=groq,
+        anthropic_client=anthropic,
+        budget=ModelBudget(anthropic_limit_usd=0.10),
+    )
+
+    with pytest.raises(ModelGatewayError, match="Anthropic fallback returned invalid JSON"):
+        gateway.complete_json(
+            task="prioritize_plan_items",
+            prompt="short prompt",
+            json_schema={"type": "object"},
+            allow_anthropic_fallback=True,
+        )
