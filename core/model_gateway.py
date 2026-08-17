@@ -90,6 +90,16 @@ def anthropic_cost(input_tokens: int, output_tokens: int) -> float:
     )
 
 
+def _parse_provider_json(raw: str, *, provider: str, task: str) -> dict[str, Any]:
+    try:
+        data = json.loads(raw.strip())
+    except json.JSONDecodeError as exc:
+        raise ModelGatewayError(f"{task} {provider} returned invalid JSON") from exc
+    if not isinstance(data, dict):
+        raise ModelGatewayError(f"{task} {provider} returned JSON {type(data).__name__}, expected object")
+    return data
+
+
 class ModelGateway:
     def __init__(
         self,
@@ -165,7 +175,11 @@ class ModelGateway:
             input_tokens = response.usage.prompt_tokens
             output_tokens = response.usage.completion_tokens
             return ModelResult(
-                data=json.loads(response.choices[0].message.content),
+                data=_parse_provider_json(
+                    response.choices[0].message.content,
+                    provider="Groq",
+                    task=task,
+                ),
                 provider="groq",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -209,7 +223,11 @@ class ModelGateway:
         actual_cost = anthropic_cost(input_tokens, output_tokens)
         self._budget.record_anthropic(actual_cost)
         return ModelResult(
-            data=json.loads(response.content[0].text.strip()),
+            data=_parse_provider_json(
+                response.content[0].text,
+                provider="Anthropic fallback",
+                task=task,
+            ),
             provider="anthropic",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
