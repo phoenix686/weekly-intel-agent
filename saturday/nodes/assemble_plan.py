@@ -123,7 +123,7 @@ def _build_project_entries(prioritized_project_work: list[dict], trello_cards: l
 
 MAX_PLAN_TEXT_CHARS = 3900  # soft budget, headroom under Telegram's real 4096 hard limit
 REASONING_CHAR_BUDGET = 150  # applied only when the full render exceeds MAX_PLAN_TEXT_CHARS
-MAX_UNCATEGORIZED_PLAN_ITEMS = 3
+MAX_UNCATEGORIZED_PLAN_ITEMS = 5
 MIN_UNCATEGORIZED_PLAN_SIMILARITY = 0.24
 
 

@@ -135,17 +135,22 @@ def test_low_confidence_uncategorized_items_are_hidden_from_digest():
         _uncategorized(title="Recurrent Looped Transformer", similarity_score=0.243),
         _uncategorized(title="RAPIDS benchmark", similarity_score=0.110),
         _uncategorized(title="Cohere translation", similarity_score=0.243),
+        _uncategorized(title="GPU workflow guide", similarity_score=0.242),
+        _uncategorized(title="Agent observability notes", similarity_score=0.241),
     ]
     text, item_map = format_digest(kept, RUN_ID, uncategorized_items=uncategorized)
 
-    assert "6 item(s) didn't match any existing topic (3 shown)" in text
+    assert "8 item(s) didn't match any existing topic (5 shown)" in text
     assert "Anthropic frontier policy" in text
     assert "NVIDIA OSMO" in text
     assert "Recurrent Looped Transformer" in text
+    assert "Cohere translation" in text
+    assert "GPU workflow guide" in text
     assert "NeRF reconstruction" not in text
     assert "RAPIDS benchmark" not in text
-    assert "3/6 uncategorized shown" in text
-    assert set(item_map.keys()) == {1, 2, 3, 4}
+    assert "Agent observability notes" not in text
+    assert "5/8 uncategorized shown" in text
+    assert set(item_map.keys()) == {1, 2, 3, 4, 5, 6}
 
 
 def test_no_uncategorized_items_omits_the_section_entirely():
