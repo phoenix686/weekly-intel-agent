@@ -9,6 +9,7 @@ from core.groq_client import get_groq_client
 from core.model_gateway import (
     ModelBudget,
     ModelGateway,
+    ModelGatewayError,
     ModelRequestTooLarge,
     ModelResult,
 )
@@ -263,6 +264,19 @@ def _score_with_split(
         ]
 
 
+def _provider_failure_scores(batch: list, reason: str) -> list[ScoredItem]:
+    """Keep the run alive when no model provider returns usable JSON."""
+    return [
+        ScoredItem(
+            **item,
+            keep=False,
+            reasoning=f"Model provider failure during scoring; item was not selected reliably. {reason}",
+            tags=["noise"],
+        )
+        for item in batch
+    ]
+
+
 def score_node(state: DiscoverySubgraphState) -> dict:
     t0 = time.perf_counter()
     items = state["clustered_items"]
@@ -276,6 +290,7 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         budget=ModelBudget(anthropic_limit_usd=budget_limit),
     )
     usage: list[ModelResult] = []
+    errors: list[str] = []
     preference_context = (
         render_preference_context(state["preference_snapshot"])
         if state.get("preference_snapshot")
@@ -284,9 +299,17 @@ def score_node(state: DiscoverySubgraphState) -> dict:
 
     for offset in range(0, len(items), BATCH_SIZE):
         batch = items[offset:offset + BATCH_SIZE]
-        for scored, model_result in _score_with_split(
-            batch, offset, gateway, run_id, preference_context
-        ):
+        try:
+            split_results = _score_with_split(
+                batch, offset, gateway, run_id, preference_context
+            )
+        except ModelGatewayError as exc:
+            message = f"provider_degraded: score_node provider failure: {exc}"
+            logger.warning(message)
+            errors.append(message)
+            all_scored.extend(_provider_failure_scores(batch, str(exc)))
+            continue
+        for scored, model_result in split_results:
             all_scored.extend(scored)
             usage.append(model_result)
         logger.info(f"scored {offset + len(batch)}/{len(items)}")
@@ -312,16 +335,16 @@ def score_node(state: DiscoverySubgraphState) -> dict:
         run_id=run_id, node_name="score_node",
         items_in=len(items), items_out=kept_count, cost_usd=round(cost_usd, 6),
         duration_seconds=round(time.perf_counter() - t0, 3),
+        error_summary="; ".join(errors) or None,
     )
+
+    if any(item.degraded for item in usage):
+        errors.append("provider_degraded: Anthropic fallback used during scoring")
 
     return {
         "scored_items": all_scored,
         "costs": [cost],
-        "errors": (
-            ["provider_degraded: Anthropic fallback used during scoring"]
-            if any(item.degraded for item in usage)
-            else []
-        ),
+        "errors": errors,
     }
 
 if __name__ == "__main__":

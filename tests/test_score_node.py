@@ -21,6 +21,7 @@ import json
 from unittest.mock import patch, MagicMock
 
 import discovery.nodes.score as score_mod
+from core.model_gateway import ModelGatewayError, ModelResult
 from discovery.nodes.score import score_node
 
 
@@ -162,6 +163,50 @@ def test_record_node_summary_reflects_kept_count_not_total():
     _, kwargs = mock_summary.call_args
     assert kwargs["items_in"] == 3
     assert kwargs["items_out"] == 2  # kept count, not total scored
+
+
+def test_provider_failure_does_not_crash_scoring_run():
+    """The September 15 Daily run hit Groq 400, then Anthropic fallback
+    returned non-JSON. score_node must degrade the batch, record the
+    provider error, and let the graph assemble a provider-degraded digest
+    instead of failing the workflow."""
+    items = [_clustered_item("https://a.com/1"), _clustered_item("https://b.com/1")]
+
+    with patch.object(score_mod, "get_groq_client"), \
+         patch.object(score_mod, "log_scored_items"), \
+         patch.object(score_mod, "record_node_summary") as mock_summary, \
+         patch.object(score_mod, "_score_with_split",
+                      side_effect=ModelGatewayError("score_batch Anthropic fallback returned invalid JSON")):
+        result = score_node(_state(items, run_id="daily-fail-1"))
+
+    assert len(result["scored_items"]) == 2
+    assert all(item["keep"] is False for item in result["scored_items"])
+    assert all(item["tags"] == ["noise"] for item in result["scored_items"])
+    assert "provider_degraded: score_node provider failure" in result["errors"][0]
+    assert result["costs"][0]["cost_usd"] == 0.0
+    mock_summary.assert_called_once()
+    assert "score_node provider failure" in mock_summary.call_args.kwargs["error_summary"]
+
+
+def test_anthropic_fallback_usage_records_provider_degraded_error():
+    items = [_clustered_item("https://a.com/1")]
+    degraded_result = ModelResult(
+        data={"results": []},
+        provider="anthropic",
+        input_tokens=100,
+        output_tokens=40,
+        cost_usd=0.001,
+        degraded=True,
+    )
+
+    with patch.object(score_mod, "get_groq_client"), \
+         patch.object(score_mod, "log_scored_items"), \
+         patch.object(score_mod, "record_node_summary"), \
+         patch.object(score_mod, "_score_with_split",
+                      return_value=[([], degraded_result)]):
+        result = score_node(_state(items, run_id="daily-degraded-1"))
+
+    assert result["errors"] == ["provider_degraded: Anthropic fallback used during scoring"]
 
 
 def test_multiple_batches_when_over_batch_size():
