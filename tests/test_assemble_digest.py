@@ -84,15 +84,21 @@ def test_uncategorized_item_no_longer_vanishes_before_after():
 
 
 def test_uncategorized_section_appears_even_with_zero_kept_items():
-    text, item_map = format_digest([], RUN_ID, uncategorized_items=[_uncategorized()])
+    text, item_map = format_digest([], RUN_ID, uncategorized_items=[_uncategorized(similarity_score=0.251)])
     assert "Nothing new today" in text  # kept-section placeholder still shows
     assert "1 item(s) didn't match any existing topic" in text
     assert set(item_map.keys()) == {1}
 
 
+def test_low_confidence_uncategorized_items_do_not_replace_empty_digest():
+    text, item_map = format_digest([], RUN_ID, uncategorized_items=[_uncategorized()])
+    assert text == "🤖 <b>Daily Digest</b>\n\n<i>Nothing new today.</i>"
+    assert item_map == {}
+
+
 def test_uncategorized_numbering_continues_after_kept_items():
     kept = [_item(keep=True, title="Kept item")]
-    uncategorized = [_uncategorized(title="Uncategorized item")]
+    uncategorized = [_uncategorized(title="Uncategorized item", similarity_score=0.251)]
     text, item_map = format_digest(kept, RUN_ID, uncategorized_items=uncategorized)
     assert set(item_map.keys()) == {1, 2}
     assert item_map[1]["title"] == "Kept item"
@@ -109,8 +115,37 @@ def test_uncategorized_item_map_entry_carries_best_tag_and_score_in_reasoning():
 
 def test_footer_includes_uncategorized_count():
     kept = [_item(keep=True)]
-    text, item_map = format_digest(kept, RUN_ID, uncategorized_items=[_uncategorized(), _uncategorized()])
-    assert "1 scored · 1/1 shown · 2 uncategorized" in text
+    text, item_map = format_digest(
+        kept,
+        RUN_ID,
+        uncategorized_items=[
+            _uncategorized(title="Hidden low-confidence", similarity_score=0.186),
+            _uncategorized(title="Shown near-threshold", similarity_score=0.251),
+        ],
+    )
+    assert "1 scored · 1/1 shown · 1/2 uncategorized shown" in text
+
+
+def test_low_confidence_uncategorized_items_are_hidden_from_digest():
+    kept = [_item(keep=True, title="Kept item")]
+    uncategorized = [
+        _uncategorized(title="NVIDIA OSMO", similarity_score=0.254),
+        _uncategorized(title="Anthropic frontier policy", similarity_score=0.288),
+        _uncategorized(title="NeRF reconstruction", similarity_score=0.133),
+        _uncategorized(title="Recurrent Looped Transformer", similarity_score=0.243),
+        _uncategorized(title="RAPIDS benchmark", similarity_score=0.110),
+        _uncategorized(title="Cohere translation", similarity_score=0.243),
+    ]
+    text, item_map = format_digest(kept, RUN_ID, uncategorized_items=uncategorized)
+
+    assert "6 item(s) didn't match any existing topic (3 shown)" in text
+    assert "Anthropic frontier policy" in text
+    assert "NVIDIA OSMO" in text
+    assert "Recurrent Looped Transformer" in text
+    assert "NeRF reconstruction" not in text
+    assert "RAPIDS benchmark" not in text
+    assert "3/6 uncategorized shown" in text
+    assert set(item_map.keys()) == {1, 2, 3, 4}
 
 
 def test_no_uncategorized_items_omits_the_section_entirely():

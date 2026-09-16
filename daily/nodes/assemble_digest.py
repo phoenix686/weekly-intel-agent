@@ -7,6 +7,8 @@ from telegram.markdown import escape_html, format_cost_line
 from discovery.story_clusterer import diversify
 
 MAX_DIGEST_ITEMS = 10
+MAX_UNCATEGORIZED_DIGEST_ITEMS = 3
+MIN_UNCATEGORIZED_DIGEST_SIMILARITY = 0.24
 
 
 def _is_non_actionable_source_error(error: str) -> bool:
@@ -15,6 +17,20 @@ def _is_non_actionable_source_error(error: str) -> bool:
 
 def _actionable_errors(errors: list[str]) -> list[str]:
     return [error for error in errors if not _is_non_actionable_source_error(error)]
+
+
+def _surfaceable_uncategorized(uncategorized_items: list[dict], slots: int) -> list[dict]:
+    limit = min(slots, MAX_UNCATEGORIZED_DIGEST_ITEMS)
+    if limit <= 0:
+        return []
+    return sorted(
+        [
+            item for item in uncategorized_items
+            if item.get("similarity_score", 0.0) >= MIN_UNCATEGORIZED_DIGEST_SIMILARITY
+        ],
+        key=lambda item: item.get("similarity_score", 0.0),
+        reverse=True,
+    )[:limit]
 
 
 def format_digest(
@@ -47,7 +63,7 @@ def format_digest(
     total_kept = len(all_kept)
     cost_line = format_cost_line(cost_breakdown)
 
-    if not kept and not uncategorized_items:
+    if not kept and not _surfaceable_uncategorized(uncategorized_items, MAX_DIGEST_ITEMS):
         messages = {
             "sources_degraded": "Source outage: the run could not establish that there were no new stories.",
             "provider_degraded": "Model provider degraded: no digest could be selected reliably.",
@@ -99,11 +115,16 @@ def format_digest(
         lines.append("")
 
     uncategorized_slots = max(0, MAX_DIGEST_ITEMS - min(total_kept, MAX_DIGEST_ITEMS))
-    shown_uncategorized = uncategorized_items[:uncategorized_slots]
+    shown_uncategorized = _surfaceable_uncategorized(uncategorized_items, uncategorized_slots)
+    hidden_uncategorized_count = len(uncategorized_items) - len(shown_uncategorized)
     if shown_uncategorized:
-        lines.append(
-            f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic</b>"
-        )
+        if hidden_uncategorized_count:
+            lines.append(
+                f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic "
+                f"({len(shown_uncategorized)} shown)</b>"
+            )
+        else:
+            lines.append(f"<b>{len(uncategorized_items)} item(s) didn't match any existing topic</b>")
         for item in shown_uncategorized:
             title = (item.get("title") or item["text"])[:80]
             url = item["url"]
@@ -132,10 +153,13 @@ def format_digest(
     # message text instead of only discoverable by cross-referencing
     # node_summary.
     shown = min(total_kept, MAX_DIGEST_ITEMS)
-    lines.append(
-        f"<i>{total_scored} scored · {shown}/{total_kept} shown · "
-        f"{len(uncategorized_items)} uncategorized · run: {run_id[:8]}</i>"
-    )
+    footer = f"{total_scored} scored · {shown}/{total_kept} shown"
+    if uncategorized_items:
+        footer += f" · {len(shown_uncategorized)}/{len(uncategorized_items)} uncategorized shown"
+    else:
+        footer += " · 0 uncategorized"
+    footer += f" · run: {run_id[:8]}"
+    lines.append(f"<i>{footer}</i>")
     if cost_line:
         lines.append(cost_line)
 
