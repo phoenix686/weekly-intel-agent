@@ -154,6 +154,21 @@ def test_low_confidence_uncategorized_items_are_hidden_from_plan():
     assert item_map[2]["title"] == "Airy"
 
 
+def test_uncategorized_plan_items_are_capped_at_five():
+    uncategorized = [
+        _uncategorized(title=f"Near miss {index}", similarity_score=0.290 - (index * 0.005))
+        for index in range(7)
+    ]
+    text, item_map = format_plan([_plan_item()], 0, RUN_ID, [], uncategorized_items=uncategorized)
+
+    assert "7 item(s) didn't match any existing topic (5 shown)" in text
+    assert "Near miss 0" in text
+    assert "Near miss 4" in text
+    assert "Near miss 5" not in text
+    assert "5/7 uncategorized shown" in text
+    assert set(item_map.keys()) == {1, 2, 3, 4, 5, 6}
+
+
 def test_no_uncategorized_items_omits_the_section_entirely():
     text, item_map = format_plan([_plan_item()], 0, RUN_ID, [], uncategorized_items=[])
     assert "didn't match any existing topic" not in text

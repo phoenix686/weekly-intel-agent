@@ -7,7 +7,7 @@ from telegram.markdown import escape_html, format_cost_line
 from discovery.story_clusterer import diversify
 
 MAX_DIGEST_ITEMS = 10
-MAX_UNCATEGORIZED_DIGEST_ITEMS = 3
+MAX_UNCATEGORIZED_DIGEST_ITEMS = 5
 MIN_UNCATEGORIZED_DIGEST_SIMILARITY = 0.24
 
 
